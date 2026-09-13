@@ -9,6 +9,16 @@ does not claim its messages are the newest in the mailbox.
 Missing traces/mail appear as explicit errors alongside available evidence.
 Neither command starts a watcher, migrates state or acknowledges messages.
 
+For a dedicated role, `inspect` includes `role_handoff_record`: the full
+checkpoint with `tenant`, `role`, `session`, `at`, `conclusion` and `next`.
+The existing `role_handoff` string remains a 1 KiB display excerpt; use the
+record when recovering context. A missing checkpoint is null. A damaged,
+oversized or identity-mismatched file adds `role_handoff_error` and no record;
+other available observations still return. Pooled seats use branch handoffs.
+The body remains limited to the writer's 16 KiB; file reads are bounded to
+128 KiB to allow JSON escaping. This is authored context, not verified evidence
+or permission to act. See the [interrupted supervisor demo](../examples/recovery/DEMO.md).
+
 `fleet trace <address>` exports a JSON envelope with `data` (native JSONL),
 `source`, `partial`, `coverage`, `modified_at`, `file_bytes`, `fingerprint` and `lines`.
 It reads the last 1 MiB from an observed regular file, drops a partial leading

@@ -51,6 +51,46 @@ func TestInspectReadsHandoffAndTraceWithoutWrites(t *testing.T) {
 	}
 }
 
+func TestInspectRetainsFullRoleCheckpointAfterSupervisorExit(t *testing.T) {
+	home, _ := deliverEnv(t)
+	conclusion := strings.Repeat("Completed work and exact-head evidence.\n", 40)
+	next := "Preserve the active writer; compare existing output before retry; no merge authority."
+	if err := fleet.WriteRoleHandoff(fleet.Rec{"session": "departed-supervisor", "launch_dir": home}, conclusion, next); err != nil {
+		t.Fatal(err)
+	}
+	files, err := filepath.Glob(fleet.Path("role-handoff", "*.json"))
+	if err != nil || len(files) != 1 {
+		t.Fatal(files, err)
+	}
+	before, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No session record survives. Retrieval depends on the retained role binding.
+	got, err := Inspect("hub:lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := fleet.M(got, "role_handoff_record")
+	if fleet.S(r, "conclusion") != strings.TrimSpace(conclusion) || fleet.S(r, "next") != next || fleet.S(r, "session") != "departed-supervisor" {
+		t.Fatal("full authored checkpoint lost", r)
+	}
+	if len(fleet.S(got, "role_handoff")) > 1024 || strings.Contains(fleet.S(got, "role_handoff"), next) {
+		t.Fatal("short display behavior changed", got)
+	}
+	after, err := os.ReadFile(files[0])
+	if err != nil || string(before) != string(after) || Heartbeat() != nil {
+		t.Fatal("inspection changed checkpoint or scheduled work", err)
+	}
+	if err := os.WriteFile(files[0], []byte(`{"conclusion":`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err = Inspect("hub:lead")
+	if err != nil || fleet.S(got, "role_handoff_error") == "" || fleet.M(got, "role_handoff_record") != nil {
+		t.Fatal("damaged evidence appeared absent or complete", got, err)
+	}
+}
+
 func TestTraceBoundsWindowAndMarksCoverage(t *testing.T) {
 	home, _ := deliverEnv(t)
 	path := strings.TrimSuffix(launchPath(deliverTarget{address: "hub:lead", cwd: home}), ".json") + ".log"

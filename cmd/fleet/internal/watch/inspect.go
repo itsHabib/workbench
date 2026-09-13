@@ -21,7 +21,7 @@ func Inspect(address string) (fleet.Rec, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := fleet.Rec{"at": at, "agent": row, "handoff": nil, "role_handoff": "", "messages": []fleet.Rec{}}
+	out := fleet.Rec{"at": at, "agent": row, "handoff": nil, "role_handoff": "", "role_handoff_record": nil, "messages": []fleet.Rec{}}
 	if fleet.S(row, "head_error") == "" {
 		cwd, branch := fleet.S(row, "cwd"), fleet.S(row, "branch")
 		if branch != "" {
@@ -30,7 +30,12 @@ func Inspect(address string) (fleet.Rec, error) {
 
 	}
 	if info, err := os.Stat(fleet.S(row, "cwd")); err == nil && info.IsDir() {
-		out["role_handoff"] = fleet.RoleHandoffLine(fleet.Rec{"cwd": row["cwd"]})
+		r, err := fleet.ReadRoleHandoff(fleet.Rec{"cwd": row["cwd"]})
+		out["role_handoff_record"] = r
+		out["role_handoff"] = fleet.RoleHandoffSummary(r)
+		if err != nil {
+			out["role_handoff_error"] = err.Error()
+		}
 	}
 	inspectMail(out, row)
 	trace, err := traceForRow(row)
