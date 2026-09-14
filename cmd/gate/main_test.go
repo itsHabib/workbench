@@ -358,6 +358,28 @@ func TestMalformedJudgmentRoutesDoubleDashProvider(t *testing.T) {
 	}
 }
 
+// A model belongs to one provider's catalogue. The crossed route runs codex,
+// which refuses -model outright, so carrying the Claude pin across would hand
+// the operator an escape that fails before it starts.
+func TestMalformedJudgmentRouteDropsTheClaudeModel(t *testing.T) {
+	for _, spelling := range [][]string{
+		{"-model", "sonnet"},
+		{"--model", "sonnet"},
+		{"-model=sonnet"},
+		{"--model=sonnet"},
+	} {
+		args := append([]string{"judge", "-run", "run_1", "-grant", "grt_1", "-auto", "-provider", "claude"}, spelling...)
+		args = append(args, "-state", "/tmp/gate-state")
+		got := terminalErrorFor(errors.New(`judgment_malformed: json: unknown field "findings"`), args)
+		if !strings.Contains(got.Escape.Next, "-provider codex") || !strings.Contains(got.Escape.Next, "/tmp/gate-state") {
+			t.Fatalf("%v: escape = %q, want the codex route with the rest kept", spelling, got.Escape.Next)
+		}
+		if strings.Contains(got.Escape.Next, "model") || strings.Contains(got.Escape.Next, "sonnet") {
+			t.Fatalf("%v: escape = %q carried the claude model across", spelling, got.Escape.Next)
+		}
+	}
+}
+
 func TestMalformedEscalationDoesNotSwitchProviders(t *testing.T) {
 	got := terminalErrorFor(
 		errors.New("judgment_malformed_escalation: question is empty"),
@@ -715,6 +737,16 @@ func TestValidateJudgeFlagsUsesClosedProviderSet(t *testing.T) {
 			}
 		})
 	}
+	t.Run("claude with a model override", func(t *testing.T) {
+		err := validateJudgeFlags("run_123", "grt_123", judgmentOptions{
+			Auto:     true,
+			Provider: verify.JudgeProviderClaude,
+			Model:    "sonnet",
+		})
+		if err != nil {
+			t.Fatalf("explicit claude model refused: %v", err)
+		}
+	})
 
 	cases := []struct {
 		name string
@@ -738,7 +770,27 @@ func TestValidateJudgeFlagsUsesClosedProviderSet(t *testing.T) {
 				Why:      "safe",
 				Provider: verify.JudgeProviderCodex,
 			},
-			code: "-provider requires -auto",
+			code: "-provider and -model require -auto",
+		},
+		{
+			name: "model without auto",
+			opts: judgmentOptions{
+				Decision: verify.DecisionPass,
+				Why:      "safe",
+				Who:      "operator",
+				Model:    "sonnet",
+			},
+			code: "-provider and -model require -auto",
+		},
+		{
+			name: "model for codex",
+			opts: judgmentOptions{Auto: true, Provider: verify.JudgeProviderCodex, Model: "sonnet"},
+			code: "judge_model_unsupported",
+		},
+		{
+			name: "model that reads as a flag",
+			opts: judgmentOptions{Auto: true, Provider: verify.JudgeProviderClaude, Model: "--tools=default"},
+			code: "judge_model_invalid",
 		},
 	}
 	for _, tc := range cases {

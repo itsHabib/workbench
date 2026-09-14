@@ -177,7 +177,7 @@ func usage() {
   grant    -repo R [-action merge] [-max-tier T1] [-max-cycles 3] [-ttl 24h] [-init]
   gate     -repo R -pr N (-grant grt_x | -slack) [-live]
   grant-callback -signature SIG -timestamp UNIX [-state DIR]  (reads the original Slack body on stdin; internal Escalate seam)
-  judge    -run run_x -grant grt_x (-decision pass|block -why "..." -who NAME [-method cli-operator|slack-interactive] | -judgment <path|-> -who NAME | -auto -provider claude|codex)
+  judge    -run run_x -grant grt_x (-decision pass|block -why "..." -who NAME [-method cli-operator|slack-interactive] | -judgment <path|-> -who NAME | -auto -provider claude [-model opus] | -auto -provider codex)
   resolve  -escalation esc_x -grant grt_x -decision pass|block -why "..." -who NAME [-method ...]  (resolve a park by its escalation id + stamp the resolution)
   executor prepare-request -repo R -pr N -head SHA -grant grt_x -decision pass|block -why Q -replay evt_x -out path
   executor prepare -request path -state-tip SHA -workflow-run-id N -workflow-actor-id N -workflow-triggering-actor LOGIN -app-id N -installation-id N
@@ -1452,10 +1452,10 @@ func validateJudgeFlags(run, grantID string, opts judgmentOptions) error {
 		if opts.Who != "" || opts.Method != "" {
 			return errors.New("judge: -who/-method are not accepted with -auto — the provider is the decider and gate records it")
 		}
-		return verify.ValidateJudgeProvider(opts.Provider)
+		return verify.ValidateJudgeProvider(opts.Provider, opts.Model)
 	}
-	if opts.Provider != "" {
-		return errors.New("judge: -provider requires -auto")
+	if opts.Provider != "" || opts.Model != "" {
+		return errors.New("judge: -provider and -model require -auto")
 	}
 	// Every judgment a person authors must name that person. This is the write
 	// path, and it is the only place the binding can be enforced: a reader that
@@ -1485,6 +1485,9 @@ type judgmentOptions struct {
 	Auto         bool
 	ArtifactPath string
 	Provider     string
+	// Model overrides the model -auto pins the Claude projection to. Empty is
+	// the projection's own pin, never the operator's interactive CLI default.
+	Model string
 	// Who and Method bind the decision to a decider: the identity that decided
 	// and the channel it arrived through. Required on every path a PERSON
 	// authors — manual and submitted-artifact — and derived on the -auto path,
@@ -1540,6 +1543,7 @@ func cmdJudge(args []string) error {
 	artifactPath := fs.String("judgment", "", "provider-neutral gate-judgment-v1 artifact path ('-' for stdin)")
 	auto := fs.Bool("auto", false, "run a built-in local CLI provider over the versioned request")
 	provider := fs.String("provider", "", "built-in local CLI provider for -auto: claude or codex")
+	model := fs.String("model", "", "model to pin -provider claude to (default "+verify.DefaultClaudeJudgeModel+"; never the CLI's interactive default)")
 	who := fs.String("who", "", "who decided — recorded on the judgment; omit only with -auto")
 	method := fs.String("method", "", "how the decider's identity was established: cli-operator (default) or slack-interactive")
 	stampOn := fs.Bool("stamp", true, "post a gate/authorized commit status when judgment authorizes the merge")
@@ -1556,6 +1560,7 @@ func cmdJudge(args []string) error {
 		Auto:         *auto,
 		ArtifactPath: *artifactPath,
 		Provider:     *provider,
+		Model:        *model,
 		Who:          *who,
 		Method:       *method,
 	}
@@ -1859,10 +1864,11 @@ func judgmentFromOptions(arts []state.Artifact, run, escalationID string, subjec
 	if err != nil {
 		return verify.Verdict{}, err
 	}
-	// -auto derives its own decider: the resolved provider wrapper and the model
-	// it reported, on the auto-<provider> channel. Nothing here to supply.
+	// -auto derives its own decider: the resolved provider wrapper, the model
+	// gate pinned, and the model it reported, on the auto-<provider> channel.
+	// Nothing here to supply.
 	if opts.Auto {
-		return verify.AutoJudge(opts.Provider, request)
+		return verify.AutoJudge(opts.Provider, opts.Model, request)
 	}
 	artifact, err := readJudgmentArtifact(opts.ArtifactPath)
 	if err != nil {
@@ -2940,7 +2946,10 @@ func alternateJudgeCommand(args []string) string {
 	if len(args) == 0 || args[0] != "judge" {
 		return ""
 	}
-	copyArgs := append([]string(nil), args...)
+	// A model names one provider's catalogue. The route crosses to the other
+	// provider, which runs its own pin — carrying -model across would hand
+	// codex a Claude model, which it refuses before it ever runs.
+	copyArgs := withoutFlag(args, "model")
 	found := false
 	for i, arg := range copyArgs {
 		if strings.HasPrefix(arg, "-provider=") || strings.HasPrefix(arg, "--provider=") {
@@ -2958,6 +2967,24 @@ func alternateJudgeCommand(args []string) string {
 		return ""
 	}
 	return shellJoin(append([]string{"gate"}, copyArgs...))
+}
+
+// withoutFlag returns a copy of args with every occurrence of the named flag
+// dropped, in both the separate-value and the '=' spelling.
+func withoutFlag(args []string, name string) []string {
+	kept := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-"+name || arg == "--"+name {
+			i++ // its value rides the next argument
+			continue
+		}
+		if strings.HasPrefix(arg, "-"+name+"=") || strings.HasPrefix(arg, "--"+name+"=") {
+			continue
+		}
+		kept = append(kept, arg)
+	}
+	return kept
 }
 
 func shellJoin(args []string) string {

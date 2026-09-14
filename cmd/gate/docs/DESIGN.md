@@ -397,7 +397,14 @@ judgment is durable and nothing followed it (observed on `itsHabib/ivy#22`,
   owns their fixed argument vectors, disables tools and customizations, strips
   authority-bearing environment variables, and records the resolved wrapper's
   digest. The caller cannot nominate a path or arguments, though PATH, saved
-  login, and the process identity remain same-user dependencies. Gate writes a
+  login, and the process identity remain same-user dependencies. The model is
+  part of the projection, not the operator's ambient state: the Claude
+  projection always pins `--model` (default `opus`; `judge -model` names
+  another, syntax-checked, read from the flag and never from the environment),
+  and the pin is recorded in the producer and decider identity. An unpinned
+  judge silently runs whatever the operator last chose interactively, which on
+  2026-09-13 needed credits the subscription did not have. Codex needs no pin
+  because `--ignore-user-config` already excludes the operator's model. Gate writes a
   versioned `gate-judgment-v1` request to stdin and reads the same versioned
   response from stdout. `judge -judgment` accepts the response as a file for a
   native Codex-produced artifact path. Both bind the decision to the parked

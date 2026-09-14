@@ -106,6 +106,17 @@ Constraints that are design decisions, not omissions:
   resolved wrapper's SHA-256 digest. PATH, saved login, and the process identity
   remain same-user dependencies, so this is advisory automation; independent
   execution authority stays outside it.
+- **The Claude judge's model is Gate's to pin.** The projection always passes
+  `--model`, defaulting to `opus` (`verify.DefaultClaudeJudgeModel`). Unpinned,
+  it inherited the operator's interactive default, which on 2026-09-13 was a
+  model this subscription reaches only on extra-usage credits, and every
+  `-auto` judgment failed. `judge -model` overrides the pin with one
+  syntax-checked alias or id; Gate reads it only from that flag and never adds
+  `ANTHROPIC_MODEL` to the environment allowlist. `-model` with `-provider codex`
+  is refused, not ignored: `--ignore-user-config` already keeps the operator's
+  model out of Codex. The pinned model is recorded in the producer and decider
+  identity (`claude-cli[claude@sha256:...;model=opus]:<reported>`), so the audit
+  names the model Gate ran, not only the one the provider claims.
 - **The ladder law lives in code.** Local producers can never block, judgment
   cannot override a code block, tiers compose monotone-max, unknown values
   fail closed. These are reducer errors and pinned tests, not conventions.
