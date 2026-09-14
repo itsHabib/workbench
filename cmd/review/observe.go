@@ -206,7 +206,7 @@ func buildPanel(
 			evidence.Completed = append(evidence.Completed, completed)
 			continue
 		}
-		if completed, ok := cleanComment(reviewer, plan.Subject.HeadSHA, comments); ok {
+		if completed, ok := commentCompletion(reviewer, plan.Subject.HeadSHA, comments); ok {
 			evidence.Completed = append(evidence.Completed, completed)
 			continue
 		}
@@ -247,36 +247,62 @@ func completedReviewState(state string) bool {
 	return false
 }
 
-var codexReviewedCommit = regexp.MustCompile(
-	"(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{40})`\\r?$",
-)
-
-func cleanComment(
+// Preserve the same evidence order as Gate: formal reviews first (at the
+// caller), then the connector's submission, then a workflow attestation.
+func commentCompletion(
 	expected, head string,
 	comments []issueComment,
 ) (reviewpanel.Reviewer, bool) {
-	// Comment-based completion is Codex-specific: Codex emits a structured
-	// clean-review message with a full reviewed commit. Extend this boundary
-	// explicitly if another reviewer gains an equivalent exact-head signal.
-	if expected != "codex" {
+	if review, ok := codexCompletion(expected, head, comments); ok {
+		return review, true
+	}
+	for index := len(comments) - 1; index >= 0; index-- {
+		comment := comments[index]
+		if !issueCommentFrom(comment, "github-actions[bot]") {
+			continue
+		}
+		parsed, ok := reviewpanel.DecodeWorkflowAttestation(comment.Body)
+		if ok && parsed.Reviewer == expected && parsed.HeadSHA == head {
+			return reviewpanel.Reviewer{
+				Name: expected, Actor: comment.User.Login, State: "COMMENTED",
+				HeadSHA: head, ReviewID: comment.ID,
+			}, true
+		}
+	}
+	return reviewpanel.Reviewer{}, false
+}
+
+var fullReviewHead = regexp.MustCompile(`\A[0-9a-f]{40}\z`)
+
+func codexCompletion(expected, head string, comments []issueComment) (reviewpanel.Reviewer, bool) {
+	if expected != "codex" || !fullReviewHead.MatchString(head) {
 		return reviewpanel.Reviewer{}, false
 	}
 	for index := len(comments) - 1; index >= 0; index-- {
 		comment := comments[index]
-		if !actorMatches(expected, comment.User.Login) ||
-			!strings.HasPrefix(comment.Body, "Codex Review: Didn't find any major issues.") {
+		if !issueCommentFrom(comment, "chatgpt-codex-connector[bot]") {
 			continue
 		}
-		match := codexReviewedCommit.FindStringSubmatch(comment.Body)
-		if len(match) != 2 || !strings.EqualFold(head, match[1]) {
+		parsed, ok := reviewpanel.DecodeCodexComment(comment.Body)
+		if !ok || !strings.HasPrefix(head, parsed.ReviewedCommit) {
 			continue
+		}
+		state := "COMMENTED"
+		if parsed.NoFindingsFraming {
+			state = "CLEAN"
 		}
 		return reviewpanel.Reviewer{
-			Name: expected, Actor: comment.User.Login, State: "CLEAN",
-			HeadSHA: strings.ToLower(head), ReviewID: comment.ID,
+			Name: expected, Actor: comment.User.Login, State: state,
+			HeadSHA: head, ReviewID: comment.ID,
 		}, true
 	}
 	return reviewpanel.Reviewer{}, false
+}
+
+func issueCommentFrom(comment issueComment, actor string) bool {
+	// This type is read only from the issue-comments API, never inline/formal
+	// review endpoints. Identity and bot metadata come from that API response.
+	return comment.ID > 0 && comment.User.Login == actor && comment.User.Type == "Bot"
 }
 
 func actorPresent(expected string, actors []string) bool {

@@ -278,6 +278,9 @@ func TestClassifyPanelCodexCleanCommentRefusals(t *testing.T) {
 		"stale":       func(c *Comment) { c.Body = strings.Replace(c.Body, "e96af9fbfc", "aaaaaaaaaa", 1) },
 		"malformed":   func(c *Comment) { c.Body = strings.Replace(c.Body, "`e96af9fbfc`", "e96af9fbfc", 1) },
 		"wrong actor": func(c *Comment) { c.Author = "some-bot[bot]" },
+		"same prefix stale full footer": func(c *Comment) {
+			c.Body = strings.Replace(c.Body, "`e96af9fbfc`", "`"+head[:39]+"a`", 1)
+		},
 		"not a codex review submission": func(c *Comment) {
 			c.Body = strings.Replace(c.Body, "Codex Review:", "Approved! LGTM,", 1)
 		},
@@ -302,6 +305,9 @@ func TestClassifyPanelCodexCleanCommentRefusals(t *testing.T) {
 		})
 	}
 }
+
+const attestationAuthor = "github-actions[bot]"
+const attestationMarker = "<!-- gate:review-attestation -->"
 
 const attestHead = "2b754f7a73c1d2e3f405162738495a6b7c8d9e0f"
 

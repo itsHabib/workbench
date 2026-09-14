@@ -118,6 +118,41 @@ path was already safe — the emitted merge command is `--match-head-commit`
 pinned and GitHub refuses to merge a merged PR. Revisit only if the race is
 observed parking runs in practice.
 
+## review completion evidence: residuals after the exact-head reviews (PR #338, 2026-09-13)
+
+Independent and Claude exact-head reviews of #338 found no spoofable path: both
+consumers authenticate the bot login and type before decoding, and
+`contracts/reviewpanel` holds format parsers only. Gate's acceptance only
+tightened. The residuals below are shared with Gate's existing panel or
+concern the `review` tool's loop decision, not merge authority:
+
+- **P2, Codex findings posted in an issue-comment body:** `review observe` now
+  credits any authenticated `Codex Review:` comment with a head footer as
+  completed, but `reviewfindings` reads inline review comments only. If the
+  connector ever reports findings in the comment body, a T1 `decide` could stop
+  without them. The live connector posts findings as inline review comments and
+  its issue comment is the clean summary, so this shape is unobserved; Gate reads
+  issue-comment findings separately. Teach `reviewfindings` to read the body, or
+  credit only the clean framing in `review`.
+- **P2, edited comments still count:** neither consumer checks edit metadata, so
+  an account with write access could edit an old attestation or Codex footer to
+  name an unreviewed head. Reject edited comments in both collectors'
+  `issueCommentFrom`, not in contracts.
+- **P2, 10-character Codex footer:** a footer matches as a head prefix; a pusher
+  could grind a colliding commit (about 2^40 SHA-1 work). Prefer the full-SHA
+  footer when present and treat the short form as weaker evidence.
+- **P2, formal reviews differ between consumers:** Gate requires a bot account
+  and an exact commit match; `review`'s `latestReview` accepts non-bot accounts
+  whose login matches an alias and compares commits case-insensitively. Align
+  `review` with Gate.
+- **P3, alias sets differ:** `review` accepts `copilot` itself as a Copilot
+  login and has no `coderabbit` alias; Gate has the reverse. Share one alias
+  table or document the difference.
+- **Trust note:** `github-actions[bot]` covers every workflow in the repository,
+  so a same-repository PR branch that adds a workflow could post an attestation.
+  This matches the existing Gate panel and relies on workflow changes being
+  reviewed; decide explicitly whether branch protection should cover it.
+
 ## runway: `writeResultAtomic` does not fsync the containing directory (claude on #259, deferred)
 
 `controller.writeResultAtomic` syncs the temp file before `os.Rename`, so

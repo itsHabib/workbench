@@ -36,22 +36,30 @@ func TestBuildPanelUsesOnlyExactHeadCompletion(t *testing.T) {
 	}
 }
 
-func TestCleanCommentRequiresFullExactHead(t *testing.T) {
+func TestCommentCompletionRequiresKnownCommitShape(t *testing.T) {
 	comments := []issueComment{
 		comment("chatgpt-codex-connector[bot]",
 			"Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `"+testHeadA[:10]+"`", 3),
 	}
-	if _, ok := cleanComment("codex", testHeadA, comments); ok {
-		t.Fatal("abbreviated reviewed commit accepted")
+	if _, ok := commentCompletion("codex", testHeadA, comments); !ok {
+		t.Fatal("connector ten-character reviewed commit rejected")
 	}
 	comments[0].Body = "Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `" +
 		strings.ToUpper(testHeadA) + "`"
-	if _, ok := cleanComment("codex", testHeadA, comments); ok {
+	if _, ok := commentCompletion("codex", testHeadA, comments); ok {
 		t.Fatal("uppercase reviewed commit accepted")
 	}
 	comments[0].Body = "Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `" + testHeadA + "`"
-	if _, ok := cleanComment("codex", testHeadA, comments); !ok {
+	if _, ok := commentCompletion("codex", testHeadA, comments); !ok {
 		t.Fatal("full exact reviewed commit rejected")
+	}
+	comments[0].Body = strings.Replace(comments[0].Body, testHeadA, testHeadA[:39]+"0", 1)
+	if _, ok := commentCompletion("codex", testHeadA, comments); ok {
+		t.Fatal("stale full commit with matching prefix accepted")
+	}
+	comments[0].Body = "Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `" + testHeadA[:10] + "`"
+	if _, ok := commentCompletion("codex", testHeadA[:10], comments); ok {
+		t.Fatal("abbreviated subject treated as a known full head")
 	}
 }
 

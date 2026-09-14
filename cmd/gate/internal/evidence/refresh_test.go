@@ -170,6 +170,15 @@ func TestCarryEquivalentRefreshUsesAttestationHead(t *testing.T) {
 	}
 }
 
+func TestCandidateHeadsRejectsCopiedAttestation(t *testing.T) {
+	comment := attestation("claude", oldHead)
+	comment.Author = "itsHabib"
+	comment.IsBot = false
+	if got := candidateHeads(newHead, []string{"claude"}, nil, []Comment{comment}); len(got) != 0 {
+		t.Fatalf("human copy introduced a diff-equivalence candidate: %v", got)
+	}
+}
+
 // Candidate heads are tried newest first, and only heads a reviewer actually
 // reviewed are tried at all.
 func TestCandidateHeadsOrderAndFilter(t *testing.T) {

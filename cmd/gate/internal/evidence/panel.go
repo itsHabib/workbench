@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -154,49 +153,21 @@ func panelCompletion(expected, headSHA string, reviews []rawComment, comments []
 	return reviewpanel.Reviewer{}, false
 }
 
-var codexReviewedCommit = regexp.MustCompile("(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{10})`\\r?$")
-
-// codexReviewPrefix opens every review the Codex connector posts, clean or not.
-// It is the connector harness's own framing, not model prose the review can
-// choose: a comment lacking it is not a Codex review submission at all.
-const codexReviewPrefix = "Codex Review:"
-
-// codexCleanPrefix additionally opens the no-findings variant. It selects the
-// recorded state, never whether the review counts as completed.
-const codexCleanPrefix = "Codex Review: Didn't find any major issues."
-
-// codexIssueCompletion reports the Codex connector's latest head-bound review
-// posted as an issue comment, and the panel state to record for it.
-//
-// Completion is not cleanliness. The panel asks one question — did this
-// reviewer review THIS head — and the connector's harness-emitted
-// reviewed-commit line answers it whether or not the review found anything.
-// Requiring the clean opener conflated the two and parked the gate on evidence
-// SHAPE: a Codex review that did its job and reported findings read as "codex
-// never reviewed this head". Findings are a separate fact, extracted by the
-// review-consolidation verifier from the same comments, and they still park
-// the run for judgment on their own merits.
-//
-// The head anchor is the connector's line, never the review's words. A comment
-// saying "Approved", "LGTM", or "ready to merge" without that line completes
-// nothing — prose is not authority here, and a verdict with no commit anchor
-// cannot state which tree it applies to.
 func codexIssueCompletion(expected, headSHA string, comments []Comment) (Comment, string, bool) {
-	if expected != "codex" {
+	if expected != "codex" || len(headSHA) != 40 || !reSHA.MatchString(headSHA) {
 		return Comment{}, "", false
 	}
 	for i := len(comments) - 1; i >= 0; i-- {
 		comment := comments[i]
-		if comment.Author != "chatgpt-codex-connector[bot]" || !comment.IsBot ||
-			comment.CommitID != "" || comment.Path != "" ||
-			!strings.HasPrefix(comment.Body, codexReviewPrefix) {
+		if !issueCommentFrom(comment, "chatgpt-codex-connector[bot]") {
 			continue
 		}
-		match := codexReviewedCommit.FindStringSubmatch(comment.Body)
-		if len(match) != 2 || !strings.HasPrefix(headSHA, match[1]) {
+		parsed, ok := reviewpanel.DecodeCodexComment(comment.Body)
+		if !ok || !strings.HasPrefix(headSHA, parsed.ReviewedCommit) {
 			continue
 		}
-		if strings.HasPrefix(comment.Body, codexCleanPrefix) {
+		// Completion is separate from findings, which Gate evaluates elsewhere.
+		if parsed.NoFindingsFraming {
 			return comment, "CLEAN", true
 		}
 		return comment, "COMMENTED", true
@@ -204,50 +175,28 @@ func codexIssueCompletion(expected, headSHA string, comments []Comment) (Comment
 	return Comment{}, "", false
 }
 
-// attestationAuthor is the only actor whose attestation counts: the repository's
-// own Actions token. A human, a PR author, or any other bot posting the same
-// text is not this login, and the login cannot be spoofed on a comment.
-const attestationAuthor = "github-actions[bot]"
-
-// attestationMarker opens the body of a review attestation. It is quoted here
-// for the workflow that emits it; attestationBody is what actually matches.
-const attestationMarker = "<!-- gate:review-attestation -->"
-
-// attestationBody matches a whole attestation and nothing else: the marker, the
-// reviewer, and the reviewed head, on three consecutive lines from the first
-// byte of the comment, with only trailing whitespace permitted after. Matching
-// the entire body rather than scanning it for fields is what keeps the sentinel
-// out of reach of prose — a review quoting this very format, at any offset and
-// with any amount of surrounding text, cannot clear a panel. The commit is the
-// full 40-hex SHA and must equal the judged head exactly.
-var attestationBody = regexp.MustCompile(
-	"\\A" + regexp.QuoteMeta(attestationMarker) +
-		"\\r?\\n\\*\\*Reviewer:\\*\\* ([a-z0-9-]{1,40})" +
-		"\\r?\\n\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{40})`\\s*\\z")
-
-// workflowAttestation reports a repository-workflow attestation that `expected`
-// reviewed exactly headSHA.
-//
-// Some providers — claude[bot] today — publish their review only as an issue
-// comment, which carries no commit anchor, and the body is model prose that Gate
-// refuses as authority on principle. The authority instead belongs to the
-// workflow that produced the review: it checked out a specific head and ran the
-// reviewer against exactly that tree, so it can state the head as fact. This is
-// the same structural role the Codex connector's reviewed-commit line plays —
-// a harness-emitted, head-bound sentinel, not a provider's self-description.
 func workflowAttestation(expected, headSHA string, comments []Comment) (Comment, bool) {
 	for i := len(comments) - 1; i >= 0; i-- {
-		comment := comments[i]
-		if comment.Author != attestationAuthor || !comment.IsBot ||
-			comment.CommitID != "" || comment.Path != "" {
-			continue
-		}
-		match := attestationBody.FindStringSubmatch(comment.Body)
-		if len(match) == 3 && match[1] == expected && match[2] == headSHA {
-			return comment, true
+		parsed, ok := authenticatedAttestation(comments[i])
+		if ok && parsed.Reviewer == expected && parsed.HeadSHA == headSHA {
+			return comments[i], true
 		}
 	}
 	return Comment{}, false
+}
+
+// Gate trusts only its repository workflow's Actions actor to attest that a
+// provider reviewed a head. Reuse this boundary for equivalence candidates.
+func authenticatedAttestation(comment Comment) (reviewpanel.WorkflowAttestation, bool) {
+	if !issueCommentFrom(comment, "github-actions[bot]") {
+		return reviewpanel.WorkflowAttestation{}, false
+	}
+	return reviewpanel.DecodeWorkflowAttestation(comment.Body)
+}
+
+func issueCommentFrom(comment Comment, actor string) bool {
+	return comment.ID > 0 && comment.Author == actor && comment.IsBot &&
+		comment.CommitID == "" && comment.Path == ""
 }
 
 func latestExactHeadReview(expected, headSHA string, reviews []rawComment) (rawComment, bool) {
