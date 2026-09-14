@@ -4,11 +4,12 @@ import io
 import json
 from pathlib import Path
 import shutil
+import signal
 import sys
 import tempfile
 import tomllib
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import lab
@@ -55,6 +56,21 @@ class OperatorTest(unittest.TestCase):
         result = type("Result", (), {"stdout": '{"watcher":"stale"}'})()
         with patch.object(lab, "fleet", return_value=result), self.assertRaises(RuntimeError):
             lab.card_projection(self.root, apply=True)
+
+    def test_collection_error_still_stops_watcher_and_closes_log(self):
+        (self.root / "control").mkdir()
+        (self.root / "control/stop-requested").touch()
+        (self.root / "card.md").write_text("fixture")
+        (self.root / "RUN.md").write_text("fixture")
+        lab.write_json(self.root / "state/deliver.json", {})
+        lab.write_json(self.root / "resolved.json", {kind: {"card": str(self.root / "card.md")} for kind in lab.ROLES})
+        watcher = Mock(pid=123, poll=Mock(return_value=None))
+        with patch.object(lab.subprocess, "Popen", return_value=watcher) as start, patch.object(lab, "stop", side_effect=RuntimeError("status unavailable")), contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(RuntimeError, "status unavailable"):
+            lab.operate(self.root)
+        watcher.send_signal.assert_called_once_with(signal.SIGINT)
+        watcher.wait.assert_called_once_with(timeout=15)
+        self.assertTrue(start.call_args.kwargs["stdout"].closed)
+        self.assertEqual(json.loads((self.root / "control/collection-error.json").read_text())["error"], "status unavailable")
 
     def test_edit_once_inspect_then_project_using_real_fleet(self):
         info = {}

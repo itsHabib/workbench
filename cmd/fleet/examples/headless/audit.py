@@ -15,7 +15,11 @@ def digest(path):
 
 
 def git(path, *args):
-    return subprocess.check_output(["git", "-C", str(path), *args])
+    if args[0] == "diff":
+        args = ("diff", "--no-ext-diff", "--no-textconv", *args[1:])
+    return subprocess.check_output(["git", "--no-pager", "-c", "core.fsmonitor=false",
+                                    "-c", "core.hooksPath=/dev/null", "-C", str(path), *args],
+                                   timeout=30, env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull})
 
 
 def draft_continuity(root, draft, interruption, author_session):
@@ -89,10 +93,7 @@ def audit(root):
                                    and len(set(supervisor_sessions) - {None, interruption["provider_session"]}) > 0)
     for kind in ("implementation", "verify"):
         checks.setdefault(kind + "_provider_observed", False)
-    tests = subprocess.run(["python3", "-m", "unittest", "discover", "-s", str(task), "-p", "test_*.py"], capture_output=True, text=True,
-                           env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
-    checks["tests_pass"] = tests.returncode == 0
     return {"status": "pass" if all(checks.values()) else "fail", "head": head,
             "patch_sha256": digest(patch), "checks": checks, "receipts": evidence,
-            "supervisor_sessions": supervisor_sessions, "tests": tests.stdout + tests.stderr,
-            "scope": "local process artifact audit; semantic judgment belongs to the independent verifier; no merge or isolation authority"}
+            "supervisor_sessions": supervisor_sessions,
+            "scope": "artifact audit only; no worker code is executed; test and semantic judgment belong to the independent verifier; no merge or isolation authority"}

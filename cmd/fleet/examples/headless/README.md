@@ -50,8 +50,17 @@ The run is bounded to 20 minutes. The stop entry point pauses its three addresse
 requests provider cancellation and asks the driver to collect exits before
 stopping the watcher. A cancellation request is not proof of descendant
 quiescence. Unknown exits are retained in `control/cleanup.json` and `status.json`.
-Each prepared lab runs once; another run uses another directory. Nothing deletes
-the retained checkout, draft, messages or failure evidence.
+Each prepared lab has one initial run and permits one bounded continuation:
+
+```sh
+python3 cmd/fleet/examples/headless/lab.py resume "$LAB"
+```
+
+Resume requires a stopped watcher and collected terminal attempts. It lifts the
+address stops and lets pending mail or an eligible recurrence wake the agents;
+it does not redispatch work, replay acknowledged mail or supply new task facts.
+Earlier timeout/cleanup evidence is retained under `control/before-resume/`.
+Nothing deletes the retained checkout, draft, messages or failure evidence.
 
 ## Define once, inspect, update
 
@@ -97,9 +106,13 @@ stable message ID and repeats that exact send once. The author implements,
 tests and commits; a separate verifier process fetches that commit into its
 own checkout, tests it and records a receipt. The supervisor exports the patch,
 records an assessment and stops the addresses. The outer artifact audit requires
-the actual patch, unchanged input/tests, preserved draft/assignment, a different
+the actual patch, unchanged input/tests, the original assignment, observed draft
+continuity by the original author, a different
 supervisor conversation, clean same-head checkouts and independently attributed
-passing receipts. Failure and missing evidence prevent a passing audit.
+passing receipts. PLAN.md may change when its author documents the answer and
+finished work. This check observes file-change events; it does not prove absence
+of writes outside those events. The outer audit executes no worker tests.
+Failure and missing evidence prevent a passing audit.
 
 Inspect `result/worker.patch`, `result/ASSESSMENT.md` and `result/audit.json`.
 Actual provider state, traces and collected exits are under
@@ -120,6 +133,23 @@ against the same base in the existing local Rooms host, run the same tests and
 collect its result. That verifies the patch in Rooms. It does not put the
 supervisor, author or verifier model inside a VM. Coordination to prepare that
 backend occurs outside the demonstrated headless path.
+
+This requires Rooms with PR #121's toolstore support. On an already prepared
+Linux Rooms host, copy the frozen patch there and run:
+
+```sh
+python3 rooms-check.py --rooms /path/to/rooms --image /path/to/image.ext4 \
+  --toolstore /path/to/python-toolstore --patch /path/to/worker.patch \
+  --out /path/to/new-attempt-directory
+```
+
+This thin foreground adapter records input hashes, the exact invocation, CLI
+exit and returned patch hash. Inspect `out/result.json` for command outcome and
+`lifecycle.ndjson` for collection/cleanup. It does not start the host, install
+tools, create a VM image, run a model or treat missing cleanup evidence as success.
+The measured cold run used this same Rooms invocation through the owner's
+host-specific probe; this portable adapter is a convenience, not a second
+measured backend run.
 
 Keep role cards as editable purpose/responsibility/context, slots as capacity
 bindings, and assignments as work. Fleet owns launch/observe/mail/checkpoint/
