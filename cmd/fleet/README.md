@@ -34,12 +34,24 @@ card registry, not a communication or authority gate.
   `[fleet]` line. The day-one failure this design replaces was agents being
   asked to report their own liveness. Handoffs, assignments and receipts still need
   authored explanations; Fleet does not verify their substantive claims.
-- **One holder per key.** A branch (`repo:<id>:<branch>`) is leased on first
-  write; a machine resource (`slot:<name>`) is taken on purpose. A rival is
-  refused with the holder's name and the exact command that stands them down.
-  A dead holder's branch is taken over; a dead holder's resource is orphaned
-  and needs `--takeover`, because the machine it drives may still be running.
-  Unreadable evidence is never death.
+- **One holder per key; a branch lease blocks only an active writer.** A branch
+  (`repo:<id>:<branch>`) is leased on first write; a machine resource
+  (`slot:<name>`) is taken on purpose. A holder is active on a branch while its
+  session is live and has shown activity there — the claim, a write it was
+  admitted to, or any hook event while its shell stood on that branch, kept per
+  branch — within `FLEET_IDLE_S` (default 30 minutes). A live process with no
+  recent turns is idle, not working: a desktop app keeps its pid for sessions that
+  are out of usage for days. Only an active holder refuses a rival, and the
+  refusal says when the branch would change hands and points at a worktree of the
+  rival's own (`git worktree add <dir> -b <new-branch> <branch>`). A dead or idle
+  holder's branch goes to the next writer: the lease records who took it from
+  whom, when and why, the hook's event row carries the takeover, and each side is
+  told at its next event — the displaced session that Fleet touched no files, the
+  taker to preserve any uncommitted work it finds. No operator command is
+  involved, and `fleet assign` follows the same rule. A resource is never idle: a
+  live holder keeps it until `fleet drop`, and a dead holder's resource is
+  orphaned and needs `--takeover`, because the machine it drives may still be
+  running. Unreadable evidence is never death.
   Branch leases cover recognized file-edit tools and Git/GitHub shell operations.
   Ordinary shell writes, scripts and generators can miss the branch check; tools
   outside the hook matcher bypass it. These leases gate recognized future admissions; they do not terminate an already
@@ -77,8 +89,8 @@ temp-then-rename, or an append-only JSONL. Nothing needs a server.
 
 | path | written by | meaning |
 |---|---|---|
-| `sessions/<sid>.json` | hook | identity, role, branch, liveness, turn state |
-| `leases/<key>.json` | hook, `take`, `drop` | one holder per key |
+| `sessions/<sid>.json` | hook | identity, role, branch, liveness, turn state, activity and writes per branch, takeover notices not yet delivered |
+| `leases/<key>.json` | hook, `take`, `drop` | one holder per key; after a takeover, who took it from whom, when and why |
 | `receipts/<sha>.<kind>.json` | `fleet receipt` | the latest evidence of done at an exact head |
 | `receipts/<sha>.<kind>.jsonl` | `fleet receipt` | every verdict recorded at that head, oldest first |
 | `dispatch/<repo>__<branch>__<rel>.json` | `fleet dispatch` | the declared part of an ownership row |
@@ -161,8 +173,8 @@ exit code changes; `--all` only adds what it replaced.
 **The directory guard.** A session that runs `cd <another bound directory>` becomes
 that directory's occupant at its next tool call — the hook records a session at its cwd —
 and then leases that directory's branch away from the session that actually lives
-there. It happened twice in one rehearsal evening, and there is no holder-side release
-of a branch lease short of `SessionEnd` or an operator `fleet revoke`. So the PreToolUse
+there. It happened twice in one rehearsal evening, and a session active on its branch
+keeps the lease until `SessionEnd` or an operator `fleet revoke`. So the PreToolUse
 Bash handler resolves every `cd`/`pushd` target the way identity is resolved
 (longest-prefix over `roles.map`) and denies the move when the target's bound directory
 is not the session's own, naming the seat or role and the ways to do the work without

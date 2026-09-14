@@ -72,6 +72,7 @@ func touchSessionLocked(sid string, ev Event, fields Rec) (Rec, error) {
 		writes[S(write, "key")] = write
 		rec["last_writes"] = writes
 	}
+	seen := M(rec, "last_seen") // read before fields replace it; merged, not replaced, below
 	for k, v := range fields {
 		rec[k] = v
 	}
@@ -124,11 +125,41 @@ func touchSessionLocked(sid string, ev Event, fields Rec) (Rec, error) {
 			}
 		}
 	}
+	placeSession(rec, cwd, seen, M(fields, "last_seen"))
+	return rec, WriteJSON(p, rec)
+}
+
+// placeSession records where the session stands — the repo and branch of its cwd —
+// and stamps its activity there, and on any branch named, into last_seen.
+func placeSession(rec Rec, cwd string, seen, named Rec) {
 	if cwd != "" {
 		rec["branch"] = nilIfEmpty(BranchOf(cwd))
 		rec["repo"] = nilIfEmpty(RepoID(cwd))
 	}
-	return rec, WriteJSON(p, rec)
+	if seen = stampSeen(seen, named, sessionKey(rec)); seen != nil {
+		rec["last_seen"] = seen
+	}
+}
+
+// stampSeen is the session's last_seen — per branch key, when it last showed activity
+// there — with this event's added: the branches the caller names (a write it was just
+// admitted to) and the checkout its shell stands in. Kept per key, because the record's
+// repo and branch are only where the session stands now: one event from another
+// checkout must not erase the time it spent on this one.
+func stampSeen(seen, named Rec, standing string) Rec {
+	if len(named) == 0 && standing == "" {
+		return seen
+	}
+	if seen == nil {
+		seen = Rec{}
+	}
+	for k, v := range named {
+		seen[k] = v
+	}
+	if standing != "" {
+		seen[standing] = Now()
+	}
+	return seen
 }
 
 // InflightKey is the key PreToolUse writes and PostToolUse reads for one command:

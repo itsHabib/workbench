@@ -298,9 +298,13 @@ const (
 	HeldOrphaned HeldState = "orphaned" // dead resource holder
 	// HeldDead means a dead session holds a branch; the next writer takes it over.
 	HeldDead HeldState = "dead" // dead branch holder
+	// HeldIdle means a live session holds a branch but has shown no activity on it
+	// within IdleS; the next writer takes it over.
+	HeldIdle HeldState = "idle" // live branch holder, quiet on the branch
 	// HeldUnknown means the holder's record cannot be read: not free, not taken over.
 	HeldUnknown HeldState = "unknown" // the holder's record cannot be read: not free, not taken over
-	// HeldLive means a live session other than this one holds the key.
+	// HeldLive means a live session other than this one holds the key and, for a
+	// branch, is active on it.
 	HeldLive HeldState = "live" // a live foreign holder
 )
 
@@ -320,17 +324,30 @@ func HeldByOther(key, sid string) (HeldState, Rec) {
 	if S(cur, "session") == sid {
 		return HeldFree, cur
 	}
-	alive, known := Liveness(S(cur, "session"))
+	state, _ := HolderState(key, cur)
+	return state, cur
+}
+
+// HolderState classifies the session holding lease cur on key, from one read of its
+// record, and returns that record: unknown when it cannot be read, dead (a resource:
+// orphaned) when the session is not live, idle when it is live but has shown no
+// activity on the branch within IdleS, else live. A resource is never idle.
+func HolderState(key string, cur Rec) (HeldState, Rec) {
+	holder, known := holderRecord(S(cur, "session"))
 	if !known {
-		return HeldUnknown, cur
+		return HeldUnknown, nil
 	}
-	if alive {
-		return HeldLive, cur
+	resource := IsResource(key)
+	if !SessionAlive(holder) {
+		if resource {
+			return HeldOrphaned, holder
+		}
+		return HeldDead, holder
 	}
-	if IsResource(key) {
-		return HeldOrphaned, cur
+	if resource || recentOn(holder, cur, key) {
+		return HeldLive, holder
 	}
-	return HeldDead, cur
+	return HeldIdle, holder
 }
 
 // Liveness is observed liveness with its evidence: alive, and whether the evidence
@@ -338,22 +355,24 @@ func HeldByOther(key, sid string) (HeldState, Rec) {
 // absence — the sessions directory unavailable, the file unparseable — is UNKNOWN,
 // never dead. Unavailable evidence must not become proof of death on the lease path.
 func Liveness(sid string) (alive, known bool) {
+	rec, known := holderRecord(sid)
+	return known && SessionAlive(rec), known
+}
+
+// holderRecord is a session's record and whether it could be read, under Liveness's
+// rule: an absent record in a readable directory is known (no live session), anything
+// else unreadable is not.
+func holderRecord(sid string) (Rec, bool) {
 	b, err := os.ReadFile(Path("sessions", sid+".json"))
 	if err != nil {
 		if !os.IsNotExist(err) {
-			return false, false
+			return nil, false
 		}
 		st, serr := os.Stat(Path("sessions"))
-		if serr != nil || !st.IsDir() {
-			return false, false
-		}
-		return false, true
+		return nil, serr == nil && st.IsDir()
 	}
 	rec := ReadJSONBytes(b)
-	if rec == nil {
-		return false, false
-	}
-	return SessionAlive(rec), true
+	return rec, rec != nil
 }
 
 // TestPause is the substrate's one test seam. A TOCTOU race cannot be proven by
@@ -392,51 +411,9 @@ func CheckLease(key, branch, sid, role, cwd string) (reason string) {
 	err := KeyLock(key, func() error {
 		cur := Lease(key)
 		TestPause("AFTER_OBSERVE") // inside the lock: a rival now BLOCKS rather than races
-		if cur == nil {
-			if reason = acquireGuards(key, sid, role, cwd); reason != "" {
-				return nil
-			}
-			return WriteLease(key, LeaseRecord(key, sid, role, cwd, "claimed on first write"))
-		}
-		if IsMalformed(cur) {
-			reason = fmt.Sprintf("lease file for %s is malformed: %s. Nothing is inferred from garbage; it is not free and not taken over. Next action: have the operator inspect and remove it.", KeyLabel(key), S(cur, "malformed"))
-			return nil
-		}
-		if S(cur, "session") == sid {
-			return nil // no heartbeat: freshness lives on the session record
-		}
-		holderRole := S(cur, "role")
-		if holderRole == "" {
-			holderRole = "a session"
-		}
-		alive, known := Liveness(S(cur, "session"))
-		if !known {
-			reason = fmt.Sprintf("%s is held by %s %s and the holder's session record cannot be read (%s). Unavailable evidence is not death: not free, not taken over. Next action: check that %s is a readable directory, then retry.",
-				KeyLabel(key), holderRole, Short(S(cur, "session")), Path("sessions", S(cur, "session")+".json"), Path("sessions"))
-			return nil
-		}
-		if alive {
-			what := "branch " + branch
-			if IsResource(key) {
-				what = key
-			}
-			reason = fmt.Sprintf("%s is held by %s %s since %s ago. One holder per key. Either work elsewhere, or ask the operator to run `fleet revoke %s --to %s \"<reason>\"`, which stands the holder down at its next action.",
-				what, holderRole, Short(S(cur, "session")), FmtAge(Now()-F(cur, "since")), KeyLabel(key), Short(sid))
-			return nil
-		}
-		if IsResource(key) {
-			reason = fmt.Sprintf("%s is held by dead session %s (since %s ago). A dead holder's resource is not taken over automatically: it may still be running. Next action: confirm it is quiet, then `fleet take %s --takeover \"<what you checked>\"`.",
-				key, Short(S(cur, "session")), FmtAge(Now()-F(cur, "since")), key)
-			return nil
-		}
-		if reason = acquireGuards(key, sid, role, cwd); reason != "" {
-			return nil
-		}
-		if err := WriteLease(key, LeaseRecord(key, sid, role, cwd, "took over from dead session "+Short(S(cur, "session")))); err != nil {
-			return err
-		}
-		HookTakeovers = append(HookTakeovers, Rec{"key": key, "from": S(cur, "session"), "to": sid})
-		return nil
+		var err error
+		reason, err = decideLease(key, branch, sid, role, cwd, cur)
+		return err
 	})
 	if err == ErrKeyBusy {
 		return fmt.Sprintf("another fleet process has held the lock on %s for over a second, so nothing was written. Next action: `fleet leases` to see who holds it and retry; if it persists, `fleet sessions` for a hung session.", KeyLabel(key))
@@ -445,6 +422,75 @@ func CheckLease(key, branch, sid, role, cwd string) (reason string) {
 		return substrateError(key, err.Error())
 	}
 	return reason
+}
+
+// decideLease is CheckLease's decision on one read of the key, made and acted on inside
+// its lock: the refusal, or "" when this session now holds the key.
+func decideLease(key, branch, sid, role, cwd string, cur Rec) (string, error) {
+	if cur == nil {
+		if reason := acquireGuards(key, sid, role, cwd); reason != "" {
+			return reason, nil
+		}
+		return "", WriteLease(key, LeaseRecord(key, sid, role, cwd, "claimed on first write"))
+	}
+	if IsMalformed(cur) {
+		return fmt.Sprintf("lease file for %s is malformed: %s. Nothing is inferred from garbage; it is not free and not taken over. Next action: have the operator inspect and remove it.", KeyLabel(key), S(cur, "malformed")), nil
+	}
+	if S(cur, "session") == sid {
+		return "", nil // no heartbeat: freshness lives on the session record
+	}
+	state, holder := HolderState(key, cur)
+	switch state {
+	case HeldUnknown:
+		return fmt.Sprintf("%s is held by %s %s and the holder's session record cannot be read (%s). Unavailable evidence is not death: not free, not taken over. Next action: check that %s is a readable directory, then retry.",
+			KeyLabel(key), roleOf(cur), Short(S(cur, "session")), Path("sessions", S(cur, "session")+".json"), Path("sessions")), nil
+	case HeldLive:
+		return heldRefusal(key, branch, sid, cur, holder), nil
+	case HeldOrphaned:
+		return fmt.Sprintf("%s is held by dead session %s (since %s ago). A dead holder's resource is not taken over automatically: it may still be running. Next action: confirm it is quiet, then `fleet take %s --takeover \"<what you checked>\"`.",
+			key, Short(S(cur, "session")), FmtAge(Now()-F(cur, "since")), key), nil
+	}
+	return takeOver(key, branch, sid, role, cwd, cur, holder, state)
+}
+
+// takeOver hands a dead or idle holder's branch to this session, recording who took it
+// from whom, when and why on the lease itself and in the hook's event row. Both
+// sessions are told once the evaluation stands (AnnounceTakeovers).
+func takeOver(key, branch, sid, role, cwd string, cur, holder Rec, state HeldState) (string, error) {
+	if reason := acquireGuards(key, sid, role, cwd); reason != "" {
+		return reason, nil
+	}
+	t := takeover(key, branch, sid, role, cur, holder, state)
+	rec := LeaseRecord(key, sid, role, cwd, takeoverNote(t))
+	rec["takeover"] = t
+	if err := WriteLease(key, rec); err != nil {
+		return "", err
+	}
+	HookTakeovers = append(HookTakeovers, t)
+	unannounced = append(unannounced, t)
+	return "", nil
+}
+
+// heldRefusal is the refusal for a key its holder is using. A branch says when it
+// changes hands if the holder goes quiet, and never sends a routine handover to the
+// operator; a resource stays with its live holder until it is dropped.
+func heldRefusal(key, branch, sid string, cur, holder Rec) string {
+	if IsResource(key) {
+		return fmt.Sprintf("%s is held by %s %s since %s ago. A machine resource stays with its live holder until it is dropped, because the machine may be busy with no session touching it. Next action: wait for `fleet leases` to show it free, or ask its holder to `fleet drop %s`.",
+			key, roleOf(cur), Short(S(cur, "session")), FmtAge(Now()-F(cur, "since")), key)
+	}
+	quiet := Now() - LastActiveOn(holder, cur, key)
+	left := FmtAge(max(float64(IdleS)-quiet, 1)) // HolderState found it active; never "in 0s"
+	// The writer stands in the holder's tree — git checks a branch out in one worktree —
+	// so `git checkout -b` there would move the holder's checkout and is refused as a
+	// write. A worktree of its own is the way on that touches nothing of the holder's.
+	own := fmt.Sprintf("`git worktree add <new-dir> -b <new-branch> %s` starts a branch of your own from its head without touching this checkout", branch)
+	if S(M(cur, "takeover"), "from") == sid {
+		return fmt.Sprintf("branch %s was taken from you %s ago by %s %s (%s), and it is active on the branch now (%s ago). Fleet touched no files: what you left uncommitted is still in this checkout, and the new holder was told to preserve it. Next action: reconcile with what the new holder committed, or carry your work to a branch of your own — %s; if it goes quiet on the branch for %s, your next write here takes it back, in %s at the earliest.",
+			branch, FmtAge(Now()-F(cur, "since")), roleOf(cur), Short(S(cur, "session")), displacedWhy(M(cur, "takeover")), FmtAge(quiet), own, FmtAge(float64(IdleS)), left)
+	}
+	return fmt.Sprintf("branch %s is held by %s %s, active on it %s ago. A branch lease blocks only an active writer. If the holder goes quiet on the branch for %s, the next write here takes the branch over and the lease records it, in %s at the earliest. Next action: continue on a branch of your own — %s; that is the normal path, not a workaround — or retry after that.",
+		branch, roleOf(cur), Short(S(cur, "session")), FmtAge(quiet), FmtAge(float64(IdleS)), left, own)
 }
 
 func substrateError(key, msg string) string {

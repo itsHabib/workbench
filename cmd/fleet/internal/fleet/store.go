@@ -40,7 +40,20 @@ var (
 	OrgState = expand(envOr("ORG_STATE", "~/dev/org/state"))
 	// StaleS is how long a turn may stay open with no pid proof before it reads stale.
 	StaleS = envInt("FLEET_STALE_S", 7200)
+	// IdleS is how long a live holder may show no activity on a branch before its lease
+	// there stops blocking the next writer. On this machine 36,963 in-turn gaps between
+	// hook events had a 99.9th percentile near eleven minutes; eight passed thirty, and
+	// every one of those was a hung or abandoned turn. Zero or less would make every
+	// live holder idle at once, so it reads as the default.
+	IdleS = positive(envInt("FLEET_IDLE_S", 1800), 1800)
 )
+
+func positive(n, d int) int {
+	if n > 0 {
+		return n
+	}
+	return d
+}
 
 const slowNoteS = 30 // PostToolUse reports elapsed above this
 

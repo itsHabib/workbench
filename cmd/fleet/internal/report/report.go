@@ -368,7 +368,7 @@ func percentile(xs []float64, p float64) float64 {
 func hookStats(b *strings.Builder, es records, since float64) {
 	groups := map[string][]float64{}
 	prompts, capped, lines := 0, 0, 0
-	b.WriteString("## Silent takeovers of dead holders' branches\n\n")
+	b.WriteString("## Automatic takeovers of dead or idle holders' branches\n\n")
 	takeovers := 0
 	for _, e := range es {
 		if !inWindow(e, since) {
@@ -389,7 +389,11 @@ func hookStats(b *strings.Builder, es records, since float64) {
 		var ts records
 		_ = json.Unmarshal(raw, &ts)
 		for _, t := range ts {
-			fmt.Fprintf(b, "- %s: %s, %s → %s\n", stamp(fleet.F(e, "at")), cell(fleet.S(t, "key")), cell(fleet.S(t, "from")), cell(fleet.S(t, "to")))
+			why := fleet.S(t, "why")
+			if why == "" {
+				why = "dead" // rows written before idle takeovers existed
+			}
+			fmt.Fprintf(b, "- %s: %s, %s → %s (%s)\n", stamp(fleet.F(e, "at")), cell(fleet.S(t, "key")), cell(fleet.S(t, "from")), cell(fleet.S(t, "to")), cell(why))
 			takeovers++
 		}
 	}

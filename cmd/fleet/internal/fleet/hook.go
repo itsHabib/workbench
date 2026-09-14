@@ -34,10 +34,19 @@ var HookTakeovers []Rec
 
 var allow = &Verdict{}
 
-// Run handles one event. It never panics out: the fail-open law says an internal
+// Run handles one event, then tells both sessions of any takeover it made. A caller
+// that may still unwind the event's leases — the Codex adapter — calls Evaluate and
+// announces once it has decided, so an unwound takeover is never announced.
+func Run(ev Event) *Verdict {
+	v := Evaluate(ev)
+	AnnounceTakeovers()
+	return v
+}
+
+// Evaluate handles one event. It never panics out: the fail-open law says an internal
 // error exits 0 with no output, logged — except on the lease path, which CheckLease
 // already turns into a refusal before it can reach here.
-func Run(ev Event) (v *Verdict) {
+func Evaluate(ev Event) (v *Verdict) {
 	defer func() {
 		if r := recover(); r != nil {
 			logError(Rec{"error": fmt.Sprint(r)})
@@ -89,6 +98,7 @@ func onSessionStart(ev Event, sid string) *Verdict {
 	if cwd == "" {
 		cwd = "."
 	}
+	lines = append(lines, leaseNoticeLines(sid, rec)...)
 	lines = append(lines, branchStartLines(rec, sid, cwd)...)
 	lane := M(rec, "lane")
 	if S(rec, "role") != "" && lane == nil {
@@ -149,11 +159,24 @@ func branchStartLines(rec Rec, sid, cwd string) []string {
 	if cur == nil || S(cur, "session") == sid {
 		return lines
 	}
-	r := S(cur, "role")
-	if r == "" {
-		r = "session"
+	return append(lines, foreignHolderLine(key, b, cur))
+}
+
+// foreignHolderLine is another session's lease on this session's branch as the session
+// starts: whether it blocks writes, or whether the first write takes it over. A read
+// for the context line only; CheckLease decides the write under the key's lock.
+func foreignHolderLine(key, branch string, cur Rec) string {
+	who := orSession(S(cur, "role")) + " " + Short(S(cur, "session"))
+	state, holder := HolderState(key, cur)
+	switch state {
+	case HeldIdle:
+		return fmt.Sprintf("[fleet] %s is held by %s, quiet on it for %s: your first write takes it over, and the lease records it", branch, who, FmtAge(Now()-LastActiveOn(holder, cur, key)))
+	case HeldDead:
+		return fmt.Sprintf("[fleet] %s is held by %s, whose session has stopped: your first write takes it over, and the lease records it", branch, who)
+	case HeldUnknown:
+		return fmt.Sprintf("[fleet] %s is held by %s, whose session record cannot be read — writes there are refused until it can", branch, who)
 	}
-	return append(lines, fmt.Sprintf("[fleet] %s is held by %s %s — you cannot write to it", b, r, Short(S(cur, "session"))))
+	return fmt.Sprintf("[fleet] %s is held by %s — you cannot write to it while it is active there", branch, who)
 }
 
 // requiresLines is the state of every resource the lane requires, one line each.
@@ -210,6 +233,7 @@ func onPrompt(ev Event, sid string) *Verdict {
 		}
 	}
 	lines = append(lines, resumeLines(sid, prev, ev)...)
+	lines = append(lines, leaseNoticeLines(sid, rec)...)
 	if B(M(rec, "lane"), "watch") {
 		lines = append(lines, BoardLines(F(prev, "last_prompt_at"))...)
 	}
@@ -285,6 +309,9 @@ func onPreTool(ev Event, sid string) *Verdict {
 		}
 		fields["handoff"] = Rec{"from": nilIfEmpty(key), "to": tos, "start": target, "at": Now()}
 	}
+	if seen := admitted(writes, key, toKeys); seen != nil {
+		fields["last_seen"] = seen
+	}
 	var terr error
 	rec, terr = TouchErr(sid, ev, fields)
 	if terr != nil && branch != "" && writes {
@@ -310,6 +337,24 @@ func onPreTool(ev Event, sid string) *Verdict {
 	}
 	recordInflight(ev, sid, cmd)
 	return allow
+}
+
+// admitted is the branch keys this call was just cleared to write or switch to, each
+// stamped now. A write is activity on its branch from its admission, not only once
+// PostToolUse records it: a commit still running is working on the branch.
+func admitted(writes bool, key string, toKeys []string) Rec {
+	keys := toKeys
+	if writes && key != "" {
+		keys = append([]string{key}, toKeys...)
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	seen := Rec{}
+	for _, k := range keys {
+		seen[k] = Now()
+	}
+	return seen
 }
 
 // preWriteVerdicts is every refusal that must be reached before this session's record
@@ -472,11 +517,26 @@ func onPostTool(ev Event, sid string) *Verdict {
 		}
 		CachePullRequest(cmd, ev["tool_response"], BashTarget(cmd, start), sid)
 	}
+	// A takeover is told at the next event that can carry text; for a session that was
+	// quiet mid-turn, or the one that just took a branch, that is this one.
+	lines := leaseNoticeLines(sid, rec)
+	if slow := settleInflight(ev, sid, cmd); slow != "" {
+		lines = append(lines, slow)
+	}
+	if len(lines) == 0 {
+		return allow
+	}
+	return context(ev, strings.Join(lines, "\n"))
+}
+
+// settleInflight closes a Bash command's in-flight record: the cost ledger row, the
+// rule lock, and a line when the command was slow, else "".
+func settleInflight(ev Event, sid, cmd string) string {
 	ik := InflightKey(ev, sid, cmd)
 	p := Path("inflight", Safe(ik)+".json")
 	started := ReadJSON(p)
 	if started == nil {
-		return allow
+		return ""
 	}
 	Unlink(p)
 	elapsed := Now() - F(started, "at")
@@ -486,7 +546,7 @@ func onPostTool(ev Event, sid string) *Verdict {
 		Unlink(Path("locks", Safe(S(rule, "name"))+".json"))
 	}
 	if elapsed < slowNoteS {
-		return allow
+		return ""
 	}
 	med := ""
 	for _, r := range CostRows() {
@@ -495,7 +555,7 @@ func onPostTool(ev Event, sid string) *Verdict {
 			break
 		}
 	}
-	return context(ev, fmt.Sprintf("[fleet] that command took %s%s.", FmtAge(elapsed), med))
+	return fmt.Sprintf("[fleet] that command took %s%s.", FmtAge(elapsed), med)
 }
 
 func round1(f float64) float64 {

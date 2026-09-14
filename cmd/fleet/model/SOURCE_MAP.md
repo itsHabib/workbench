@@ -18,8 +18,8 @@ Paths are relative to `cmd/fleet/internal/fleet/`.
 
 | Anchor | Observed behavior | Model abstraction |
 |---|---|---|
-| `policy.go` `CheckLease` | The holder's own write needs no lock. Otherwise, under `KeyLock`: free is taken; malformed is refused; a rival holder's liveness is read through `Liveness`, and "not known" refuses; alive refuses; dead takes over a branch and refuses a resource. | `write(s)`: one atomic step. `Unreadable` is `Liveness` returning not-known. Malformed is out of scope. |
-| `policy.go` `HeldByOther` | The same ladder as a state: free, malformed, unknown, live, orphaned (resource), dead (branch). | The `match live(h)` in `write`, and `takeover`'s guard. |
+| `policy.go` `CheckLease` | The holder's own write needs no lock. Otherwise, under `KeyLock`: free is taken; malformed is refused; a rival holder is classified by `HolderState`, and "not known" refuses; alive refuses, and for a branch that means alive and active on it within `FLEET_IDLE_S`; dead takes over a branch and refuses a resource; a live holder idle on a branch is taken over like a dead one. | `write(s)`: one atomic step. `Unreadable` is `Liveness` returning not-known. Malformed is out of scope. There is no idle state: `Alive` stands for a holder active on the key, and an idle branch holder is `Dead` to `write`. |
+| `policy.go` `HeldByOther`, `HolderState` | The same ladder as a state: free, malformed, unknown, live, idle (branch), orphaned (resource), dead (branch). | The `match live(h)` in `write`, and `takeover`'s guard. |
 | `lease.go` `AcquireLease`, `TakeLease`, `DropLease` | Every mutation is inside `KeyLock` on the key. | Atomicity of `write`, `release`, `takeover` is assumed; `UnlockedCheckMutant` drops it for `write`. |
 | `lease.go` `SessionAlive`, `Liveness` | A harness pid that answers, or a recent event from a parent-unverified session; a record that cannot be read is "not known". | `Alive` / `Dead` / `Unreadable`. |
 | `session.go` `ReleaseSessionState` | SessionEnd removes the session's leases. | `release(s)`. |

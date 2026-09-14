@@ -112,8 +112,10 @@ func rollbackLeases(before map[string]fleet.Rec, sid string) {
 	}
 }
 
-// Run evaluates one Codex event.
+// Run evaluates one Codex event. Takeovers are announced only after a denial has rolled
+// the patch's leases back, so a takeover that did not stand tells nobody.
 func Run(ev fleet.Event) *fleet.Verdict {
+	defer fleet.AnnounceTakeovers()
 	mapped := mappedEvents(ev)
 	var before map[string]fleet.Rec
 	if len(mapped) > 1 {
@@ -121,7 +123,7 @@ func Run(ev fleet.Event) *fleet.Verdict {
 	}
 	var contexts []string
 	for _, item := range mapped {
-		v := fleet.Run(item)
+		v := fleet.Evaluate(item)
 		if v.Code == 2 && strings.TrimSpace(v.Err) != "" {
 			rollbackLeases(before, fleet.S(ev, "session_id"))
 			return &fleet.Verdict{Code: 2, Err: v.Err}

@@ -94,7 +94,7 @@ A role shared by several seats is not a unique mailbox: use the concrete address
 Read `fleet work`, `fleet board`, the current branch and head, and the runtime's observations.
 Resume the same assignment on its existing branch without deleting dirty files. Repurposing
 a dirty seat for different work still requires preserving those files. `fleet unassign <seat>`
-clears the placement and its matching dispatch rows together, retaining the tree and any live session/leases. Never take over another live writer or an exclusive resource.
+clears the placement and its matching dispatch rows together, retaining the tree and any live session/leases. Never take over another active writer or an exclusive resource. A branch whose holder has gone quiet on it for `FLEET_IDLE_S` passes to your first write there, on the record; preserve whatever that holder left uncommitted.
 
 `unoccupied` means a prior session left and nobody currently holds the branch. Read its
 handoff and mail to understand why; it is not proof of abandonment. An expired due time

@@ -23,7 +23,7 @@ The report answers:
   epoch. Lateness is grouped by last recorded accountable role; this is not a
   reconstruction of historical blame. Retired/superseded epochs stop accruing
   delay. Watcher timestamps are observation bounds, not exact acquisition times.
-- Automatic branch replacements of dead holders. Successfully unwound adapter
+- Automatic branch replacements of dead or idle holders, each with its reason. Successfully unwound adapter
   replacements are excluded. A later tool refusal does not necessarily undo a
   lease replacement and is not treated as doing so.
 - Prompt events with capped board lines and total lines exceeding the existing
