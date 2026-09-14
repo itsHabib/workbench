@@ -189,13 +189,33 @@ func TestMain(m *testing.M) {
 // gh actually printed, so the retry classifier is exercised on real text — the
 // run makes all three bounded attempts before it aborts, which is also the
 // proof that the bound terminates.
+//
+// The repository read that names the default branch also lands, so the run
+// dies at the diff read it did that day rather than at the base check that
+// now precedes it. fakeBaseEnv overrides the view's base branch, which is how
+// the stacked-PR refusal is driven through the same live path.
 func runResetAfterView() int {
 	if len(os.Args) > 2 && os.Args[1] == "pr" && os.Args[2] == "view" {
-		fmt.Println(openPRView)
+		fmt.Println(strings.Replace(openPRView, `"baseRefName":"main"`, `"baseRefName":"`+fakeBase()+`"`, 1))
+		return 0
+	}
+	if len(os.Args) == 3 && os.Args[1] == "api" && os.Args[2] == "repos/o/r" {
+		fmt.Println(`{"full_name":"o/r","default_branch":"main"}`)
 		return 0
 	}
 	fmt.Fprintln(os.Stderr, resetPeer)
 	return 1
+}
+
+// fakeBaseEnv names the base branch the fake view reports; unset means main,
+// the repository's default.
+const fakeBaseEnv = "GO_GH_FAKE_BASE"
+
+func fakeBase() string {
+	if base, ok := os.LookupEnv(fakeBaseEnv); ok {
+		return base
+	}
+	return "main"
 }
 
 const resetPeer = `error connecting to api.github.com: Post "https://api.github.com/graphql": ` +

@@ -57,7 +57,8 @@ import (
 //	  0  | would_merge / merged                   | land the PR
 //	  1  | blocked                                | stop; do not merge
 //	  2  | parked_for_judgment                    | re-mint a wider grant (ceiling) or judge (escalation)
-//	  3  | capability_refused / already_merged    | mint/repair the grant and retry once / nothing to merge
+//	  3  | capability_refused / already_merged /  | mint/repair the grant and retry once / nothing to merge /
+//	     | base_not_default                       | retarget the PR to the default branch, then gate again
 //	  4  | (hard error, no outcome)               | surface the error; no merge
 const (
 	codeMerge   = 0
@@ -528,9 +529,9 @@ func cmdGate(args []string) error {
 }
 
 // runGate is one thin vertical pass: capability, evidence, verification,
-// reduction, outcome. It is the LIVE verb: an already-merged subject refuses
-// here — replay (backtest) calls runGateWithSynthesis directly to keep
-// evaluating historical, merged PRs.
+// reduction, outcome. It is the LIVE verb: an already-merged subject, or one
+// based on a branch other than the default, refuses here — replay (backtest)
+// calls runGateWithSynthesis directly to keep evaluating historical, merged PRs.
 func runGate(e env, repo string, pr int, grantID string, live bool, modelBackend string, reviewsOptional bool) (gateResult, int, error) {
 	return runGateWithSynthesis(
 		e, repo, pr, grantID, live, modelBackend, reviewsOptional, true, true, "",
@@ -610,16 +611,16 @@ func runGateWithSynthesis(
 
 	// A merged PR has no merge left to authorize: a park on it is unresolvable,
 	// because judging it pass would stamp irreversible merge authorization for a
-	// merge that already happened — manufactured audit evidence. Refuse before
-	// the verifier ladder can run or an escalation can be written. Replay
-	// (backtest) skips this: evaluating historical, merged PRs is its purpose.
+	// merge that already happened — manufactured audit evidence. A PR based on
+	// anything but the default branch has no merge gate may authorize (see
+	// refuseUnmergeable). Both refuse before the verifier ladder can run or an
+	// escalation can be written. Replay (backtest) skips this: evaluating
+	// historical, merged PRs is its purpose.
 	if refuseMerged {
-		mv, err := verify.MergedPR(e.st, viewID)
-		if err != nil {
-			return res, codeError, err
-		}
-		if mv.Merged {
-			return refuseMergedRun(e, run, viewID, grantID, subject, mv, res)
+		var done bool
+		res, code, done, err = refuseUnmergeable(e, run, viewID, view, grantID, subject, res)
+		if done {
+			return res, code, err
 		}
 	}
 
@@ -773,6 +774,78 @@ func refuseMergedRun(e env, run, viewID, grantID string, subject verify.Subject,
 		"merge_commit": mv.MergeSHA,
 		"grant":        grantID,
 		"why":          why,
+	}
+	if _, err := e.st.Append(state.KindAction, run, []string{viewID}, body); err != nil {
+		return res, codeError, err
+	}
+	return res, codeRefused, nil
+}
+
+// refuseUnmergeable runs the refusals decidable from the recorded view alone:
+// a subject already merged, and a subject whose base is not the repository's
+// default branch. Neither is a question a judgment could answer, so neither
+// may reach the ladder and park. done reports whether the run ends here.
+//
+// The merged check runs first and needs nothing but the view, so an unreadable
+// default branch can never stop it. An unreadable default branch fails the run
+// rather than passing it: an unread up-to-date requirement at worst lets GitHub
+// reject a doomed merge, but an unread default branch could let the squash land
+// in the wrong branch.
+func refuseUnmergeable(e env, run, viewID string, view json.RawMessage, grantID string, subject verify.Subject, res gateResult) (gateResult, int, bool, error) {
+	mv, err := verify.MergedPR(e.st, viewID)
+	if err != nil {
+		return res, codeError, true, err
+	}
+	if mv.Merged {
+		refused, code, err := refuseMergedRun(e, run, viewID, grantID, subject, mv, res)
+		return refused, code, true, err
+	}
+	base := evidence.BaseRef(view)
+	if base == "" {
+		return res, codeError, true, fmt.Errorf("gate: %s#%d view recorded no base branch", subject.Repo, subject.Number)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), ghTimeout)
+	defer cancel()
+	def, err := defaultBranch(ctx, subject.Repo, runGHAPI)
+	if err != nil {
+		return res, codeError, true, err
+	}
+	if base == def {
+		return res, 0, false, nil
+	}
+	res.HeadSHA = mv.HeadSHA
+	res, code, err := refuseNonDefaultBase(e, run, viewID, grantID, subject, base, def, res)
+	return res, code, true, err
+}
+
+// outcomeBaseNotDefault is the coded refusal for a PR that targets a branch
+// other than the repository's default — a stacked PR not yet retargeted. The
+// command gate emits merges into whatever branch the PR targets, so a pass
+// would squash the PR into its parent's branch: the parent's reviewed head
+// moves, and the authorization covers a merge nobody asked for. No judgment can
+// make the target right, so it refuses rather than parks.
+const outcomeBaseNotDefault = "base_not_default"
+
+// refuseNonDefaultBase finalizes a run whose PR targets a non-default base: a
+// terminal refused action (exit 3), shaped like refuseMergedRun's — parented to
+// the view evidence and carrying the subject — plus both branch names, so the
+// log says why without a second read. cycleCount excludes it, since no ladder
+// decision was produced.
+func refuseNonDefaultBase(e env, run, viewID, grantID string, subject verify.Subject, base, def string, res gateResult) (gateResult, int, error) {
+	why := fmt.Sprintf("%s: PR base %q is not the default branch %q, so the merge would land in %q; "+
+		"retarget the PR to %q, then gate again",
+		outcomeBaseNotDefault, base, def, base, def)
+	res.Outcome = outcomeBaseNotDefault
+	res.Code = outcomeBaseNotDefault
+	res.Why = why
+	body := map[string]any{
+		"outcome":        outcomeBaseNotDefault,
+		"repo":           subject.Repo,
+		"number":         subject.Number,
+		"base_ref":       base,
+		"default_branch": def,
+		"grant":          grantID,
+		"why":            why,
 	}
 	if _, err := e.st.Append(state.KindAction, run, []string{viewID}, body); err != nil {
 		return res, codeError, err
@@ -1323,11 +1396,15 @@ func countsAsCycle(a state.Artifact) (bool, error) {
 	if a.Kind == state.KindEscalation {
 		return b.Code == "", nil
 	}
-	// already_merged is a refusal, not a ladder decision, and its parent is
-	// view evidence rather than a reduced verdict — counting it would send
-	// outcomeSubjectMatches to a non-verdict parent and make every later
-	// cycle count on the subject unreadable.
-	return b.Outcome != "capability_refused" && b.Outcome != outcomeAlreadyMerged, nil
+	// already_merged and base_not_default are refusals, not ladder decisions,
+	// and their parent is view evidence rather than a reduced verdict —
+	// counting them would send outcomeSubjectMatches to a non-verdict parent
+	// and make every later cycle count on the subject unreadable.
+	switch b.Outcome {
+	case "capability_refused", outcomeAlreadyMerged, outcomeBaseNotDefault:
+		return false, nil
+	}
+	return true, nil
 }
 
 // outcomeSubjectMatches follows an outcome artifact to its parent reduced
