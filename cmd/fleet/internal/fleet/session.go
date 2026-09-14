@@ -16,6 +16,9 @@ type Event = map[string]any
 // named the dead pid would read as dead — and its branch lease taken over — while the
 // session was live.
 //
+// The launch directory is recorded at a startup or resume SessionStart; a compact or
+// clear SessionStart keeps the one already recorded (launchDirAtStart).
+//
 // The role is re-resolved at SessionStart and sticky between events within one
 // session. At SessionStart the map's answer is taken as is, including none: an
 // operator who deletes the wrong line must be able to strip a session of a role it
@@ -88,13 +91,14 @@ func touchSessionLocked(sid string, ev Event, fields Rec) (Rec, error) {
 		rec["cwd"] = nil
 	}
 	cwd := S(rec, "cwd")
-	// Identity comes from the directory the session was LAUNCHED in, recorded once
-	// at SessionStart. The role used to re-resolve from the event's cwd whenever it
-	// was empty, so a session that started unroled in ~/dev and ran one
+	// Identity comes from the directory the session was LAUNCHED in, recorded at the
+	// SessionStart that launches it. The role used to re-resolve from the event's cwd
+	// whenever it was empty, so a session that started unroled in ~/dev and ran one
 	// `cd ~/dev/cc-skills && …` came out wearing that checkout's card. A `cd` is not
-	// a change of who you are.
+	// a change of who you are, and neither is a compaction that happens while the
+	// shell stands somewhere else.
 	if starting {
-		rec["launch_dir"] = nilIfEmpty(cwd)
+		rec["launch_dir"] = launchDirAtStart(ev, rec, cwd)
 	}
 	launch := S(rec, "launch_dir")
 	if launch == "" {
@@ -129,6 +133,21 @@ func touchSessionLocked(sid string, ev Event, fields Rec) (Rec, error) {
 		rec["repo"] = nilIfEmpty(RepoID(cwd))
 	}
 	return rec, WriteJSON(p, rec)
+}
+
+// launchDirAtStart is the launch directory a SessionStart records. startup and resume
+// start a harness process in a directory, and that directory is the session's
+// identity. compact and clear happen inside a process that is already running, and
+// Claude Code sends the Bash tool's current directory as their cwd: a session that ran
+// `cd` into an unbound directory and was then compacted re-recorded that directory and
+// lost its role. So those keep the directory already recorded. Any other source, or
+// none, takes the event's cwd as before.
+func launchDirAtStart(ev Event, rec Rec, cwd string) any {
+	source := S(ev, "source")
+	if kept := S(rec, "launch_dir"); kept != "" && (source == "compact" || source == "clear") {
+		return kept
+	}
+	return nilIfEmpty(cwd)
 }
 
 // InflightKey is the key PreToolUse writes and PostToolUse reads for one command:
