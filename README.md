@@ -29,6 +29,7 @@ Grouped by what they own. Each has its own README under `cmd/<tool>/`.
 | tool | what it does |
 |---|---|
 | [`fleet`](cmd/fleet/README.md) | the substrate for a team of agents: a hook that derives identity, liveness and leases from harness events; seats, assignment rows, receipts, role-addressed mail, one Go watcher for the board, headless polling, assignment/mail wakeups and recurring lead ticks |
+| [`passage`](cmd/passage/README.md) | design and light POC for selected work phases, evidence-bound handoffs and reopening; [Rooms/Fleet/Gate composition](docs/features/passage/spec.md) |
 | [`org`](cmd/org/README.md), [`org-mcp`](cmd/org-mcp/README.md) | editable Markdown role cards and an optional parent directory; register, read, list. Work, messaging and checkpoints need no Org lifecycle; old lifecycle callers are removed during cutover |
 | [`standup`](cmd/standup/README.md) | the record and the compiler behind the standup: an agenda derived from records, one `standup.v1` record the lead lane proposes, a confirm that only the operator's phrase can set, and an apply that turns cards into `fleet dispatch` rows and mail |
 | [`runway`](cmd/runway/README.md) | foreground execution-runtime controller: one admitted request at a time |
