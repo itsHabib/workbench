@@ -126,14 +126,17 @@ specific.
 
 **Rule 1. Location is identity.** A session's role is decided by the directory it was
 launched in. `roles.map` is plain text, one line per directory: `path tenant role [seat]`
-(`cmd/fleet/internal/fleet/lanes.go:107-138`). At SessionStart the hook records the launch
-directory once (`cmd/fleet/internal/fleet/session.go:96-98`) and resolves the role from it
-(`cmd/fleet/internal/fleet/session.go:103-115`). Two different match rules apply
+(`cmd/fleet/internal/fleet/lanes.go:107-138`). At a `startup` or `resume` SessionStart the
+hook records the launch directory (`cmd/fleet/internal/fleet/session.go:100-102`), and at
+every SessionStart it resolves the role from it (`cmd/fleet/internal/fleet/session.go:107-119`).
+A `compact` or `clear` SessionStart keeps the recorded launch directory, because Claude Code
+sends the shell's current directory as that event's cwd
+(`cmd/fleet/internal/fleet/session.go:138-151`). Two different match rules apply
 (`cmd/fleet/internal/fleet/lanes.go:143-167`): the **role** needs an exact path match, so
 an unlisted nested worktree has no role rather than borrowing its parent's; the **tenant**
 is the longest-prefix match, so it is inherited down a tree. A later `cd` does not change
 identity, because the role comes from `launch_dir`, not the event's cwd
-(`cmd/fleet/internal/fleet/session.go:91-102`). The hook also refuses a Bash `cd` or
+(`cmd/fleet/internal/fleet/session.go:94-106`). The hook also refuses a Bash `cd` or
 `pushd` into another session's bound directory before the shell runs it, because the next
 tool call there would lease that seat's branch (`cmd/fleet/internal/fleet/hook.go:381-410`).
 The session's own tree is read from `launch_dir` too, so a session whose shell stepped into
@@ -141,7 +144,7 @@ an unbound directory may `cd` back to its launch directory.
 
 **Rule 2. Runtime activity comes from hooks and process evidence.** Identity, branch, liveness, turn
 state and last assistant text are written by the hook from harness events
-(`cmd/fleet/internal/fleet/session.go:52-131`, `cmd/fleet/internal/fleet/hook.go:505-512`).
+(`cmd/fleet/internal/fleet/session.go:55-135`, `cmd/fleet/internal/fleet/hook.go:505-512`).
 Assignments, handoffs and receipts are authored records. A receipt can change a row to done;
 Fleet does not execute its claimed check or establish the checker's independence.
 No verb lets an agent set its own liveness directly. The one declared act is
@@ -191,17 +194,17 @@ The processes that write:
 | path | written by | holds | code |
 |---|---|---|---|
 | `$ORG_STATE/roles.map` | verb: `fleet role`, `fleet pool` | `path tenant role [seat]`, one line per bound directory | `cmd/fleet/internal/verbs/role.go:441-473` |
-| `sessions/<sid>.json` | hook (every event); the lease path writes a minimal one before a first lease | identity, launch dir, role, seat, lane, branch, pid and pid kind, turn state, last event, `last_writes` | `cmd/fleet/internal/fleet/session.go:52-131`, `cmd/fleet/internal/fleet/policy.go:488-496` |
-| `leases/<key>.json` | hook (first write, branch switch, seat occupancy at start, release at end); verbs `take`, `drop`, `revoke` | one holder per key | `cmd/fleet/internal/fleet/policy.go:399`, `cmd/fleet/internal/fleet/session.go:631-633`, `cmd/fleet/internal/fleet/lease.go:127-240`, `cmd/fleet/internal/verbs/keys.go:117-231` |
+| `sessions/<sid>.json` | hook (every event); the lease path writes a minimal one before a first lease | identity, launch dir, role, seat, lane, branch, pid and pid kind, turn state, last event, `last_writes` | `cmd/fleet/internal/fleet/session.go:55-135`, `cmd/fleet/internal/fleet/policy.go:488-496` |
+| `leases/<key>.json` | hook (first write, branch switch, seat occupancy at start, release at end); verbs `take`, `drop`, `revoke` | one holder per key | `cmd/fleet/internal/fleet/policy.go:399`, `cmd/fleet/internal/fleet/session.go:650-652`, `cmd/fleet/internal/fleet/lease.go:127-240`, `cmd/fleet/internal/verbs/keys.go:117-231` |
 | `keylocks/<key>.lock` | any process taking `KeyLock` | an empty file whose kernel lock serializes one key; never removed | `cmd/fleet/internal/fleet/lock.go:47-73` |
-| `stop/<key>.json` | verbs `stop`, `revoke`; removed by `resume`, by the hook once a revoke has reached the displaced session, or at SessionEnd of the session a revoke flag excepts | a stand-down flag on a branch, resource or mail address | `cmd/fleet/internal/verbs/keys.go:22-63`, `cmd/fleet/internal/fleet/session.go:143-157`, `cmd/fleet/internal/fleet/lease.go:239` |
+| `stop/<key>.json` | verbs `stop`, `revoke`; removed by `resume`, by the hook once a revoke has reached the displaced session, or at SessionEnd of the session a revoke flag excepts | a stand-down flag on a branch, resource or mail address | `cmd/fleet/internal/verbs/keys.go:22-63`, `cmd/fleet/internal/fleet/session.go:162-176`, `cmd/fleet/internal/fleet/lease.go:239` |
 | `dispatch/<repo>__<branch>__<rel>.json` | verbs `dispatch`, `reassign`, `undispatch`, `request` | the declared part of an ownership row | `cmd/fleet/internal/verbs/work.go:44-48`, `cmd/fleet/internal/verbs/work.go:150-157`, `cmd/fleet/internal/verbs/work.go:218-221` |
 | `assign/<seat>.json` | verb `assign` (and `dispatch --slot`); the SessionStart hook stamps `delivered_to` | what a seat's next session reads at start | `cmd/fleet/internal/verbs/views.go:873-875`, `cmd/fleet/internal/fleet/startup_continuity.go:44-47` |
 | `receipts/<sha>.<kind>.json` and `receipts/<head>.<kind>.jsonl` | verb `receipt` | latest verdict at a head, and every verdict at that head | `cmd/fleet/internal/verbs/receipts.go:93-129` |
 | `mail/.v2/<sha256 tenant>/<role or seat>/<sha256 address>/<id>.json` | verbs `send`, `ack`; watcher (delivery stamps and lateness reports) | one message, retained after acknowledgement | `cmd/fleet/internal/fleet/mail_address.go:12-19`, `cmd/fleet/internal/fleet/mail.go:145-180`, `cmd/fleet/internal/fleet/mail_store.go:193-252`, `cmd/fleet/internal/watch/late.go:106-120` |
 | `handoff/<key>.json` | verb `handoff <branch>` | the latest authored conclusion for a branch | `cmd/fleet/internal/verbs/keys.go:403-427` |
 | `role-handoff/<sha1>.json` | verb `handoff --role` | the latest authored conclusion for a tenant and role | `cmd/fleet/internal/fleet/startup_continuity.go:98-127` |
-| `last-word/<key>.json` | hook at Stop | the session's last assistant text on that branch | `cmd/fleet/internal/fleet/session.go:314-335` |
+| `last-word/<key>.json` | hook at Stop | the session's last assistant text on that branch | `cmd/fleet/internal/fleet/session.go:333-354` |
 | `inflight/`, `locks/` | hook (Bash PreToolUse writes, PostToolUse and SessionEnd remove) | a running command's start time; a running expensive rule | `cmd/fleet/internal/fleet/hook.go:453-487`, `cmd/fleet/internal/fleet/lease.go:233-240` |
 | `costs.jsonl`, `overrides.jsonl` | hook | measured command durations; accepted `FLEET_ALLOW_SLOW` overrides | `cmd/fleet/internal/fleet/hook.go:484`, `cmd/fleet/internal/fleet/policy.go:575` |
 | `events.jsonl` | hook | every evaluation's verdict and latency | `cmd/fleet/main.go:242-263` |
@@ -309,7 +312,7 @@ it (below).
   (`cmd/fleet/internal/fleet/policy.go:506-541`).
 - A **seat** is also a `slot:` key, but it is an occupancy lease the SessionStart hook
   writes for the session that starts in a pooled worktree
-  (`cmd/fleet/internal/fleet/session.go:588-645`). It cannot be taken or dropped by hand
+  (`cmd/fleet/internal/fleet/session.go:607-664`). It cannot be taken or dropped by hand
   (`cmd/fleet/internal/verbs/keys.go:126-128`, `cmd/fleet/internal/verbs/keys.go:203-205`).
 
 ### The decision: `CheckLease`
@@ -373,9 +376,9 @@ three exceptions elsewhere:
 
 - **Seat occupancy.** At SessionStart, `occupySlot` displaces the seat's previous occupant
   whenever `SessionAlive` of its record is false, and an unreadable record reads as nil,
-  which `SessionAlive` treats as dead (`cmd/fleet/internal/fleet/session.go:619-633`,
+  which `SessionAlive` treats as dead (`cmd/fleet/internal/fleet/session.go:638-652`,
   `cmd/fleet/internal/fleet/lease.go:252-255`). The code accepts this on purpose: a wrongly
-  displaced seat costs a seat, not a collision (`cmd/fleet/internal/fleet/session.go:592-596`).
+  displaced seat costs a seat, not a collision (`cmd/fleet/internal/fleet/session.go:611-615`).
 - **Delivery's presence check.** `sessionRecords` skips a record it cannot parse, so an
   unreadable session record does not count as present in its directory
   (`cmd/fleet/internal/watch/deliver.go:395-408`).
@@ -435,7 +438,7 @@ the lane's `requires`, and, for Bash, the cost gate
   `except` naming the new holder, so the displaced session is refused at its next tool call
   (`cmd/fleet/internal/verbs/keys.go:65-114`, `cmd/fleet/internal/fleet/lease.go:127-147`).
   The hook retires that flag once it has reached the displaced session
-  (`cmd/fleet/internal/fleet/session.go:143-157`).
+  (`cmd/fleet/internal/fleet/session.go:162-176`).
 - **Release at SessionEnd** frees branch leases and seat occupancy, but not resource leases:
   a session ending proves nothing about the machine it drove
   (`cmd/fleet/internal/fleet/lease.go:223-231`).
@@ -460,7 +463,7 @@ reproduce exactly this (`cmd/fleet/model/CRASH-REPLACEMENT.md:5-17`,
 against this particular schedule only because `CheckLease` never takes over a dead holder's
 resource automatically. A seat's occupancy lease is displaced automatically at SessionStart,
 so a seat is exposed the same way a branch is; `occupySlot` warns the new occupant that a
-process the old one left may still be writing (`cmd/fleet/internal/fleet/session.go:641-643`).
+process the old one left may still be writing (`cmd/fleet/internal/fleet/session.go:660-662`).
 
 ## 6. Rows, dispatch, receipts and `fleet done`
 
@@ -763,7 +766,7 @@ of the proof (`cmd/fleet/internal/provider/observe.go:10-11`).
 
 | # | process | durable write | code |
 |---|---|---|---|
-| 26 | hook (SessionStart) | `sessions/<sid>.json` with `launch_dir`, role and seat; the seat occupancy lease; `delivered_to` and `delivered_at` on `assign/repo-author-1.json`; a line in `events.jsonl` | `cmd/fleet/internal/fleet/session.go:52-131`, `cmd/fleet/internal/fleet/session.go:597-634`, `cmd/fleet/internal/fleet/startup_continuity.go:44-47`, `cmd/fleet/main.go:242-263` |
+| 26 | hook (SessionStart) | `sessions/<sid>.json` with `launch_dir`, role and seat; the seat occupancy lease; `delivered_to` and `delivered_at` on `assign/repo-author-1.json`; a line in `events.jsonl` | `cmd/fleet/internal/fleet/session.go:55-135`, `cmd/fleet/internal/fleet/session.go:616-653`, `cmd/fleet/internal/fleet/startup_continuity.go:44-47`, `cmd/fleet/main.go:242-263` |
 | 27 | hook (PreToolUse on the first write) | `leases/<branch key>.json` | `cmd/fleet/internal/fleet/policy.go:395-400` |
 | 28 | verb run by the agent | `acked_at` on each message it handled; a `handoff/` checkpoint; a receipt when it records one (any live session can; section 6) | `cmd/fleet/internal/fleet/mail.go:249-277`, `cmd/fleet/internal/verbs/keys.go:403-427`, `cmd/fleet/internal/verbs/receipts.go:108-129` |
 | 29 | hook (Stop, SessionEnd) | `turn_open: false`, `last-word/`; at SessionEnd `ended: true` and branch leases released | `cmd/fleet/internal/fleet/hook.go:505-524` |
@@ -1352,7 +1355,7 @@ Both directions are listed: docs behind the code, and docs ahead of it.
 | "The lock's kernel release on process death … `~/verify-windows.md` names the probe" | `cmd/fleet/model/CLAIMS.md:63-64` | Points at a file outside the repository; the probe cannot be followed from the tree |
 | the key prefix "is the only thing the substrate ever branches on, for one rule: what happens to a dead holder" | `cmd/fleet/internal/fleet/store.go:405-408` (comment) | The prefix also decides whether a key may be taken or dropped by hand (`cmd/fleet/internal/verbs/keys.go:118-120`, `cmd/fleet/internal/verbs/keys.go:196-198`) and whether SessionEnd releases it (`cmd/fleet/internal/fleet/lease.go:223-231`) |
 | `noSilentResourceTakeover`: "a resource never changes hands after a death without a takeover" | `cmd/fleet/model/README.md:49` | The invariant checks only that no `Silent` fact was recorded (`cmd/fleet/model/model/reference.qnt:151-154`); an unlabelled change of hands would pass it (section 9) |
-| "Unreadable evidence is never death." | `cmd/fleet/README.md:44` | True for `CheckLease`, `HeldByOther` and `fleet take`. Seat occupancy displaces an occupant whose record is unreadable (`cmd/fleet/internal/fleet/session.go:619-633`), and delivery's presence check skips unreadable records (`cmd/fleet/internal/watch/deliver.go:395-408`) |
+| "Unreadable evidence is never death." | `cmd/fleet/README.md:44` | True for `CheckLease`, `HeldByOther` and `fleet take`. Seat occupancy displaces an occupant whose record is unreadable (`cmd/fleet/internal/fleet/session.go:638-652`), and delivery's presence check skips unreadable records (`cmd/fleet/internal/watch/deliver.go:395-408`) |
 | "A recycled PID cannot keep an address occupied." | `docs/features/org-fleet-boundary/spec.md:103-104` | A pid reused by another user's process reads `unknown` and keeps the address reserved (`cmd/fleet/internal/watch/status.go:85-91`, `cmd/fleet/internal/fleet/platform_unix.go:23-26`, `cmd/fleet/internal/fleet/pid_alive_darwin.go`) |
 | "It is not a scheduler or a workflow engine" | `cmd/fleet/README.md:8-10` | The watcher package calls itself "Fleet's Go scheduler, delivery launcher and observer" (`cmd/fleet/internal/watch/watch.go:1`) and does schedule provider launches (section 8) |
 | `ReleaseSessionState` is in `session.go` | `cmd/fleet/model/SOURCE_MAP.md:25` | It is in `cmd/fleet/internal/fleet/lease.go:233-240` |
