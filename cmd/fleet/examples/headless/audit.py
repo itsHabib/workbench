@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import subprocess
 
+EDIT_TOOLS = ("Write", "Edit", "MultiEdit")
+
 
 def read(path):
     return json.loads(path.read_text())
@@ -22,28 +24,83 @@ def git(path, *args):
                                    timeout=30, env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull})
 
 
-def draft_continuity(root, draft, interruption, author_session):
-    """Observe ownership through recovery; the author may update its plan later."""
-    changes = []
+def traces(root):
+    """Each observed native trace with its attempt's launch time in milliseconds."""
     for trace in (root / "state/watch/delivery").glob("*.trace.jsonl"):
-        for line in trace.read_text().splitlines():
-            event = json.loads(line)
-            params = event.get("params", {})
-            item = params.get("item", {})
-            if event.get("method") != "item/completed" or item.get("type") != "fileChange":
-                continue
-            for change in item.get("changes", []):
-                if change.get("path") == str(draft):
-                    changes.append((event["emittedAtMs"], params.get("threadId"), change))
-    changes.sort(key=lambda row: row[0])
+        meta = Path(str(trace).removesuffix(".trace.jsonl") + ".meta.json")
+        launched = read(meta)["at"] * 1000 if meta.exists() else None
+        yield launched, [json.loads(line) for line in trace.read_text().splitlines()]
+
+
+def file_changes(event, draft, launched):
+    """(at_ms, session, kind, content_sha256) for a traced edit of draft, Codex or Claude."""
+    params = event.get("params", {})
+    item = params.get("item", {})
+    if event.get("method") == "item/completed" and item.get("type") == "fileChange":
+        for change in item.get("changes", []):
+            if change.get("path") == str(draft):
+                kind = change.get("kind", {}).get("type")
+                yield event["emittedAtMs"], params.get("threadId"), kind, hashlib.sha256(change.get("diff", "").encode()).hexdigest()
+    if event.get("type") != "assistant" or launched is None:
+        return
+    for block in event.get("message", {}).get("content", []):
+        tool = block.get("input", {}) if block.get("type") == "tool_use" and block.get("name") in EDIT_TOOLS else {}
+        if tool.get("file_path") == str(draft):
+            kind = "add" if block["name"] == "Write" else "update"
+            yield launched, event.get("session_id"), kind, hashlib.sha256(tool.get("content", "").encode()).hexdigest()
+
+
+def draft_continuity(root, draft, interruption, author_session):
+    """Observe ownership through recovery; the author may update its plan later.
+
+    Codex events carry emission times. Claude SDK messages do not, so a Claude
+    edit is placed at its attempt's launch: the draft's creating write belongs to
+    an attempt launched before the interruption, and every later edit to one
+    launched after the resume.
+    """
+    changes = sorted((row for launched, events in traces(root) for event in events
+                      for row in file_changes(event, draft, launched)), key=lambda row: row[0])
     if not changes:
         return False
-    first_at, first_session, first = changes[0]
-    created = hashlib.sha256(first.get("diff", "").encode()).hexdigest()
-    return (first.get("kind", {}).get("type") == "add" and created == interruption["draft_sha256"]
+    first_at, first_session, first_kind, created = changes[0]
+    return (first_kind == "add" and created == interruption["draft_sha256"]
             and first_session == author_session and first_at <= interruption["requested_at"] * 1000
             and all(at > interruption["resumed_at"] * 1000 and session == author_session
-                    and change.get("kind", {}).get("type") == "update" for at, session, change in changes[1:]))
+                    and kind in ("add", "update") for at, session, kind, _ in changes[1:]))
+
+
+def tool_inputs(event):
+    """The text of each observed tool invocation, Codex or Claude."""
+    item = event.get("params", {}).get("item", {})
+    if event.get("method") == "item/started" and item.get("type") in ("commandExecution", "fileChange"):
+        yield json.dumps(item.get("command") or item.get("changes"))
+    if event.get("type") == "assistant":
+        for block in event.get("message", {}).get("content", []):
+            if block.get("type") == "tool_use":
+                yield json.dumps(block.get("input"))
+
+
+def reference_reads(root, info):
+    """Observed tool inputs naming the source checkout's committed example task."""
+    sources = {str(Path(info["fleet_source"]) / info["task_path"]), str(Path(__file__).resolve().parent / "task")}
+    return sorted({text[:300] for _, events in traces(root) for event in events
+                   for text in tool_inputs(event) if any(source in text for source in sources)})
+
+
+def rooms_evidence(root, info, patch, receipts, head):
+    """Rooms applied the identical patch, succeeded, collected and cleaned up."""
+    out = Path(info["rooms"]["out"])
+    summary = read(out / "summary.json") if (out / "summary.json").exists() else {}
+    lifecycle = out / "lifecycle.ndjson"
+    events = [json.loads(line).get("event") for line in lifecycle.read_text().splitlines()] if lifecycle.exists() else []
+    matching = [r for r in receipts if r.get("head") == head and r.get("kind") == "rooms"]
+    latest = max(matching, key=lambda r: r["at"], default={})
+    checks = {"rooms_receipt": (latest.get("verdict") == "pass" and latest.get("dirty") is False
+                                and latest.get("cwd") == info["verifier"]["cwd"]),
+              "rooms_identical_patch": (summary.get("input_patch_sha256") == summary.get("returned_patch_sha256") == digest(patch)),
+              "rooms_succeeded": summary.get("cli_exit") == 0 and summary.get("command_status") == "succeeded" and summary.get("command_exit") == 0,
+              "rooms_collected": "collection_done" in events and "cleanup_done" in events}
+    return checks, {"receipt": latest, "summary": summary, "events": events}
 
 
 def audit(root):
@@ -93,7 +150,13 @@ def audit(root):
                                    and len(set(supervisor_sessions) - {None, interruption["provider_session"]}) > 0)
     for kind in ("implementation", "verify"):
         checks.setdefault(kind + "_provider_observed", False)
+    observed_reads = reference_reads(root, info)
+    checks["no_observed_reference_reads"] = not observed_reads
+    rooms = None
+    if info.get("rooms"):
+        rooms_checks, rooms = rooms_evidence(root, info, patch, receipts, head)
+        checks.update(rooms_checks)
     return {"status": "pass" if all(checks.values()) else "fail", "head": head,
-            "patch_sha256": digest(patch), "checks": checks, "receipts": evidence,
-            "supervisor_sessions": supervisor_sessions,
+            "patch_sha256": digest(patch), "checks": checks, "receipts": evidence, "rooms": rooms,
+            "supervisor_sessions": supervisor_sessions, "observed_reference_reads": observed_reads,
             "scope": "artifact audit only; no worker code is executed; test and semantic judgment belong to the independent verifier; no merge or isolation authority"}

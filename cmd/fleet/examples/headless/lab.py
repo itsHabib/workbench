@@ -18,6 +18,12 @@ REPO = HERE.parents[3]
 BASE = "92a706a7982a527ade967e43b68afd4bc1e5d667"
 TASK = "cmd/fleet/examples/headless/task"
 ROLES = ("supervisor", "author", "verifier")
+PROVIDERS = ("codex", "claude")
+# Claude runs without an OS sandbox here. Its tool surface, file-tool root and
+# permission rules bound it; Bash itself is unconfined. The README says so.
+CLAUDE_TOOLS = "Bash,Read,Write,Edit,Glob,Grep"
+CLAUDE_ALLOW = ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
+CLAUDE_DENY = ["Bash(git push:*)", "Bash(gh:*)", "Bash(curl:*)", "Bash(wget:*)", "Bash(limactl:*)", "WebFetch", "WebSearch"]
 
 
 def run(args, cwd, env=None, check=True):
@@ -35,12 +41,23 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def parent_session(name):
+    """A launching agent's own session variables never reach the lab's agents."""
+    return name == "CLAUDECODE" or (name.startswith("CLAUDE_") and name != "CLAUDE_CONFIG_DIR")
+
+
 def env_for(root):
-    return {**os.environ, "PATH": str(root / "bin") + os.pathsep + os.environ["PATH"],
-            "FLEET_STATE": str(root / "state"), "ORG_STATE": str(root / "org"),
-            "FLEET_LANES": str(root / "lanes"), "ORG_TENANT": "headless-lab",
-            "FLEET_WATCH": "off", "FLEET_GITHUB": "off", "FLEET_NOTIFY": "",
-            "PYTHONDONTWRITEBYTECODE": "1"}
+    inherited = {k: v for k, v in os.environ.items() if not parent_session(k)}
+    env = {**inherited, "PATH": str(root / "bin") + os.pathsep + os.environ["PATH"],
+           "FLEET_STATE": str(root / "state"), "ORG_STATE": str(root / "org"),
+           "FLEET_LANES": str(root / "lanes"), "ORG_TENANT": "headless-lab",
+           "FLEET_WATCH": "off", "FLEET_GITHUB": "off", "FLEET_NOTIFY": "",
+           "PYTHONDONTWRITEBYTECODE": "1"}
+    resolved = root / "resolved.json"
+    runtime = json.loads(resolved.read_text()).get("provider", {}).get("runtime_home") if resolved.exists() else None
+    if runtime:
+        env["FLEET_RUNTIME_HOME"] = runtime
+    return env
 
 
 def fleet(root, *args, cwd=None, check=True):
@@ -51,7 +68,7 @@ def write_json(path, value):
     path.write_text(json.dumps(value, indent=2) + "\n")
 
 
-def provider_wrapper(root, directories):
+def codex_wrapper(root, directories):
     real = shutil.which("codex")
     if not real:
         raise RuntimeError("authenticated Codex CLI is required; no installer is run")
@@ -76,8 +93,70 @@ def provider_wrapper(root, directories):
     wrapper.write_text("#!/usr/bin/env python3\nimport os,sys\n" +
                        "os.execv(" + repr(real) + ", " + repr([real, *args]) + " + sys.argv[1:])\n")
     wrapper.chmod(0o700)
-    return {"real_cli": real, "overrides": options, "wrapper_sha256": sha(wrapper),
+    return {"name": "codex", "real_cli": real, "overrides": options, "wrapper_sha256": sha(wrapper),
             "scope": "process-local CLI settings; normal auth and trusted hooks retained; no global config edit"}
+
+
+def claude_wrapper(root, directories, runtime_home):
+    real = shutil.which("claude")
+    if not real:
+        raise RuntimeError("an authenticated Claude Code CLI is required; no installer is run")
+    runtime = Path(runtime_home or os.environ.get("FLEET_RUNTIME_HOME") or Path.home() / ".local/share/fleet/runtime").resolve()
+    if not (runtime / "node_modules/@anthropic-ai/claude-agent-sdk/package.json").exists():
+        raise RuntimeError(f"the Claude Agent SDK is not installed under {runtime}; pass --runtime-home")
+    write_json(root / "mcp.json", {"mcpServers": {}})
+    # Appended after the SDK's own arguments, so these settings sources win.
+    args = ["--setting-sources", "project,local", "--strict-mcp-config", "--mcp-config", str(root / "mcp.json"), "--tools", CLAUDE_TOOLS]
+    wrapper = root / "bin/claude"
+    wrapper.write_text("#!/usr/bin/env python3\nimport os,sys\nos.environ['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '1'\n" +
+                       "os.execv(" + repr(real) + ", [" + repr(real) + ", *sys.argv[1:], *" + repr(args) + "])\n")
+    wrapper.chmod(0o700)
+    for directory in directories:
+        claude_settings(directory, root)
+    return {"name": "claude", "real_cli": real, "runtime_home": str(runtime), "arguments": args,
+            "wrapper_sha256": sha(wrapper), "allow": CLAUDE_ALLOW, "deny": CLAUDE_DENY, "file_tool_root": str(root),
+            "auto_memory": "disabled", "os_sandbox": "none; Bash is not confined to the lab",
+            "scope": "process-local CLI arguments and checkout-local settings; user settings, MCP and memory excluded; normal auth retained"}
+
+
+def claude_settings(checkout, root):
+    """Add the lab's Claude tool policy beside the hooks and denies Fleet projected."""
+    path = checkout / ".claude/settings.local.json"
+    settings = json.loads(path.read_text())
+    permissions = settings.setdefault("permissions", {})
+    permissions["allow"] = sorted(set(permissions.get("allow") or []) | set(CLAUDE_ALLOW))
+    permissions["deny"] = sorted(set(permissions.get("deny") or []) | set(CLAUDE_DENY))
+    permissions["additionalDirectories"] = [str(root)]
+    settings["autoMemoryEnabled"] = False
+    write_json(path, settings)
+
+
+def rooms_backend(root, host, binary, image, toolstore):
+    """Freeze a one-command Rooms entry point: rooms-run PATCH OUT. No VM is started."""
+    if not shutil.which("limactl"):
+        raise RuntimeError("limactl is required for the local Lima Rooms backend; no installer is run")
+    adapter = root / "bin/rooms-check.py"
+    shutil.copy2(HERE / "rooms-check.py", adapter)
+    fixed = ["--lima", host, "--rooms", binary, "--image", image, "--toolstore", toolstore]
+    cli = root / "bin/rooms-run"
+    cli.write_text("#!/usr/bin/env python3\n\"\"\"Run PATCH once in a cold Rooms room, collecting into OUT: rooms-run PATCH OUT\"\"\"\n"
+                   "import os,sys\nif len(sys.argv) != 3:\n    sys.exit('usage: rooms-run PATCH OUT')\n"
+                   "os.execv(sys.executable, [sys.executable, " + repr(str(adapter)) + ", *" + repr(fixed) +
+                   ", '--patch', sys.argv[1], '--out', sys.argv[2]])\n")
+    cli.chmod(0o700)
+    return {"cli": str(cli), "out": str(root / "result/rooms"), "host": host, "binary": binary, "image": image,
+            "toolstore": toolstore, "adapter_sha256": sha(adapter),
+            "scope": "executes only the frozen patch and supplied tests in a cold room; agents stay on the host"}
+
+
+def provider_preflight(root, provider, directories):
+    """Inspect configuration without a model turn."""
+    if provider == "codex":
+        return [fleet(root, "check", "supervisor:headless", check=False)]
+    checks = [run([root / "bin/claude", "--version"], root, env_for(root), check=False)]
+    for directory in directories:
+        checks.append(fleet(root, "inspect-hooks", "--config", directory / ".claude/settings.local.json", check=False))
+    return checks
 
 
 def toml_value(value):
@@ -86,7 +165,7 @@ def toml_value(value):
     return json.dumps(value)
 
 
-def prepare(destination, cards, fleet_source):
+def prepare(destination, cards, fleet_source, provider="codex", model=None, runtime_home=None, rooms=None):
     root = Path(destination).resolve() if destination else Path(tempfile.mkdtemp(prefix="headless-workbench-")).resolve()
     if destination:
         root.mkdir()
@@ -97,12 +176,15 @@ def prepare(destination, cards, fleet_source):
     build_source = Path(fleet_source).resolve() if fleet_source else REPO
     run(["go", "build", "-o", root / "bin/fleet", "./cmd/fleet"], build_source)
     repo, lead, verifier = (root / n for n in ("workbench", "workbench-lead", "workbench-verifier"))
-    run(["git", "clone", "--no-hardlinks", REPO, repo], root)
-    git(repo, "checkout", "--detach", BASE)
+    # Only BASE's history enters the lab: the source repository's other refs
+    # include this example's committed reference result.
+    run(["git", "init", "--quiet", repo], root)
+    git(repo, "fetch", "--quiet", "--no-tags", REPO, BASE)
+    git(repo, "checkout", "--quiet", "--detach", BASE)
     git(repo, "config", "user.name", "Headless Workbench lab")
     git(repo, "config", "user.email", "lab@example.invalid")
     # No publication endpoint. Rooms later receives a frozen base-relative patch.
-    git(repo, "remote", "set-url", "origin", str(repo))
+    git(repo, "remote", "add", "origin", str(repo))
     task = repo / TASK
     task.mkdir(parents=True)
     shutil.copy2(HERE / "task/test_report.py", task / "test_report.py")
@@ -135,7 +217,12 @@ def prepare(destination, cards, fleet_source):
     for path in (lead, author, verifier):
         (path / "RUN.md").symlink_to(root / "RUN.md")
         (path / "resolved.json").symlink_to(root / "resolved.json")
-    provider = provider_wrapper(root, (repo, lead, author, verifier))
+    if provider == "claude":
+        provider_info = claude_wrapper(root, (lead, author, verifier), runtime_home)
+    else:
+        provider_info = codex_wrapper(root, (repo, lead, author, verifier))
+    provider_info["model"] = model
+    backend = rooms_backend(root, *rooms) if rooms else None
     resolved = {"root": str(root), "base": BASE, "seed_head": seed,
                 "fleet_cli": str(root / "bin/fleet"), "fleet_source": str(build_source),
                 "fleet_source_head": git(build_source, "rev-parse", "HEAD"), "fleet_binary_sha256": sha(root / "bin/fleet"),
@@ -147,30 +234,45 @@ def prepare(destination, cards, fleet_source):
                 "supervisor": {"address": "supervisor:headless", "cwd": str(lead), "card": str(root / "lanes/supervisor/card.md")},
                 "author": {"address": "workbench-author-1", "cwd": str(author), "card": str(root / "lanes/author/card.md")},
                 "verifier": {"address": "verifier:headless", "cwd": str(verifier), "card": str(root / "lanes/verifier/card.md")},
-                "provider": provider}
+                "provider": provider_info, "rooms": backend}
     write_json(root / "resolved.json", resolved)
-    brief = f"""# Useful supervision without the desktop
+    (root / "RUN.md").write_text(run_brief(root, provider, backend))
+    delivery = {}
+    for key in ROLES:
+        target = {"cwd": resolved[key]["cwd"], "provider": provider}
+        if provider == "claude":
+            target.update(permission_mode="dontAsk")
+        if model:
+            target["model"] = model
+        delivery[resolved[key]["address"]] = target
+    delivery["supervisor:headless"].update(fresh=True, every="1h", prompt=f"Complete the local headless Workbench run in {root}/RUN.md. Read your role card and resolved.json, inspect existing Fleet work/mail/handoff and advance the authorized outcome. On the initial turn follow the deliberate interruption fixture; on later wakes recover existing work. Stop the addresses at completion.")
+    write_json(root / "state/deliver.json", delivery)
+    checks = provider_preflight(root, provider, (lead, author, verifier))
+    (root / "check.stdout").write_text("".join(c.stdout for c in checks))
+    (root / "check.stderr").write_text("".join(c.stderr for c in checks))
+    print((root / "check.stdout").read_text())
+    if any(c.returncode for c in checks):
+        raise RuntimeError(f"provider preflight failed; evidence retained in {root}")
 
-Lab root: {root}. Read resolved.json and your projected card. This is one authorized disposable local task: produce and independently verify a Python frozen-check readout and a patch against {BASE}. No network publication, installs, credential reads, grants, merges, or effects outside this lab. The Codex backend uses existing login; MCP, desktop tools, plugins and model subagents are disabled for these processes.
+
+def run_brief(root, provider, backend):
+    rooms = ""
+    if backend:
+        rooms = (f" After its local tests pass, the verifier runs the same exported patch once through `rooms_cli PATCH {backend['out']}`"
+                 " (rooms.cli in resolved.json), then records a separate rooms/pass or rooms/fail receipt at the same head from"
+                 " result.json, the returned patch hash and lifecycle collection/cleanup. The supervisor waits for both receipts.")
+    return f"""# Useful supervision without the desktop
+
+Lab root: {root}. Read resolved.json and your projected card. This is one authorized disposable local task: produce and independently verify a Python frozen-check readout and a patch against {BASE}. No network publication, installs, credential reads, grants, merges, or effects outside this lab. The {provider} backend uses existing login; MCP, desktop tools, plugins and model subagents are disabled for these processes.
 
 Role cards are ordinary prose. The author seat is workbench-author-1; the supervisor is supervisor:headless; verifier:headless is a separate process/checkout. Fleet watches and launches all three. Use the absolute fleet_cli from resolved.json for every Fleet command; a login shell can replace PATH. The outer fixture only prepared the lab, starts/stops the watcher, deliberately interrupts the supervisor after checkpoint and dirty author work, and resumes its address. Supervisor fresh=true starts a new provider conversation on each wake, so recovery relies on Fleet records and files. It supplies no answer or restated task after interruption.
 
-Supervisor dispatch: fleet dispatch task/readout --as implementation --for supervisor:headless --slot workbench-author-1 --brief 'Read RUN.md, resolved.json and the author card; implement the frozen observation readout through tests, a clean commit and implementation receipt.' Inspect existing rows before dispatch; recovery keeps the existing assignment. Initial supervisor writes `fleet handoff --role CONCLUSION NEXT` and control/supervisor-ready, then sleep 120 as the interruption fixture. Do not use sleep for normal peer coordination.
+Supervisor dispatch: fleet dispatch task/readout --as implementation --for supervisor:headless --slot workbench-author-1 --brief 'Read RUN.md, resolved.json and the author card; implement the frozen observation readout through tests, a clean commit and implementation receipt.' Inspect existing rows before dispatch; recovery keeps the existing assignment. Initial supervisor writes `fleet handoff --role CONCLUSION NEXT` and control/supervisor-ready, then runs `sleep 300` as one foreground command allowed more than five minutes; that is the interruption fixture. Do not use sleep for normal peer coordination.
 
-Author first writes task/PLAN.md and asks the supervisor about status-policy by mail; wait by ending the turn. The supervisor knows to preserve distinct observed labels, with empty checks unknown. Resume through Fleet mail; use stable IDs for retries. Verifier receives the author's full commit, fetches it from the author's local checkout, checks out detached in its own directory, tests and independently compares input/report, and emits verify/pass or fail at the exact clean head. Keep outputs/caches outside its checkout.
+Author first writes task/PLAN.md with its file-writing tool and asks the supervisor about status-policy by mail; wait by ending the turn. The supervisor knows to preserve distinct observed labels, with empty checks unknown. Resume through Fleet mail; use stable IDs for retries. When the author reports a head, the supervisor exports `git -C AUTHOR diff {BASE} HEAD` to {root}/result/worker.patch and sends the verifier the head, the author's checkout and the patch path and SHA-256. The verifier fetches the author's full commit from the author's local checkout, checks out detached in its own directory, confirms the patch equals its own `git diff {BASE} HEAD`, tests and independently compares input/report, and emits verify/pass or fail at the exact clean head. Keep outputs/caches outside its checkout.{rooms}
 
-Completion: supervisor checks real implementation and independent verify receipts, exports `git -C AUTHOR diff {BASE} HEAD` to {root}/result/worker.patch, writes result/ASSESSMENT.md with exact head and evidence, checkpoints, then stops all three addresses. Keep report/input/test source and finished commit on retries. No result is approval of any PR. Rooms verification is a separate subsequent execution of this same frozen patch, never proof that agents ran in a VM.
+Completion: supervisor checks real implementation and independent receipts at the exact head, writes result/ASSESSMENT.md with that head, the patch hash, the evidence and what remains unproven, checkpoints, then stops all three addresses. Keep report/input/test source and finished commit on retries. No result is approval of any PR. Rooms executes only the frozen patch and tests; it is never proof that agents ran in a VM.
 """
-    (root / "RUN.md").write_text(brief)
-    delivery = {resolved[key]["address"]: {"cwd": resolved[key]["cwd"], "provider": "codex"} for key in ("supervisor", "author", "verifier")}
-    delivery["supervisor:headless"].update(fresh=True, every="1h", prompt=f"Complete the local headless Workbench run in {root}/RUN.md. Read your role card and resolved.json, inspect existing Fleet work/mail/handoff and advance the authorized outcome. On the initial turn follow the deliberate interruption fixture; on later wakes recover existing work. Stop the addresses at completion.")
-    write_json(root / "state/deliver.json", delivery)
-    check = fleet(root, "check", "supervisor:headless", check=False)
-    (root / "check.stdout").write_text(check.stdout)
-    (root / "check.stderr").write_text(check.stderr)
-    print(check.stdout)
-    if check.returncode:
-        raise RuntimeError(f"provider preflight failed ({check.returncode}); evidence retained in {root}")
 
 
 def lab_root(value):
@@ -208,7 +310,7 @@ def card_projection(root, apply=False):
         print(json.dumps({"kind": kind, "source": str(source), "source_sha256": sha(source),
                           "imported_from": info.get("card_source"), "initial_sha256": info.get("initial_card_hashes", {}).get(kind),
                           "role": role, "slot": slot or None, "address": target["address"],
-                          "cwd": checkout, "provider": "codex", "projection_matches": before == expected,
+                          "cwd": checkout, "provider": info.get("provider", {}).get("name", "codex"), "projection_matches": before == expected,
                           "running_session_uptake": "not established; no restart or new turn requested"}))
         print("".join(difflib.unified_diff(before.splitlines(True), expected.splitlines(True),
                                          fromfile=str(config), tofile=str(source))), end="")
@@ -277,6 +379,8 @@ def operate(root, resume=False):
             if watcher.poll() is not None:
                 raise RuntimeError("watcher stopped unexpectedly")
             draft = root / "workbench-author-1" / TASK / "PLAN.md"
+            if phase == "inflight" and (root / "control/supervisor-ready").exists() and not draft.exists():
+                fixture_alive(root)
             if phase == "inflight" and (root / "control/supervisor-ready").exists() and draft.exists():
                 observed = json.loads(fleet(root, "watch", "status", "--json").stdout)
                 supervisor = next(w for w in observed["workers"] if w["address"] == "supervisor:headless")
@@ -331,6 +435,14 @@ def operate(root, resume=False):
         print(root, flush=True)
 
 
+def fixture_alive(root):
+    """An interruption fixture that already ended cannot demonstrate recovery."""
+    observed = json.loads(fleet(root, "watch", "status", "--json").stdout)
+    supervisor = next((w for w in observed["workers"] if w["address"] == "supervisor:headless"), {})
+    if supervisor.get("provider_terminal"):
+        raise RuntimeError("the supervisor's interruption fixture ended before the author draft existed; nothing was interrupted")
+
+
 def stop(root, requested=False):
     if requested:
         (root / "control/stop-requested").touch(exist_ok=True)
@@ -359,9 +471,14 @@ def main():
     parser.add_argument("root", nargs="?")
     parser.add_argument("--cards", help="source directory containing supervisor.md, author.md and verifier.md")
     parser.add_argument("--fleet-source", help="local Fleet source checkout to build; defaults to this repository")
+    parser.add_argument("--provider", choices=PROVIDERS, default="codex", help="provider for all three agents")
+    parser.add_argument("--model", help="provider model for all three agents; the provider default otherwise")
+    parser.add_argument("--runtime-home", help="directory whose node_modules holds the Claude Agent SDK (FLEET_RUNTIME_HOME)")
+    parser.add_argument("--rooms", nargs=4, metavar=("LIMA_HOST", "ROOMS", "IMAGE", "TOOLSTORE"),
+                        help="let the verifier run the patch in a cold room on this Lima host; paths are inside the host")
     args = parser.parse_args()
     if args.action == "prepare":
-        prepare(args.root, args.cards, args.fleet_source)
+        prepare(args.root, args.cards, args.fleet_source, args.provider, args.model, args.runtime_home, args.rooms)
         return
     if not args.root:
         parser.error("root is required")
