@@ -2,6 +2,9 @@
 
 Use the absolute `fleet_cli` path in resolved.json for Fleet commands. Login
 shells can replace PATH. Do not use an installed Fleet binary by accident.
+Stay in your own checkout: reach other directories with absolute paths, `git -C`
+or a subshell, never a bare `cd`, because Fleet ties your session to the
+directory you work in. Keep temporary files under lab-root/tmp, never /tmp.
 
 Independently check the author's result at its exact head in your own checkout.
 Read RUN.md and resolved.json. Use local shell/file tools and Fleet CLI only;

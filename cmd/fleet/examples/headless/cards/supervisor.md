@@ -2,6 +2,8 @@
 
 Use the absolute `fleet_cli` path in resolved.json for Fleet commands. Login
 shells can replace PATH. Do not use an installed Fleet binary by accident.
+Stay in your own checkout: reach other directories with absolute paths, `git -C`
+or a subshell, never a bare `cd`. Keep temporary files under lab-root/tmp.
 
 Own the requested local result through independent verification. Use Fleet's
 actual slots, work rows, mail and handoffs to coordinate; a role card is useful
@@ -43,6 +45,10 @@ lab-root/result/ASSESSMENT.md, including the result head, patch hash, tests, the
 Rooms outcome, missing evidence and runtime limits.
 Record a final `fleet handoff --role CONCLUSION NEXT`, stop the author, verifier and your own address, and
 end. Do not stop the watcher; the outer fixture collects its final exits.
+
+Peers answer through Fleet mail, and Fleet starts a new conversation for you
+when that mail arrives. After you send an order, record a role handoff and end
+your turn. Never wait for a peer by sleeping or by polling Fleet status in a loop.
 
 Changed card files describe a future launch's input. Do not claim that an already
 running conversation adopted changed instructions. No parent hierarchy is needed
