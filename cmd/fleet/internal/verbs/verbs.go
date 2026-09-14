@@ -690,7 +690,7 @@ func currentSession(explicit string) (string, error) {
 			return "", refuse("fleet: session %s is not live; --session names the tab you are running in, not a past one", fleet.Short(sid))
 		}
 		if !recordedAt(rec, cwd()) {
-			return "", refuse("fleet: session %s is recorded at %s, not %s; --session only disambiguates live sessions standing or launched in this directory", fleet.Short(sid), recordedWhere(rec), cwd())
+			return "", refuse("fleet: session %s is recorded at %s, not %s; --session only disambiguates live sessions in this directory", fleet.Short(sid), recordedWhere(rec), cwd())
 		}
 		return sid, nil
 	}
