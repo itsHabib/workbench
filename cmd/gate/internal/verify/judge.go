@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -78,6 +79,19 @@ const (
 	// JudgeProviderCodex selects the locally installed Codex CLI.
 	JudgeProviderCodex = "codex"
 )
+
+// DefaultClaudeJudgeModel is the model the Claude projection pins when the
+// caller names none. Unpinned, the CLI runs whatever the operator last chose
+// interactively: on 2026-09-13 that was a model this subscription reaches only
+// on extra-usage credits, and every -auto judgment failed with them at zero.
+// The alias tracks the strongest model the subscription login covers.
+const DefaultClaudeJudgeModel = "opus"
+
+// judgeModelPattern admits a model alias or id and nothing that could read as
+// another argument: a leading letter or digit can never be taken for a flag,
+// and there is no room for whitespace, '=', or the ';', ':' and brackets that
+// delimit the recorded producer identity.
+var judgeModelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 // JudgmentGrantV1 binds a judgment to the presented capability. The signature
 // stays in gate state; providers receive only the id and ceiling they must echo.
@@ -276,6 +290,29 @@ func judgmentProducerImpl(producer Producer) (string, error) {
 type judgeProviderInvocation struct {
 	name string
 	args []string
+	// model is the model gate pinned the provider to, or empty when the
+	// projection pins none. It is recorded, so it is never inferred from args.
+	model string
+}
+
+// label names the invocation the way an operator would retype the part that
+// varies: the provider and, where gate pins one, the model it ran.
+func (inv judgeProviderInvocation) label() string {
+	if inv.model == "" {
+		return inv.name
+	}
+	return inv.name + " --model " + inv.model
+}
+
+// identity names what gate itself ran — the provider, the resolved wrapper and
+// its digest, and the pinned model. None of it is the provider's to write; the
+// model's own claim follows it after the colon.
+func (inv judgeProviderInvocation) identity(provider string, executable judgeExecutable) string {
+	wrapper := fmt.Sprintf("%s@sha256:%s", filepath.Base(executable.path), executable.digest)
+	if inv.model == "" {
+		return fmt.Sprintf("%s-cli[%s]", provider, wrapper)
+	}
+	return fmt.Sprintf("%s-cli[%s;model=%s]", provider, wrapper, inv.model)
 }
 
 type judgeExecutable struct {
@@ -287,31 +324,64 @@ type judgeCommandFactory func(name string, args ...string) *exec.Cmd
 type judgeExecutableResolver func(name string) (judgeExecutable, error)
 
 // ValidateJudgeProvider restricts the advisory auto-judge to Gate's built-in
-// local CLI projections. Callers select a provider, never an executable.
-func ValidateJudgeProvider(provider string) error {
+// local CLI projections. Callers select a provider and, for Claude, the model
+// it is pinned to — never an executable or arguments. An empty model means the
+// projection's own pin.
+func ValidateJudgeProvider(provider, model string) error {
 	switch provider {
 	case "":
 		return fmt.Errorf("judge_provider_unconfigured: pass -provider %s|%s", JudgeProviderClaude, JudgeProviderCodex)
-	case JudgeProviderClaude, JudgeProviderCodex:
-		return nil
+	case JudgeProviderClaude:
+		return validateJudgeModel(model)
+	case JudgeProviderCodex:
+		return refuseCodexModel(model)
 	default:
 		return fmt.Errorf("judge_provider_unsupported: %q (want %s or %s)", provider, JudgeProviderClaude, JudgeProviderCodex)
 	}
 }
 
-func providerInvocation(provider string) (judgeProviderInvocation, error) {
-	if err := ValidateJudgeProvider(provider); err != nil {
+func validateJudgeModel(model string) error {
+	if model == "" || judgeModelPattern.MatchString(model) {
+		return nil
+	}
+	return fmt.Errorf("judge_model_invalid: %q is not a model alias or id "+
+		"(a letter or digit, then letters, digits, '.', '-' or '_'; at most 64)", model)
+}
+
+// refuseCodexModel keeps -model from being silently ignored. The Codex
+// projection already runs with --ignore-user-config, so it never inherits the
+// operator's interactive model and has nothing to pin.
+func refuseCodexModel(model string) error {
+	if model == "" {
+		return nil
+	}
+	return fmt.Errorf("judge_model_unsupported: -model pins the %s projection only; "+
+		"%s runs its built-in default with user config ignored", JudgeProviderClaude, JudgeProviderCodex)
+}
+
+func claudeJudgeModel(model string) string {
+	if model == "" {
+		return DefaultClaudeJudgeModel
+	}
+	return model
+}
+
+func providerInvocation(provider, model string) (judgeProviderInvocation, error) {
+	if err := ValidateJudgeProvider(provider, model); err != nil {
 		return judgeProviderInvocation{}, err
 	}
 	switch provider {
 	case JudgeProviderClaude:
+		pinned := claudeJudgeModel(model)
 		return judgeProviderInvocation{
 			name: "claude",
 			args: []string{
 				"-p",
 				"--safe-mode",
 				"--tools", "",
+				"--model", pinned,
 			},
+			model: pinned,
 		}, nil
 	case JudgeProviderCodex:
 		return judgeProviderInvocation{
@@ -339,10 +409,12 @@ func providerInvocation(provider string) (judgeProviderInvocation, error) {
 // The versioned request rides stdin and the artifact rides stdout, avoiding
 // command-line size limits and keeping the repository out of the provider's
 // working directory. Built-in tools and customizations are disabled, and only
-// a small runtime allowlist is inherited from Gate's environment. This is
-// still advisory same-user automation, not an independently custodied identity.
-func AutoJudge(provider string, request JudgmentRequestV1) (Verdict, error) {
-	if err := ValidateJudgeProvider(provider); err != nil {
+// a small runtime allowlist is inherited from Gate's environment. The model is
+// gate's to pin, never the operator's interactive default; an empty model is
+// the projection's own pin. This is still advisory same-user automation, not
+// an independently custodied identity.
+func AutoJudge(provider, model string, request JudgmentRequestV1) (Verdict, error) {
+	if err := ValidateJudgeProvider(provider, model); err != nil {
 		return Verdict{}, err
 	}
 	workDir, err := os.MkdirTemp("", "gate-judge-*")
@@ -352,6 +424,7 @@ func AutoJudge(provider string, request JudgmentRequestV1) (Verdict, error) {
 	defer os.RemoveAll(workDir)
 	return autoJudge(
 		provider,
+		model,
 		request,
 		workDir,
 		sanitizedJudgeEnvironment(os.Environ()),
@@ -361,14 +434,14 @@ func AutoJudge(provider string, request JudgmentRequestV1) (Verdict, error) {
 }
 
 func autoJudge(
-	provider string,
+	provider, model string,
 	request JudgmentRequestV1,
 	workDir string,
 	environment []string,
 	resolve judgeExecutableResolver,
 	command judgeCommandFactory,
 ) (Verdict, error) {
-	invocation, err := providerInvocation(provider)
+	invocation, err := providerInvocation(provider, model)
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -386,7 +459,7 @@ func autoJudge(
 	cmd.Stdin = bytes.NewReader(raw)
 	out, err := cmd.Output()
 	if err != nil {
-		return Verdict{}, providerFailure(provider, out, err)
+		return Verdict{}, providerFailure(invocation.label(), out, err)
 	}
 	artifact, err := DecodeJudgmentArtifact(bytes.NewReader(out))
 	if err != nil {
@@ -397,19 +470,13 @@ func autoJudge(
 		return Verdict{}, judgmentUnusable(provider, out, err)
 	}
 	verdict.Source = "auto-judgment"
-	verdict.Producer.Impl = fmt.Sprintf(
-		"%s-cli[%s@sha256:%s]:%s",
-		provider,
-		filepath.Base(executable.path),
-		executable.digest,
-		verdict.Producer.Impl,
-	)
+	verdict.Producer.Impl = invocation.identity(provider, executable) + ":" + verdict.Producer.Impl
 	// The delegate IS the decider on this path, so the recorded identity is the
-	// resolved wrapper and the model it reported — the same string the producer
-	// carries, which is the most specific thing gate can honestly name. The
-	// channel says the decision was delegated rather than taken by a person, so
-	// a later reader can separate the operator's own approvals from these
-	// without inferring it from an impl string's shape.
+	// resolved wrapper, the model gate pinned it to, and the model it reported —
+	// the same string the producer carries, which is the most specific thing
+	// gate can honestly name. The channel says the decision was delegated rather
+	// than taken by a person, so a later reader can separate the operator's own
+	// approvals from these without inferring it from an impl string's shape.
 	decider, err := NewDecider(verdict.Producer.Impl, MethodAuto+provider, time.Now)
 	if err != nil {
 		return Verdict{}, err
@@ -496,11 +563,12 @@ const (
 // failure on stdout — or exits non-zero saying nothing at all — used to surface
 // as a bare "judge_provider_failed:" with an empty body, which is impossible to
 // act on. The provider, its exit status, and whichever stream spoke are always
-// named.
-func providerFailure(provider string, stdout []byte, err error) error {
+// named — and so is the pinned model: "out of usage credits" means nothing
+// actionable until it says which model was out.
+func providerFailure(label string, stdout []byte, err error) error {
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) {
-		return fmt.Errorf("judge_provider_failed: %s: %w", provider, err)
+		return fmt.Errorf("judge_provider_failed: %s: %w", label, err)
 	}
 	detail := providerDetail(exit.Stderr)
 	if detail == "" {
@@ -509,7 +577,7 @@ func providerFailure(provider string, stdout []byte, err error) error {
 	if detail == "" {
 		detail = "no diagnostic output on stderr or stdout"
 	}
-	return fmt.Errorf("judge_provider_failed: %s exited %d: %s", provider, exit.ExitCode(), detail)
+	return fmt.Errorf("judge_provider_failed: %s exited %d: %s", label, exit.ExitCode(), detail)
 }
 
 func providerDetail(stream []byte) string {

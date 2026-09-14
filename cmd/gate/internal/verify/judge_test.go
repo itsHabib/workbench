@@ -228,56 +228,93 @@ func TestValidateJudgmentGovernsProducerClass(t *testing.T) {
 
 func TestAutoJudgeRequiresExplicitProvider(t *testing.T) {
 	request, _ := judgmentFixture()
-	_, err := AutoJudge("", request)
+	_, err := AutoJudge("", "", request)
 	if err == nil || !strings.Contains(err.Error(), "judge_provider_unconfigured") {
 		t.Fatalf("error = %v, want actionable unconfigured-provider refusal", err)
 	}
 }
 
+// The argument vectors are pinned whole. The Claude one carries --model on
+// every path: without it the CLI runs the operator's interactive default, and
+// on 2026-09-13 that default needed extra-usage credits the subscription did
+// not have, so every -auto judgment failed. The Codex one pins no model
+// because --ignore-user-config already keeps the operator's out of it.
 func TestProviderInvocationUsesOnlyBuiltInCLIs(t *testing.T) {
+	codexArgs := []string{
+		"exec",
+		"--ephemeral",
+		"--sandbox", "read-only",
+		"--skip-git-repo-check",
+		"--ignore-user-config",
+		"--ignore-rules",
+		"--disable", "shell_tool",
+		"--disable", "multi_agent",
+		"-c", `forced_login_method="chatgpt"`,
+		"-c", `service_tier="flex"`,
+		"-c", `web_search="disabled"`,
+		"-",
+	}
 	cases := []struct {
-		provider string
-		name     string
-		args     []string
+		label     string
+		provider  string
+		model     string
+		name      string
+		args      []string
+		wantModel string
 	}{
 		{
-			provider: JudgeProviderClaude,
-			name:     "claude",
-			args: []string{
-				"-p",
-				"--safe-mode",
-				"--tools", "",
-			},
+			label:     "claude pins opus by default",
+			provider:  JudgeProviderClaude,
+			name:      "claude",
+			args:      []string{"-p", "--safe-mode", "--tools", "", "--model", "opus"},
+			wantModel: "opus",
 		},
 		{
+			label:     "claude honours an explicit model",
+			provider:  JudgeProviderClaude,
+			model:     "sonnet",
+			name:      "claude",
+			args:      []string{"-p", "--safe-mode", "--tools", "", "--model", "sonnet"},
+			wantModel: "sonnet",
+		},
+		{
+			label:     "claude takes a full model id",
+			provider:  JudgeProviderClaude,
+			model:     "claude-opus-5",
+			name:      "claude",
+			args:      []string{"-p", "--safe-mode", "--tools", "", "--model", "claude-opus-5"},
+			wantModel: "claude-opus-5",
+		},
+		{
+			label:    "codex pins nothing",
 			provider: JudgeProviderCodex,
 			name:     "codex",
-			args: []string{
-				"exec",
-				"--ephemeral",
-				"--sandbox", "read-only",
-				"--skip-git-repo-check",
-				"--ignore-user-config",
-				"--ignore-rules",
-				"--disable", "shell_tool",
-				"--disable", "multi_agent",
-				"-c", `forced_login_method="chatgpt"`,
-				"-c", `service_tier="flex"`,
-				"-c", `web_search="disabled"`,
-				"-",
-			},
+			args:     codexArgs,
 		},
 	}
 	for _, tc := range cases {
-		t.Run(tc.provider, func(t *testing.T) {
-			got, err := providerInvocation(tc.provider)
+		t.Run(tc.label, func(t *testing.T) {
+			got, err := providerInvocation(tc.provider, tc.model)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.name != tc.name || !slices.Equal(got.args, tc.args) {
-				t.Fatalf("invocation = %s %v, want %s %v", got.name, got.args, tc.name, tc.args)
+			if got.name != tc.name || !slices.Equal(got.args, tc.args) || got.model != tc.wantModel {
+				t.Fatalf("invocation = %s %v (model %q), want %s %v (model %q)",
+					got.name, got.args, got.model, tc.name, tc.args, tc.wantModel)
 			}
 		})
+	}
+}
+
+// The default is a named constant callers can print, and it is the model the
+// projection actually passes — the two cannot drift apart.
+func TestClaudeDefaultModelIsTheOnePinned(t *testing.T) {
+	got, err := providerInvocation(JudgeProviderClaude, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if DefaultClaudeJudgeModel != "opus" || got.model != DefaultClaudeJudgeModel {
+		t.Fatalf("default model = %q pinned %q, want opus pinned", DefaultClaudeJudgeModel, got.model)
 	}
 }
 
@@ -289,21 +326,64 @@ func TestProviderInvocationRefusesCallerSelectedExecutable(t *testing.T) {
 		"other",
 		" codex ",
 	} {
-		if _, err := providerInvocation(provider); err == nil || !strings.Contains(err.Error(), "judge_provider_unsupported") {
+		if _, err := providerInvocation(provider, ""); err == nil || !strings.Contains(err.Error(), "judge_provider_unsupported") {
 			t.Fatalf("provider %q error = %v, want unsupported refusal", provider, err)
 		}
 	}
 }
 
+// A model is one argument value, never a way back into the argument vector:
+// nothing that could parse as a flag, carry a second argument, or blur the
+// recorded identity's delimiters gets through.
+func TestProviderInvocationRefusesAModelThatIsNotAModel(t *testing.T) {
+	for _, model := range []string{
+		"--tools=default",
+		"-x",
+		"opus --tools default",
+		" opus",
+		"opus\n",
+		"opus=1",
+		"claude:opus",
+		"opus[1m]",
+		"opus;rm",
+		"../opus",
+		strings.Repeat("a", 65),
+	} {
+		_, err := providerInvocation(JudgeProviderClaude, model)
+		if err == nil || !strings.Contains(err.Error(), "judge_model_invalid") {
+			t.Fatalf("model %q error = %v, want judge_model_invalid", model, err)
+		}
+	}
+}
+
+// -model with codex is refused, not ignored: a flag that silently does nothing
+// would let an operator believe they had pinned a model they had not.
+func TestProviderInvocationRefusesAModelForCodex(t *testing.T) {
+	_, err := providerInvocation(JudgeProviderCodex, "sonnet")
+	if err == nil || !strings.Contains(err.Error(), "judge_model_unsupported") {
+		t.Fatalf("error = %v, want judge_model_unsupported", err)
+	}
+}
+
 func TestAutoJudgeRunsBuiltInProviderAndRecordsIt(t *testing.T) {
-	for _, provider := range []string{JudgeProviderClaude, JudgeProviderCodex} {
-		t.Run(provider, func(t *testing.T) {
+	cases := []struct {
+		provider string
+		model    string
+		pinned   string // what the recorded identity must name
+	}{
+		{JudgeProviderClaude, "", ";model=opus"},
+		{JudgeProviderClaude, "sonnet", ";model=sonnet"},
+		{JudgeProviderCodex, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.provider+"/"+tc.model, func(t *testing.T) {
 			request, _ := judgmentFixture()
 			var gotName string
 			var gotArgs []string
 			factory := judgeHelperFactory(t, &gotName, &gotArgs)
 			got, err := autoJudge(
-				provider,
+				tc.provider,
+				tc.model,
 				request,
 				t.TempDir(),
 				judgeHelperEnvironment(t, ""),
@@ -313,7 +393,7 @@ func TestAutoJudgeRunsBuiltInProviderAndRecordsIt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want, err := providerInvocation(provider)
+			want, err := providerInvocation(tc.provider, tc.model)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -321,9 +401,14 @@ func TestAutoJudgeRunsBuiltInProviderAndRecordsIt(t *testing.T) {
 			if gotName != wantPath || !slices.Equal(gotArgs, want.args) {
 				t.Fatalf("executed %s %v, want %s %v", gotName, gotArgs, wantPath, want.args)
 			}
-			wantProducer := provider + "-cli[" + want.name + "@sha256:" + strings.Repeat("a", 64) + "]:fixture-model"
+			wantProducer := tc.provider + "-cli[" + want.name + "@sha256:" + strings.Repeat("a", 64) + tc.pinned + "]:fixture-model"
 			if got.Source != "auto-judgment" || got.Producer.Impl != wantProducer {
-				t.Fatalf("provider provenance = source %q impl %q", got.Source, got.Producer.Impl)
+				t.Fatalf("provider provenance = source %q impl %q, want %q", got.Source, got.Producer.Impl, wantProducer)
+			}
+			// The decider is the audit's answer to "which model decided", so the
+			// pin must reach it, not only the producer.
+			if got.Decider == nil || got.Decider.Who != wantProducer || got.Decider.Method != MethodAuto+tc.provider {
+				t.Fatalf("decider = %+v, want who %q via %s", got.Decider, wantProducer, MethodAuto+tc.provider)
 			}
 		})
 	}
@@ -334,6 +419,7 @@ func TestAutoJudgeRefusesMalformedProviderOutput(t *testing.T) {
 	factory := judgeHelperFactory(t, nil, nil)
 	_, err := autoJudge(
 		JudgeProviderCodex,
+		"",
 		request,
 		t.TempDir(),
 		judgeHelperEnvironment(t, "malformed"),
@@ -357,6 +443,7 @@ func TestAutoJudgeRefusalNamesProviderEmissionAndEscape(t *testing.T) {
 			request, _ := judgmentFixture()
 			_, err := autoJudge(
 				provider,
+				"",
 				request,
 				t.TempDir(),
 				judgeHelperEnvironment(t, "verdict-shaped"),
@@ -389,7 +476,7 @@ func TestAutoJudgeRefusalNamesProviderEmissionAndEscape(t *testing.T) {
 func TestOtherJudgeProviderCrossesToTheIndependentPath(t *testing.T) {
 	for _, provider := range []string{JudgeProviderClaude, JudgeProviderCodex} {
 		other := otherJudgeProvider(provider)
-		if other == provider || ValidateJudgeProvider(other) != nil {
+		if other == provider || ValidateJudgeProvider(other, "") != nil {
 			t.Fatalf("otherJudgeProvider(%q) = %q, want the other supported provider", provider, other)
 		}
 	}
@@ -413,6 +500,7 @@ func TestAutoJudgeReportsProviderFailure(t *testing.T) {
 			factory := judgeHelperFactory(t, nil, nil)
 			_, err := autoJudge(
 				JudgeProviderCodex,
+				"",
 				request,
 				t.TempDir(),
 				judgeHelperEnvironment(t, tc.mode),
@@ -426,6 +514,36 @@ func TestAutoJudgeReportsProviderFailure(t *testing.T) {
 				if !strings.Contains(err.Error(), want) {
 					t.Fatalf("error = %v, want it to name %q", err, want)
 				}
+			}
+		})
+	}
+}
+
+// The 2026-09-13 failure, as the operator should have read it: the CLI's own
+// "out of usage credits" diagnostic is only actionable once the error says
+// which model gate pinned — which is also the flag to change.
+func TestAutoJudgeProviderFailureNamesThePinnedModel(t *testing.T) {
+	cases := []struct {
+		model string
+		want  string
+	}{
+		{"", "judge_provider_failed: claude --model opus exited 28: You're out of usage credits"},
+		{"sonnet", "judge_provider_failed: claude --model sonnet exited 28: You're out of usage credits"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.want, func(t *testing.T) {
+			request, _ := judgmentFixture()
+			_, err := autoJudge(
+				JudgeProviderClaude,
+				tc.model,
+				request,
+				t.TempDir(),
+				judgeHelperEnvironment(t, "out-of-credits"),
+				fakeJudgeResolver,
+				judgeHelperFactory(t, nil, nil),
+			)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
 			}
 		})
 	}
@@ -780,6 +898,9 @@ func TestJudgeProviderHelper(_ *testing.T) {
 		os.Exit(26)
 	case "silent-failed":
 		os.Exit(27)
+	case "out-of-credits":
+		fmt.Fprint(os.Stderr, "You're out of usage credits. Switch to another model to continue.")
+		os.Exit(28)
 	}
 	var request JudgmentRequestV1
 	if err := json.NewDecoder(os.Stdin).Decode(&request); err != nil {

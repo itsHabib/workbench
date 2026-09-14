@@ -142,7 +142,8 @@ export GATE_STATE=~/dev/gate/state                           # -state/-key defau
 ./gate.exe judge -run run_... -grant grt_... -decision pass -why "..."
 ./gate.exe judge -run run_... -grant grt_... -judgment judgment.json
 ./gate.exe judge -run run_... -grant grt_... -auto -provider codex
-./gate.exe judge -run run_... -grant grt_... -auto -provider claude
+./gate.exe judge -run run_... -grant grt_... -auto -provider claude   # pinned to --model opus
+./gate.exe judge -run run_... -grant grt_... -auto -provider claude -model sonnet
 ./gate.exe resolve -escalation esc_... -grant grt_... -decision pass -why "..." -who NAME
 ./gate.exe executor prepare-request -repo owner/repo -pr 181 -head <sha> -grant grt_... -decision pass -why "..." -replay evt_... -out preparation.json
 ./gate.exe executor request -action act_... -repo owner/repo -pr 181 -head <sha> -question "..." -replay evt_... -out request.json
@@ -332,7 +333,7 @@ PATH or `-floor`). `judge -auto` has no implicit provider: it refuses unless
 Gate has two built-in local CLI projections:
 
 ```text
-claude -> claude -p --safe-mode --tools ""
+claude -> claude -p --safe-mode --tools "" --model opus
 codex  -> codex exec --ephemeral --sandbox read-only --skip-git-repo-check
           --ignore-user-config --ignore-rules --disable shell_tool
           --disable multi_agent -c forced_login_method="chatgpt"
@@ -340,7 +341,31 @@ codex  -> codex exec --ephemeral --sandbox read-only --skip-git-repo-check
           -c web_search="disabled" -
 ```
 
-The caller selects the provider name, never an executable or argument vector.
+The Claude projection always pins its model, so the judge never inherits the
+operator's interactive CLI default (`"model"` in `~/.claude/settings.json`). On
+2026-09-13 that default was a model the subscription reaches only on
+extra-usage credits. With those at zero, every `-auto` judgment failed with
+`judge_provider_failed: claude exited 1: You're out of usage credits`. The pin
+defaults to the `opus` alias, the strongest model the subscription login
+covers. `-model` overrides it:
+
+```sh
+gate judge -run run_... -grant grt_... -auto -provider claude -model sonnet
+```
+
+`-model` takes one alias or model id: a letter or digit, then letters, digits,
+`.`, `-` or `_`, at most 64 characters. Gate passes it as the value of
+`--model`, so it can never become another argument. Gate reads it only from the
+flag and does not add `ANTHROPIC_MODEL` to the environment allowlist. `-model`
+with `-provider codex` is refused (`judge_model_unsupported`) rather than
+ignored. The Codex projection already runs with `--ignore-user-config`, so it
+never inherits the operator's model. A failing Claude provider names the pinned
+model (`judge_provider_failed: claude --model opus exited 1: ...`), which is also
+the flag to change. The route to the independent provider after an unusable
+judgment drops `-model`.
+
+The caller selects the provider name, and for Claude a model value, never an
+executable or argument vector.
 Gate resolves that fixed CLI name to an absolute path, hashes the resolved file
 into producer provenance, and runs it from a fresh temporary working directory.
 It disables the agent's tools and customizations and gives the process a
@@ -411,10 +436,15 @@ long provider call authorizes no state mutation.
 A later `capability_refused` action remains audit history but does not complete
 the persisted judgment chain; a replacement live grant may still append the
 single authorized outcome.
-The selected CLI provider, resolved wrapper filename, and SHA-256 digest are
-prefixed into the stored producer provenance. The model implementation remains
-provider-reported. PATH and the saved-login/config locations remain same-user
-dependencies, so this local path is advisory automation under the same
+The selected CLI provider, resolved wrapper filename, SHA-256 digest, and, for
+Claude, the pinned model are prefixed into the stored producer provenance and
+the decider identity:
+`claude-cli[<wrapper>@sha256:<digest>;model=opus]:<provider-reported model>`,
+where `<wrapper>` is the basename of the resolved executable (`claude.exe` for
+a Homebrew install). The bracketed part is what Gate ran: `model=` is the alias
+Gate passed, which the CLI resolves. The text after the colon is the provider's
+own claim, which Gate cannot verify. PATH and the saved-login/config locations
+remain same-user dependencies, so this local path is advisory automation under the same
 operating-system identity as Gate—not independently custodied security
 authority. Enforcement-grade judgment requires a separately controlled
 executor identity.

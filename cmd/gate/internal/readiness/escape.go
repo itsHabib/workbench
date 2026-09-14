@@ -101,6 +101,8 @@ var selfGatedCodes = []string{
 	"judgment_malformed_escalation",
 	"judge_provider_unconfigured",
 	"judge_provider_unsupported",
+	"judge_model_invalid",
+	"judge_model_unsupported",
 }
 
 var knownCodes = []string{
