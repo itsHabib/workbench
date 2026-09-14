@@ -789,3 +789,13 @@ The exact fix is a Fleet read verb that prints a path's repository id (the
 hash is Fleet's to compute, not a second implementation here); `fleet slots
 --json` prints the basename only. Until then the cost is one refusal in the
 fresh-seat, same-basename case, and the refusal text says what clears it.
+
+## Fleet: board and work states still read `turn_open`, not branch activity
+
+Branch leases now block only a holder active on the branch (`FLEET_IDLE_S`,
+`fleet.HolderState`), and `fleet leases` shows an idle holder as `idle <age>
+(next writer takes it)`. `fleet board`, `fleet work` and `fleet sessions` still
+derive busy/working/idle from `turn_open` and liveness, so a session that left
+its turn open when it ran out of usage reads `busy` or `working` there while its
+branch is takeable. Fold `fleet.HolderState` into those views when they are next
+touched; the lease decision does not depend on them.

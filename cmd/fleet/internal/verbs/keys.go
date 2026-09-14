@@ -305,15 +305,8 @@ func cmdLeases() error {
 			rows = append(rows, row{3, fmt.Sprintf("MALFORMED  %s  (refused on every verb until an operator removes it)", p)})
 			continue
 		}
-		alive := fleet.SessionAlive(fleet.ReadJSON(fleet.Path("sessions", fleet.S(r, "session")+".json")))
 		res := fleet.S(r, "kind") == "resource"
-		live := "live"
-		if !alive {
-			live = "DEAD holder"
-			if res {
-				live = "orphaned"
-			}
-		}
+		live := leaseHolder(r)
 		what := fleet.S(r, "key")
 		kind := "resource"
 		pri := 0
@@ -336,6 +329,25 @@ func cmdLeases() error {
 		say("%s", r.line)
 	}
 	return nil
+}
+
+// leaseHolder is a lease's holder as `fleet leases` shows it: live; idle, a branch the
+// next writer takes over; DEAD holder; orphaned, a dead holder's resource; or unknown,
+// a record that cannot be read and is therefore never read as death.
+func leaseHolder(lease fleet.Rec) string {
+	key := fleet.S(lease, "key")
+	state, holder := fleet.HolderState(key, lease)
+	switch state {
+	case fleet.HeldLive:
+		return "live"
+	case fleet.HeldIdle:
+		return "idle " + fleet.FmtAge(fleet.Now()-fleet.LastActiveOn(holder, lease, key)) + " (next writer takes it)"
+	case fleet.HeldOrphaned:
+		return "orphaned"
+	case fleet.HeldUnknown:
+		return "UNKNOWN holder"
+	}
+	return "DEAD holder"
 }
 
 func cmdDecide(kind, subject, text string) error {

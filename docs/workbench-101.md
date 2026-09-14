@@ -846,7 +846,8 @@ decides, the other executes, and they meet at a JSON seam, never an import.
   a harness hook (exit 0 allow / 2 deny, injecting `[fleet]` context lines), the
   operator CLI, an MCP surface, and the `fleet watch` Go watcher that owns
   headless polling and launches. One holder per key (branch leases, machine
-  slots), role/seat mail, authored handoffs, exact-head receipts (`fleet done`
+  slots; a branch lease blocks only a holder active on it, and a quiet holder's
+  branch passes to the next writer on the record), role/seat mail, authored handoffs, exact-head receipts (`fleet done`
   answers from receipts and nothing else - a message saying "done" is not
   done). State is JSON/JSONL under `~/.fleet`, temp-then-rename, no server;
   exit codes are a load-bearing seam here too (`verified`,

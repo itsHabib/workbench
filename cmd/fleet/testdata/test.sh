@@ -186,6 +186,23 @@ run "New session claims the released branch"                                0 "$
 import json,sys; p=sys.argv[1]; r=json.load(open(p)); r['pid']=999999; r['pid_kind']='harness'; json.dump(r,open(p,'w'))
 PY
 run "Holder's harness pid is dead → lease taken over, not denied"          0 "$(tool PreToolUse $S1 $WT Edit t15 "{\"file_path\":\"$WT/a.ts\"}")"
+# 2026-09-13: Codex sessions out of usage held five lanes' branches because the desktop app's pid still
+# answered. A live process is not a live writer. The holder's pid answers here (this shell), but it has
+# shown no activity on the branch past FLEET_IDLE_S: the next writer takes the branch, the lease records
+# who took it from whom and why, and the displaced session is told at its next prompt — no operator revoke.
+S1I=local_1d1e1d1e
+"$PY" - "$FLEET_STATE/sessions/$S1.json" "$(ls "$FLEET_STATE/leases"/*__feat__y.json | head -1)" "$$" <<'PY'
+import json,sys,time
+s,l,pid=sys.argv[1],sys.argv[2],int(sys.argv[3]); old=time.time()-7200
+r=json.load(open(s)); r.update(pid=pid, pid_kind='harness', last_event_at=old, turn_open=True); r.pop('last_writes',None); r.pop('last_write',None); json.dump(r,open(s,'w'))
+x=json.load(open(l)); x['since']=old; json.dump(x,open(l,'w'))
+PY
+run "an idle holder (pid answers, no activity on the branch past FLEET_IDLE_S) → the next writer takes it" 0 "$(tool PreToolUse $S1I $WT Edit t15i "{\"file_path\":\"$WT/a.ts\"}")"
+"$PY" -c "import json,sys; x=json.load(open(sys.argv[1])); t=x.get('takeover') or {}; sys.exit(0 if x['session']==sys.argv[2] and t.get('from')==sys.argv[3] and t.get('why')=='idle' else 1)" "$(ls "$FLEET_STATE/leases"/*__feat__y.json | head -1)" "$S1I" "$S1" && echo "  ok    the lease records the idle takeover: who took it, from whom, why" || { echo "  FAIL  idle takeover not on the lease: $(cat "$FLEET_STATE/leases"/*__feat__y.json)"; fails=$((fails+1)); }
+out=$(printf '%s' "$(ev hook_event_name=UserPromptSubmit session_id=$S1 cwd=$WT prompt=hi)" | "$PY" "$H")
+case "$out" in *"was taken from you"*) echo "  ok    the displaced holder is told at its next prompt, with no operator command";; *) echo "  FAIL  displaced holder not told: $out"; fails=$((fails+1));; esac
+err=$(printf '%s' "$(tool PreToolUse $S1 $WT Edit t15j "{\"file_path\":\"$WT/a.ts\"}")" | "$PY" "$H" 2>&1 >/dev/null); rc=$?
+case "$rc:$err" in 2:*"operator"*) echo "  FAIL  a branch refusal sends a routine handover to the operator: $err"; fails=$((fails+1));; 2:*"was taken from you"*) echo "  ok    its next write is refused while the taker is active, naming the takeover";; *) echo "  FAIL  displaced holder's write: rc=$rc $err"; fails=$((fails+1));; esac
 run "Detached / no repo: no branch, no lease, allowed"                      0 "$(tool PreToolUse $S3 $WORK Bash t16 '{"command":"git push"}')"
 run "Garbage on stdin → fail-open (exit 0, error logged)"                   0 "not json"
 # Defect 8: tier.json was not on the install list, so `fleet tier` could not answer from the first
