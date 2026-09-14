@@ -159,8 +159,7 @@ or state store. A hierarchy is useful only when a concrete multi-project
 responsibility/navigation problem appears. Reuse optional Org prose/parent
 relationships then; no inherited permission or mandatory communication routing.
 
-The earlier desktop recovery comparison in `../recovery/AGENT-TRIAL.md` found no
-material Fleet advantage. This headless workload tests a different missing
+The [earlier desktop recovery comparison](https://github.com/itsHabib/workbench/blob/b8e99094eee6587a7f2e511cd22db30b7a0ab56b/cmd/fleet/examples/recovery/AGENT-TRIAL.md) found no material Fleet advantage. This headless workload tests a different missing
 service: scheduling and continuity without desktop task controls. It is not a
 measured speed or cost comparison against that earlier run.
 

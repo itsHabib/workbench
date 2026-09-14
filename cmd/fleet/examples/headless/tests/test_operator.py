@@ -51,6 +51,15 @@ class OperatorTest(unittest.TestCase):
         lab.write_json(path, {"what": "delivery-exited", "exit_code": 130})
         self.assertTrue(lab.exits_collected(self.root))
 
+    def test_missing_or_mismatched_provider_state_is_unknown(self):
+        attempt = str(self.root / "state/watch/delivery/attempt")
+        lab.write_json(Path(attempt + ".meta.json"), {"attempt": attempt, "provider": "codex", "state_file": attempt + ".state.json"})
+        with self.assertRaises(FileNotFoundError):
+            lab.states(self.root)
+        lab.write_json(Path(attempt + ".state.json"), {"attempt": "another", "provider": "codex", "provider_terminal": True})
+        with self.assertRaises(RuntimeError):
+            lab.states(self.root)
+
     def test_uncertain_watcher_does_not_project(self):
         lab.write_json(self.root / "resolved.json", {})
         result = type("Result", (), {"stdout": '{"watcher":"stale"}'})()
