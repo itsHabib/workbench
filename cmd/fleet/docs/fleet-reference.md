@@ -262,7 +262,7 @@ closed instead. On the lease path every error is a refusal
 read is reported as a malformed flag, and a malformed flag still stands the session down
 (`cmd/fleet/internal/fleet/lease.go:10-26`, `cmd/fleet/internal/fleet/policy.go:266-287`).
 The hook also spawns nothing except at SessionStart, where it may walk `ps` to find the
-harness pid (`cmd/fleet/internal/fleet/platform_unix.go:42-54`) and may revive a dead
+harness pid (`cmd/fleet/internal/fleet/platform_unix.go:32-44`) and may revive a dead
 watcher (`cmd/fleet/main.go:81-92`).
 
 **What each event does** (`cmd/fleet/internal/fleet/hook.go:52-65`):
@@ -362,7 +362,7 @@ inside `KeyLock` (`cmd/fleet/internal/fleet/policy.go:307-310`).
 
 The harness pid is found at SessionStart by walking `ps` up to ten parents looking for a
 process named like `claude`, `codex`, `node` or `electron`
-(`cmd/fleet/internal/fleet/platform_unix.go:38-54`). If the walk fails, or on Windows
+(`cmd/fleet/internal/fleet/platform_unix.go:28-44`). If the walk fails, or on Windows
 always, the record says `parent-unverified`
 (`cmd/fleet/internal/fleet/platform_windows.go:67-71`).
 
@@ -377,12 +377,16 @@ three exceptions elsewhere:
 - **Delivery's presence check.** `sessionRecords` skips a record it cannot parse, so an
   unreadable session record does not count as present in its directory
   (`cmd/fleet/internal/watch/deliver.go:395-408`).
-- **The pid.** On Unix, `PidAlive` reads any `kill(pid, 0)` error as dead, including `EPERM`
-  (a live process owned by another user), for parity with the Python reference
-  (`cmd/fleet/internal/fleet/platform_unix.go:23-31`). The watcher uses a stricter
-  `PidGone`, which reports absence only on `ESRCH`
-  (`cmd/fleet/internal/fleet/platform_unix.go:33-36`). In a single-user store this does not
-  arise.
+- **The pid.** On Unix other than macOS, `PidAlive` reads any `kill(pid, 0)` error as dead,
+  including `EPERM` (a live process owned by another user), for parity with the Python
+  reference (`cmd/fleet/internal/fleet/pid_alive_unix.go`). On macOS a tool sandbox can deny
+  signal zero against the agent's own live harness, so an `EPERM` there is resolved by a
+  read-only `kern.proc.pid` query: the exact pid, owned by this user, reads alive; another
+  user's process still reads dead (`cmd/fleet/internal/fleet/pid_alive_darwin.go`). The
+  Python mirror in `testdata/xlib.py` keeps the older every-error-is-dead rule. The watcher
+  uses a stricter `PidGone`, which reports absence only on `ESRCH`
+  (`cmd/fleet/internal/fleet/platform_unix.go:23-26`). In a single-user store the cross-user
+  case does not arise.
 
 ### Where the hook applies it
 
@@ -1344,7 +1348,7 @@ Both directions are listed: docs behind the code, and docs ahead of it.
 | the key prefix "is the only thing the substrate ever branches on, for one rule: what happens to a dead holder" | `cmd/fleet/internal/fleet/store.go:405-408` (comment) | The prefix also decides whether a key may be taken or dropped by hand (`cmd/fleet/internal/verbs/keys.go:118-120`, `cmd/fleet/internal/verbs/keys.go:196-198`) and whether SessionEnd releases it (`cmd/fleet/internal/fleet/lease.go:223-231`) |
 | `noSilentResourceTakeover`: "a resource never changes hands after a death without a takeover" | `cmd/fleet/model/README.md:49` | The invariant checks only that no `Silent` fact was recorded (`cmd/fleet/model/model/reference.qnt:151-154`); an unlabelled change of hands would pass it (section 9) |
 | "Unreadable evidence is never death." | `cmd/fleet/README.md:44` | True for `CheckLease`, `HeldByOther` and `fleet take`. Seat occupancy displaces an occupant whose record is unreadable (`cmd/fleet/internal/fleet/session.go:619-633`), and delivery's presence check skips unreadable records (`cmd/fleet/internal/watch/deliver.go:395-408`) |
-| "A recycled PID cannot keep an address occupied." | `docs/features/org-fleet-boundary/spec.md:103-104` | A pid reused by another user's process reads `unknown` and keeps the address reserved (`cmd/fleet/internal/watch/status.go:85-91`, `cmd/fleet/internal/fleet/platform_unix.go:23-36`) |
+| "A recycled PID cannot keep an address occupied." | `docs/features/org-fleet-boundary/spec.md:103-104` | A pid reused by another user's process reads `unknown` and keeps the address reserved (`cmd/fleet/internal/watch/status.go:85-91`, `cmd/fleet/internal/fleet/platform_unix.go:23-26`, `cmd/fleet/internal/fleet/pid_alive_darwin.go`) |
 | "It is not a scheduler or a workflow engine" | `cmd/fleet/README.md:8-10` | The watcher package calls itself "Fleet's Go scheduler, delivery launcher and observer" (`cmd/fleet/internal/watch/watch.go:1`) and does schedule provider launches (section 8) |
 | `ReleaseSessionState` is in `session.go` | `cmd/fleet/model/SOURCE_MAP.md:25` | It is in `cmd/fleet/internal/fleet/lease.go:233-240` |
 | the stuck `starting` launch record | no doc | Undocumented. #310's `headless.md` said a crash around process start "requires inspection rather than guessing"; #318 removed that sentence. Section 11 records the gap |
