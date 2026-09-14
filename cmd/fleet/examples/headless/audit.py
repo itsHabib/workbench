@@ -53,9 +53,9 @@ def audit(root):
     head = git(author, "rev-parse", "HEAD").decode().strip()
     checks = {}
     checks["new_result"] = head != info["seed_head"]
-    checks["author_clean"] = not git(author, "status", "--porcelain").strip()
-    checks["verifier_clean_same_head"] = (not git(verifier, "status", "--porcelain").strip()
-                                          and git(verifier, "rev-parse", "HEAD").decode().strip() == head)
+    # git status may run a repository's clean filters. Cleanliness is the
+    # independent receipt's observation; this outer reader does not recompute it.
+    checks["verifier_same_head"] = git(verifier, "rev-parse", "HEAD").decode().strip() == head
     patch = root / "result/worker.patch"
     checks["patch_matches_result"] = patch.read_bytes() == git(author, "diff", info["base"], head)
     task = author / info["task_path"]
