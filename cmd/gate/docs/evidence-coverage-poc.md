@@ -26,12 +26,13 @@ command name into a required executable blob. These diagnostics do not resolve
 findings. Packet completeness reports mechanical coverage, not a favorable
 judgment.
 
-Complete supplemental source is bounded at 512 KiB across the run. The existing
-256 KiB per-file limit, UTF-8/NUL checks, Git blob verification, exact subject
+The initial implementation used separate 512 KiB supplemental-source, 256 KiB
+required-diff and 64 KiB additional-review allowances. They now share the same
+832 KiB capacity; see [shared evidence capacity](shared-evidence-budget.md).
+The 256 KiB per-file limit, UTF-8/NUL checks, Git blob verification, exact subject
 binding, 32-path limit, three-supplement limit, and atomic audit append remain.
-The separate required-diff budget stays 256 KiB. Each review section stays
-bounded at 64 KiB; counting an already rendered review does not consume the
-second section's budget again. A failed collection appends no partial evidence.
+Counting an already rendered review does not consume capacity again. A failed
+collection appends no partial evidence.
 
 ## Offline replay
 
@@ -62,7 +63,7 @@ precise findings, ambiguous names, explicit binary anchors, exact-path
 precedence, atomic overflow refusal, invalid text, and oversized individual
 files. Existing subject, expiry, terminal-run, and race checks remain exercised.
 
-After a separately authorized installation, the owner can inspect the same
+Using a reviewed binary within the assigned repair, the owner can inspect the same
 parked run with `gate packet -run RUN -state STATE`, collect the remaining
 required paths with `gate evidence -run RUN -grant EXISTING_GRANT -state STATE`,
 and inspect the packet again. Existing judgment still uses that run and its

@@ -20,6 +20,17 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
 )
 
+func TestCandidateEvidenceIDMatchesStoreWidth(t *testing.T) {
+	e := testEnv(t)
+	a, err := e.st.Append(state.KindEvidence, state.NewRunID(), nil, map[string]string{"fixture": "ID width"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.ID) != len(candidateEvidenceID) {
+		t.Fatalf("candidate header width %d differs from stored evidence ID width %d", len(candidateEvidenceID), len(a.ID))
+	}
+}
+
 func TestPacketCLI(t *testing.T) {
 	if os.Getenv("GATE_PACKET_HELPER") == "1" {
 		os.Args = append([]string{"gate"}, os.Args[3:]...)
@@ -120,16 +131,16 @@ func TestEvidenceRepairBounds(t *testing.T) {
 func TestEvidenceRepairAggregateOverflowRecordsNothingPartial(t *testing.T) {
 	e, subject, grant, run, _ := packetCLIFixture(t)
 	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
-	index := func(string, string) ([]string, error) { return []string{"first", "second", "overflow"}, nil }
+	index := func(string, string) ([]string, error) { return []string{"first", "second", "third", "overflow"}, nil }
 	read := func(_, _, path string) (string, string, error) {
-		length := 215 * 1024 // Each complete text file remains below 256 KiB.
+		length := 250 * 1024 // Each complete text file remains below 256 KiB.
 		if path == "overflow" {
 			length = 100 * 1024
 		}
 		return strings.Repeat("x", length), "fixture-blob-" + path, nil
 	}
-	if _, err := supplementEvidence(e, run, grant, []string{"first", "second"}, head, read, index); err != nil {
-		t.Fatalf("430 KiB aggregate was rejected: %v", err)
+	if _, err := supplementEvidence(e, run, grant, []string{"first", "second", "third"}, head, read, index); err != nil {
+		t.Fatalf("750 KiB aggregate was rejected: %v", err)
 	}
 	before, err := e.st.Run(run)
 	if err != nil {
@@ -141,6 +152,76 @@ func TestEvidenceRepairAggregateOverflowRecordsNothingPartial(t *testing.T) {
 	after, err := e.st.Run(run)
 	if err != nil || len(after) != len(before) {
 		t.Fatalf("failed supplement wrote partial evidence: %d -> %d: %v", len(before), len(after), err)
+	}
+}
+
+func TestEvidenceRepairIncludesReviewsInAtomicBudget(t *testing.T) {
+	e, subject, grant, run, _ := packetCLIFixture(t)
+	_, err := e.st.Append(state.KindEvidence, run, nil, map[string]any{
+		"comments": []map[string]any{{"is_bot": true, "body": strings.Repeat("unresolved finding ", 12000)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
+	index := func(string, string) ([]string, error) { return []string{"first", "second", "third"}, nil }
+	read := func(_, _, path string) (string, string, error) {
+		return strings.Repeat("x", 230*1024), "fixture-blob-" + path, nil
+	}
+	before, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = supplementEvidence(e, run, grant, []string{"first", "second", "third"}, head, read, index)
+	if err == nil || !strings.Contains(err.Error(), "evidence_budget_exceeded") {
+		t.Fatalf("source-only admission hid review overflow: %v", err)
+	}
+	after, err := e.st.Run(run)
+	if err != nil || len(after) != len(before) {
+		t.Fatalf("shared-budget rejection appended evidence: %d -> %d: %v", len(before), len(after), err)
+	}
+}
+
+func TestEvidenceRepairConcurrentSharedBudget(t *testing.T) {
+	e, subject, grant, run, _ := packetCLIFixture(t)
+	_, err := e.st.Append(state.KindEvidence, run, nil, map[string]any{
+		"comments": []map[string]any{{"is_bot": true, "body": strings.Repeat("unresolved finding ", 12000)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
+	index := func(string, string) ([]string, error) { return []string{"a1", "a2", "b1", "b2"}, nil }
+	var ready sync.WaitGroup
+	ready.Add(2)
+	read := func(_, _, path string) (string, string, error) {
+		if strings.HasSuffix(path, "1") {
+			ready.Done()
+			ready.Wait()
+		}
+		return strings.Repeat("x", 190*1024), "fixture-blob-" + path, nil
+	}
+	results := make(chan error, 2)
+	for _, paths := range [][]string{{"a1", "a2"}, {"b1", "b2"}} {
+		go func() {
+			_, err := supplementEvidence(e, run, grant, paths, head, read, index)
+			results <- err
+		}()
+	}
+	passed, rejected := 0, 0
+	for i := 0; i < 2; i++ {
+		err := <-results
+		if err == nil {
+			passed++
+			continue
+		}
+		if !strings.Contains(err.Error(), "evidence_budget_exceeded") {
+			t.Fatalf("unexpected concurrent failure: %v", err)
+		}
+		rejected++
+	}
+	if passed != 1 || rejected != 1 {
+		t.Fatalf("shared capacity admitted twice: passed=%d rejected=%d", passed, rejected)
 	}
 }
 
@@ -285,5 +366,194 @@ func TestEvidenceRepairBareTokenStaysSatisfiable(t *testing.T) {
 	p, err := verify.JudgmentPacket(arts, subject)
 	if err != nil || !p.Complete {
 		t.Fatalf("bare token left the packet unsatisfiable: %v %v %v", p.Missing, p.RequiredSources, err)
+	}
+}
+
+func parkedPacketRun(t *testing.T, evidenceBody map[string]any) (env, verify.Subject, string, string) {
+	t.Helper()
+	e := testEnv(t)
+	subject := verify.Subject{Repo: "o/r", Number: 7, HeadSHA: strings.Repeat("a", 40)}
+	grant, err := capability.Mint(e.st, e.keyPath, subject.Repo, "merge", "T2", 1, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	if _, err := e.st.Append(state.KindEvidence, run, nil, evidenceBody); err != nil {
+		t.Fatal(err)
+	}
+	v := reducedVerdict(subject, verify.DecisionEscalate, "T0")
+	id := recordReduced(t, e, run, v)
+	if _, code, err := act(e, run, grant.ID, v, id, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park %d %v", code, err)
+	}
+	return e, subject, grant.ID, run
+}
+
+func runPacket(t *testing.T, e env, run string, subject verify.Subject) (verify.Packet, int) {
+	t.Helper()
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := verify.JudgmentPacket(arts, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p, len(arts)
+}
+
+func largeDiff(path string, pairs int) string {
+	var body strings.Builder
+	for i := 0; i < pairs; i++ {
+		fmt.Fprintf(&body, "-old line %06d %s\n+new line %06d %s\n", i, strings.Repeat("o", 40), i, strings.Repeat("n", 40))
+	}
+	return fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1,%d +1,%d @@\n", path, path, path, path, pairs, pairs) + body.String()
+}
+
+// A supplement that fits the source/review share must still not push a
+// rendered required diff out of a complete packet: the run would then need
+// source that no longer fits and could never reach judgment.
+func TestEvidenceRepairRefusesDisplacingCompletePacket(t *testing.T) {
+	body := map[string]any{"diff": largeDiff("q.go", 2000), "comments": []map[string]any{{"is_bot": true, "body": "Bug at `q.go:1`"}}}
+	e, subject, grant, run := parkedPacketRun(t, body)
+	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
+	index := func(string, string) ([]string, error) { return []string{"q.go", "c1", "c2", "c3"}, nil }
+	read := func(_, _, path string) (string, string, error) {
+		return strings.Repeat("c", 250*1024), "blob-" + path, nil
+	}
+	before, n := runPacket(t, e, run, subject)
+	if !before.Complete {
+		t.Fatalf("fixture must start complete: %v", before.Missing)
+	}
+	if _, err := supplementEvidence(e, run, grant, []string{"c1", "c2", "c3"}, head, read, index); err == nil || !strings.Contains(err.Error(), "evidence_budget_exceeded") {
+		t.Fatalf("displacing supplement admitted: %v", err)
+	}
+	after, m := runPacket(t, e, run, subject)
+	if !after.Complete || m != n {
+		t.Fatalf("refused supplement changed the run: complete=%v artifacts %d -> %d", after.Complete, n, m)
+	}
+	if _, err := supplementEvidence(e, run, grant, []string{"c1"}, head, read, index); err != nil {
+		t.Fatalf("companion that keeps the packet complete was refused: %v", err)
+	}
+}
+
+// Two collectors that race on the same required path both see it missing. The
+// duplicate copy must not consume capacity a required diff still needs.
+func TestEvidenceRepairConcurrentDuplicateKeepsPacketComplete(t *testing.T) {
+	review := "Bug at `r.go:1`; also compare `docs/p.md`. " + strings.Repeat("z", 300000)
+	body := map[string]any{"diff": largeDiff("r.go", 2000), "comments": []map[string]any{{"is_bot": true, "body": review}}}
+	e, subject, grant, run := parkedPacketRun(t, body)
+	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
+	index := func(string, string) ([]string, error) { return []string{"docs/p.md", "r.go"}, nil }
+	var ready sync.WaitGroup
+	ready.Add(2)
+	read := func(_, _, path string) (string, string, error) {
+		if path == "docs/p.md" {
+			ready.Done()
+			ready.Wait()
+			return strings.Repeat("p", 200*1024), "blob-p", nil
+		}
+		return strings.Repeat("r", 150*1024), "blob-r", nil
+	}
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, err := supplementEvidence(e, run, grant, nil, head, read, index)
+			results <- err
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		if err := <-results; err != nil {
+			t.Fatalf("concurrent collector: %v", err)
+		}
+	}
+	p, _ := runPacket(t, e, run, subject)
+	if !p.Complete || strings.Count(p.Context, "## Exact-head source docs/p.md") != 1 {
+		t.Fatalf("duplicate collection stranded the packet: complete=%v missing=%v", p.Complete, p.Missing)
+	}
+}
+
+func TestEvidenceRepairSkipsCollectedPaths(t *testing.T) {
+	e, subject, grant, run, _ := packetCLIFixture(t)
+	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
+	read := func(_, _, path string) (string, string, error) { return "text", "blob-" + path, nil }
+	if _, err := supplementEvidence(e, run, grant, []string{"docs/companion.md"}, head, read, packetTestIndex); err != nil {
+		t.Fatal(err)
+	}
+	id, err := supplementEvidence(e, run, grant, []string{"docs/companion.md"}, head, read, packetTestIndex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range arts {
+		var s verify.SourceEvidence
+		if a.ID != id || json.Unmarshal(a.Body, &s) != nil {
+			continue
+		}
+		if len(s.Sources) != 0 {
+			t.Fatalf("already collected path copied again: %+v", s.Sources)
+		}
+		return
+	}
+	t.Fatal("second supplement not recorded")
+}
+
+// A packet whose only gap is the file index is complete once this supplement's
+// index is recorded, so its sources must not displace a rendered diff either.
+func TestEvidenceRepairRefusesDisplacingIndexOnlyGap(t *testing.T) {
+	body := map[string]any{"diff": largeDiff("q.go", 2000), "comments": []map[string]any{{"is_bot": true, "body": "Bug at `q.go:1`; see `docs/gone.md:5`"}}}
+	e, subject, grant, run := parkedPacketRun(t, body)
+	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
+	index := func(string, string) ([]string, error) { return []string{"q.go", "c1", "c2", "c3"}, nil }
+	read := func(_, _, path string) (string, string, error) {
+		return strings.Repeat("c", 250*1024), "blob-" + path, nil
+	}
+	before, n := runPacket(t, e, run, subject)
+	if before.Complete || strings.Join(before.Missing, " ") != "exact-head file index unavailable; run gate evidence to discover real companion paths" {
+		t.Fatalf("fixture must be missing only the index: %v", before.Missing)
+	}
+	if _, err := supplementEvidence(e, run, grant, []string{"c1", "c2", "c3"}, head, read, index); err == nil || !strings.Contains(err.Error(), "evidence_budget_exceeded") {
+		t.Fatalf("displacing supplement admitted behind an index-only gap: %v", err)
+	}
+	if _, m := runPacket(t, e, run, subject); m != n {
+		t.Fatalf("refused supplement changed the run: %d -> %d artifacts", n, m)
+	}
+	if _, err := supplementEvidence(e, run, grant, nil, head, read, index); err != nil {
+		t.Fatalf("index-only repair refused: %v", err)
+	}
+	if after, _ := runPacket(t, e, run, subject); !after.Complete {
+		t.Fatalf("index-only repair left the packet incomplete: %v", after.Missing)
+	}
+}
+
+// While a packet is incomplete, collected source may push a rendered diff out:
+// that diff's own smaller source then repairs it.
+func TestEvidenceRepairLetsSourceDisplaceDiffWhileIncomplete(t *testing.T) {
+	body := map[string]any{"diff": largeDiff("q.go", 5500), "comments": []map[string]any{{"is_bot": true, "body": "Bug at `q.go:1` and `a.go:1`"}}}
+	e, subject, grant, run := parkedPacketRun(t, body)
+	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
+	index := func(string, string) ([]string, error) { return []string{"q.go", "a.go"}, nil }
+	read := func(_, _, path string) (string, string, error) {
+		if path == "q.go" {
+			return strings.Repeat("q", 50*1024), "blob-q", nil
+		}
+		return strings.Repeat("a", 250*1024), "blob-a", nil
+	}
+	if _, err := supplementEvidence(e, run, grant, nil, head, read, index); err != nil {
+		t.Fatalf("required source refused while incomplete: %v", err)
+	}
+	p, _ := runPacket(t, e, run, subject)
+	if p.Complete || strings.Join(p.RequiredSources, ",") != "q.go" {
+		t.Fatalf("expected the displaced diff to request its source: %v %v", p.Missing, p.RequiredSources)
+	}
+	if _, err := supplementEvidence(e, run, grant, nil, head, read, index); err != nil {
+		t.Fatalf("smaller replacement source refused: %v", err)
+	}
+	if p, _ = runPacket(t, e, run, subject); !p.Complete {
+		t.Fatalf("displaced diff not repaired by its source: %v", p.Missing)
 	}
 }

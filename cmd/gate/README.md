@@ -107,11 +107,21 @@ never proof a file is absent. It fetches regular text files directly from GitHub
 at that full head SHA, verifies their Git blob hashes, and appends the index and
 content to the run. With explicit `-path docs/guide.md -path docs/companion.md`,
 it collects only those paths alongside the index; values are preserved exactly.
-It rechecks the live PR head and grant, allows at most three supplements and
-512 KiB of source across the run, and accepts at most 32 source paths per call.
+It rechecks the live PR head and grant, allows at most three supplements, and
+accepts at most 32 source paths per call.
 Each individual file is still limited to 256 KiB of verified regular UTF-8 text.
-The required-diff and required-review sections have separate 256 KiB and 64 KiB
-budgets; already included reviews do not consume the second budget again.
+Complete supplemental source, additional required reviews and required diff
+sections share an 832 KiB budget, including rendered headers and quoting.
+This pools their former 512 + 64 + 256 KiB allowances. Already included reviews
+do not consume the shared budget again. Full required reviews and collected
+source take priority; a diff section that does not fit requests exact-head source.
+The collector checks source and review capacity again under the append lock, so
+an impossible supplement records no partial evidence. A recorded file renders
+and counts once, the collector skips paths the run already holds, and a
+supplement that would leave a complete packet incomplete is refused. Packet JSON reports
+`evidence_budget_exceeded` when required source or review entries cannot fit.
+The existing initial history and recorded-diff sections remain separate; 832 KiB
+is not a limit on the entire context. See [shared evidence capacity](docs/shared-evidence-budget.md).
 Exceeding a coverage bound reports missing evidence before provider invocation.
 It does not load arbitrary local source or give author comments review authority.
 Unchanged companion files can be supplied this way; supply exact repository

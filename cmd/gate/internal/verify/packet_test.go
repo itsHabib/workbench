@@ -46,7 +46,7 @@ func TestPacketReportsAmbiguousHintWithoutRequiringEveryCandidate(t *testing.T) 
 
 func TestPacketBudgetAndExactHeadRepair(t *testing.T) {
 	subject := Subject{Repo: "o/r", Number: 1, HeadSHA: "head"}
-	diff := "diff --git a/large.md b/large.md\n--- a/large.md\n+++ b/large.md\n@@ -1 +1 @@\n-" + strings.Repeat("x", SourceBudget) + "\n+small replacement\n"
+	diff := "diff --git a/large.md b/large.md\n--- a/large.md\n+++ b/large.md\n@@ -1 +1 @@\n-" + strings.Repeat("x", RequiredEvidenceBudget) + "\n+small replacement\n"
 	arts := []state.Artifact{packetArtifact(t, SourceEvidence{Subject: subject, IndexComplete: true, FileIndex: []string{"large.md", "other.md"}}), packetArtifact(t, map[string]any{"diff": diff, "comments": []map[string]any{{"is_bot": true, "body": "Check `large.md:1` and `other.md:1`"}}})}
 	p, err := JudgmentPacket(arts, subject)
 	if err != nil || p.Complete || strings.Join(p.RequiredSources, ",") != "large.md,other.md" {
