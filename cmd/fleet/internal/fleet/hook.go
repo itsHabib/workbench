@@ -328,7 +328,11 @@ func preWriteVerdicts(ev Event, rec Rec, sid, tool, cmd, target, branch, key, ev
 	// branch's lease and only then refuse the call — and the refusal cleans up nothing,
 	// leaving this session holding a branch it was never allowed to touch and locking
 	// out the seat's real occupant. Nothing lease-mutating may run ahead of it.
-	if reason := cdDestinations(tool, cmd, evCwd); reason != "" {
+	launch := S(rec, "launch_dir")
+	if launch == "" {
+		launch = evCwd // a record from before launch_dir existed
+	}
+	if reason := cdDestinations(tool, cmd, evCwd, launch); reason != "" {
 		return nil, deny(reason)
 	}
 	if branch != "" && writes {
@@ -380,11 +384,17 @@ func denyStopped(ev Event, sid, key, branch string) {
 // directory becomes that occupant on its next tool call and leases their branch out
 // from under them. Naming a path (an absolute path, `git -C`) moves nothing and stays
 // allowed; so does moving anywhere inside this session's own bound tree.
-func cdDestinations(tool, cmd, evCwd string) string {
+//
+// "Its own" is the tree of the directory it was launched in, not of wherever its
+// shell stands now. The harness keeps a `cd` for later calls, so a verifier that
+// stepped into an unbound log directory used to be refused its own checkout — the
+// guard read "own" from the log directory and found none — and could not get home.
+// Hops are still resolved from evCwd, where the shell actually is.
+func cdDestinations(tool, cmd, evCwd, launch string) string {
 	if tool != "Bash" || cmd == "" {
 		return ""
 	}
-	own, haveOwn := BoundDir(evCwd)
+	own, haveOwn := BoundDir(launch)
 	targets, unresolved := CdChain(cmd, evCwd)
 	if unresolved {
 		return "this command hops through a directory the guard cannot resolve (`cd` or `cd -`) and then moves again relative to it, so where the shell ends up — and whose seat that is — cannot be read from the command. Next action: name each destination as an absolute path, or run the moves as separate calls."

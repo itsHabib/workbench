@@ -76,6 +76,48 @@ func TestUnseatedReceiptStillRequiresExactCleanHeadAndLiveSession(t *testing.T) 
 	}
 }
 
+// The directory guard's escape for a session whose shell has wandered off is
+// `(cd <its checkout> && fleet receipt …)`. The record names where the shell stands,
+// so that receipt was refused — with and without --session — in the session's own
+// launch checkout. Observed 2026-09-13: a headless verifier's shell stood in the lab's
+// unbound result/rooms/out/logs.
+func TestReceiptFromTheLaunchCheckoutWhileTheShellStandsElsewhere(t *testing.T) {
+	repo, sid := requestFixture(t)
+	logs := filepath.Join(filepath.Dir(repo), "result", "rooms", "out", "logs")
+	if err := os.MkdirAll(logs, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	place := func(launch string) {
+		rec := fleet.SessionRecord(sid)
+		rec["launch_dir"], rec["cwd"] = launch, logs
+		if err := fleet.WriteJSON(fleet.Path("sessions", sid+".json"), rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	head, err := gitOut("rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	head = strings.TrimSpace(head)
+	place(repo)
+	for _, session := range []string{sid, ""} {
+		if err := cmdReceipt(head, "rooms", "pass", "patch matches", session, "", false); err != nil {
+			t.Fatalf("--session %q in its own launch checkout: %v", session, err)
+		}
+		r := fleet.ReadJSON(fleet.Path("receipts", head+".rooms.json"))
+		if fleet.S(r, "session") != sid || fleet.S(r, "cwd") != canon(repo) {
+			t.Fatalf("receipt lost its provenance: %v", r)
+		}
+	}
+	// Neither launched here nor standing here: not this session's directory.
+	place(logs)
+	for _, session := range []string{sid, ""} {
+		if err := cmdReceipt(head, "rooms", "fail", "borrowed", session, "", false); err == nil {
+			t.Fatalf("--session %q borrowed a directory the session neither stands in nor was launched in", session)
+		}
+	}
+}
+
 func TestReceiptRefusesSessionWithoutRecordedDirectory(t *testing.T) {
 	_, sid := requestFixture(t)
 	rec := fleet.SessionRecord(sid)

@@ -169,7 +169,9 @@ is not the session's own, naming the seat or role and the ways to do the work wi
 moving: `git -C <dir> …`, or `(cd <dir> && …)` in a subshell, which returns here. A
 session with no role of its own gets the same refusal. Naming a path moves nothing:
 absolute paths as operands, `git -C`, and any `cd` inside the session's own tree stay
-allowed.
+allowed. The session's own tree is the one it was launched in, not wherever its shell
+stands: the harness keeps a `cd` for later calls, and a session that stepped into an
+unbound directory may always `cd` back home.
 
 **One shape for an accepted cost, one token per measured command.** When the cost gate
 refuses a slow command it asks for one exact form — `FLEET_ALLOW_SLOW=<rule-slug>
