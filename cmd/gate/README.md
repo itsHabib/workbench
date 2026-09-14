@@ -454,7 +454,7 @@ law — is specified in [docs/DESIGN.md](docs/DESIGN.md).
 | 0 | pass (`would_merge`; `-live` execution not yet wired) |
 | 1 | blocked by a code verifier |
 | 2 | parked for judgment (escalation or tier over grant ceiling) |
-| 3 | refused (no live grant, or the PR is `already_merged` — a merged subject has no merge left to authorize, so it refuses before the ladder rather than parking on an unresolvable escalation; `backtest` is exempt, replaying merged history being its purpose) |
+| 3 | refused (no live grant, or the PR is `already_merged` — a merged subject has no merge left to authorize, so it refuses before the ladder rather than parking on an unresolvable escalation — or `base_not_default` — the PR targets a branch other than the repository's default, as an un-retargeted stacked PR does, and the pinned command would squash it there; retarget and gate again. Neither refusal spends a review cycle, and `backtest` is exempt from both, replaying merged history being its purpose) |
 | 4 | error |
 
 Callers (a merge-tail skill, a driver engine, CI) branch on exit codes and the
