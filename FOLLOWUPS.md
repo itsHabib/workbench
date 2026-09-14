@@ -102,6 +102,37 @@ that accept them; cover multiline bodies with numbers and other PR URLs. Do not
 infer task completion or merge authority from this cache.
 
 
+## gate grant discovery: residuals after the exact-head review (PR #339, 2026-09-13)
+
+An independent exact-head review found one authorization-boundary defect and
+one silent-widening input, both fixed in #339: discovery no longer selects
+exact-subject (Slack or executor) grants, and an explicitly empty `-grant` is
+refused. The remaining findings fail closed or are advisory text; none widens
+authority:
+
+- **P2, mint suggestion shape:** an `uncovered` result suggests
+  `-max-tier <floor minimum> -max-cycles <next cycle>`. A fresh PR gets one
+  cycle rather than the canonical three, a floor-only tier can be narrower than
+  the final verdict, and a PR that exhausted its ceiling is offered a wider mint
+  although the explicit path treats that ceiling as the stop signal. Suggest the
+  canonical cycles, say the ladder may raise the tier, and report cycle
+  exhaustion without a mint request.
+- **P2, inbox visibility:** a discovery `uncovered` refusal records no
+  `grant_needed` artifact, so `gate next` does not list the repository as needing
+  authority the way the explicit path does.
+- **P2, Slack merged-at-moved-head:** the head check now precedes the
+  already-merged check, so a PR merged at a moved head is told to request fresh
+  Slack approval instead of reporting `already_merged`.
+- **P2, one unreadable grant blocks discovery:** any grant that fails to parse or
+  authenticate (for example one signed under a replaced key, or a malformed body
+  for another repository) turns an otherwise `uncovered` result into
+  `assessment_required` permanently. Filter by repository before authentication
+  and scope the failure to candidates that could have covered the subject.
+- **Nits:** an empty but existing state directory yields a mint command that the
+  grant verb rejects without `-init`; a moved head that coincides with a failed
+  abort write is relabelled with the discovery route instead of the state-repair
+  route.
+
 ## gate: mid-run merge race can still park (codex P1 on #219, deferred)
 
 The already-merged refusal (#219) reads the view snapshot gathered at run

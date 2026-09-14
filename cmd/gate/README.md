@@ -169,7 +169,11 @@ Discovery creates no grants, keys, artifacts, statuses or merges. It rejects a
 missing state directory instead of creating a new inventory. A head change
 before evaluation stops the run before model invocation. Explicit `-grant`,
 `-slack` and run-bound judgment flows remain explicit; no grant is silently
-substituted for a pinned ID. See [regression evidence](docs/grant-discovery-poc.md).
+substituted for a pinned ID, and an explicitly empty `-grant` is an error rather
+than a request to discover. Discovery reuses only repository authority that an
+explicit `-grant` could also use: exact-subject grants minted for a Slack
+approval or the protected executor stay with their own flow.
+See [regression evidence](docs/grant-discovery-poc.md).
 Oversized GitHub diffs use the existing pinned local-diff fallback; its scratch
 repository is temporary and its Git configuration is isolated as in the collector.
 

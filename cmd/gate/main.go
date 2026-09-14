@@ -84,6 +84,17 @@ var errLogTampered = errors.New("log_integrity_failed")
 // (-h/-help) is a clean success, not an error — the flag package has already
 // printed usage, so the caller returns nil and main exits 0. Any other parse
 // error routes to codeError via main.
+// flagSet reports whether name was passed on the command line, even as "".
+func flagSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
+}
+
 func parseFlags(fs *flag.FlagSet, args []string) (help bool, err error) {
 	err = fs.Parse(args)
 	if errors.Is(err, flag.ErrHelp) {
@@ -496,6 +507,11 @@ func cmdGate(args []string) error {
 	}
 	if *grantID != "" && *slack {
 		return errors.New("gate: -grant and -slack are mutually exclusive")
+	}
+	// An explicitly empty -grant (an unset variable in a script) is a pinning
+	// mistake, not a request to discover authority.
+	if *grantID == "" && flagSet(fs, "grant") {
+		return errors.New("gate: -grant requires a grant id; omit -grant to discover existing authority")
 	}
 	if *grantID == "" && !*slack {
 		if err := requireDiscoveryState(*stateDir); err != nil {

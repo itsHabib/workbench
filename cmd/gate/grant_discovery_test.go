@@ -89,7 +89,7 @@ func TestDiscoveryEnforcesSubjectAndAuthentication(t *testing.T) {
 		{name: "wrong action", repo: "o/r", action: "deploy", want: "uncovered"},
 		{name: "wrong head", repo: "o/r", action: "merge", head: strings.Repeat("b", 40), pr: 7, want: "uncovered"},
 		{name: "wrong PR", repo: "o/r", action: "merge", head: discoveryHead, pr: 8, want: "uncovered"},
-		{name: "bound match", repo: "o/r", action: "merge", head: discoveryHead, pr: 7, want: "available"},
+		{name: "bound match", repo: "o/r", action: "merge", head: discoveryHead, pr: 7, want: "uncovered"},
 		{name: "bad signature", repo: "o/r", action: "merge", corrupt: true, want: "assessment_required"},
 	}
 	for _, tt := range tests {
@@ -502,4 +502,32 @@ func runDiscoveryFailureCLI(t *testing.T, e env, extra ...string) terminalError 
 		t.Fatal(err)
 	}
 	return terminal
+}
+
+// Exact-subject grants belong to the Slack or executor flow that requested
+// them. An explicit -grant refuses them, so discovery must not spend them
+// either, even when their subject matches and their ceiling is wider.
+func TestDiscoveryNeverSelectsExactSubjectGrant(t *testing.T) {
+	e := testEnv(t)
+	if _, err := capability.MintBound(e.st, e.keyPath, "o/r", "merge", "T3", 3, "fixture executor", time.Hour, discoveryHead, 7, "gau_"+strings.Repeat("c", 64), e.now); err != nil {
+		t.Fatal(err)
+	}
+	d := selectGrant(e, assessedDiscovery(e, "T1"))
+	if d.Status != "uncovered" || len(d.Candidates) != 1 || !strings.Contains(strings.Join(d.Candidates[0].Gaps, " "), "grant_bound") {
+		t.Fatalf("exact-subject grant was treated as reusable authority: %+v", d)
+	}
+	repoWide := fixtureGrant(t, e, "T1", 3, time.Hour)
+	d = selectGrant(e, assessedDiscovery(e, "T1"))
+	if d.Status != "available" || d.GrantID != repoWide.ID {
+		t.Fatalf("bound T3 outranked repository authority: %+v", d)
+	}
+}
+
+func TestGateRejectsExplicitEmptyGrant(t *testing.T) {
+	e := testEnv(t)
+	fixtureGrant(t, e, "T3", 3, time.Hour)
+	err := cmdGate([]string{"-repo", "o/r", "-pr", "7", "-grant", "", "-state", e.stateDir, "-key", filepath.Dir(e.keyPath)})
+	if err == nil || !strings.Contains(err.Error(), "-grant requires a grant id") {
+		t.Fatalf("empty -grant fell through to discovery: %v", err)
+	}
 }

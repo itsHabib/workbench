@@ -19,8 +19,11 @@ is a lower bound; the full verifier ladder can raise the required tier. An
 unreadable head, diff, floor, ledger or key is an assessment failure, not proof
 that a new grant is needed. Only assessed authority gaps produce a mint request.
 Explicit `-grant` and `-slack` paths retain their behavior; judgment remains bound
-to its existing run and grant flow. No key creation, grant minting, state append,
-status publication or merge occurs during discovery.
+to its existing run and grant flow. Exact-subject grants (a Slack approval or a
+protected-executor grant) are reported as `grant_bound` candidates and never
+selected, and an explicitly empty `-grant` is refused instead of discovering.
+No key creation, grant minting, state append, status publication or merge occurs
+during discovery.
 
 Passing regression scenarios: an expired grant beside a valid one; an older
 T2 beside a newer T1; a high-tier grant with exhausted cycles beside a usable

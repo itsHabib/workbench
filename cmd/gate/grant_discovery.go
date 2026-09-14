@@ -265,6 +265,13 @@ func assessGrant(e env, a state.Artifact, d grantDiscovery) (grantCandidate, err
 		candidate.Gaps = []string{"invalid grant ceiling"}
 		return candidate, fmt.Errorf("grant %s has invalid ceilings", a.ID)
 	}
+	// An exact-subject grant (a Slack approval or a protected-executor grant)
+	// belongs to the flow that requested it. Discovery reuses only repository
+	// authority an explicit -grant could also use.
+	if g.BoundHead != "" || g.BoundPR != 0 || g.AuthorizationID != "" {
+		candidate.Gaps = append(candidate.Gaps, "grant_bound: exact-subject grant is reserved for its own Slack or executor flow")
+		return candidate, nil
+	}
 	if !g.TierWithin(d.MinimumTier) {
 		candidate.Gaps = append(candidate.Gaps, fmt.Sprintf("grant_tier_exceeded: minimum %s exceeds ceiling %s", d.MinimumTier, g.MaxTier))
 	}
