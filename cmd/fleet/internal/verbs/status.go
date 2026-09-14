@@ -52,7 +52,8 @@ func requestStatus(d fleet.Rec, now float64) fleet.Rec {
 	key := "repo:" + rid + ":" + branch
 	row := fleet.Rec{"request_id": d["request_id"], "work": branch, "repo": rid,
 		"worker": sid, "lead": d["for"], "brief": d["brief"], "status": "Queued",
-		"needs": "Worker delivery and acceptance are unconfirmed", "next": "Deliver the brief through the worker's supported harness", "verified_at": now}
+		"relationship": d["relationship"],
+		"needs":        "Worker delivery and acceptance are unconfirmed", "next": "Deliver the brief through the worker's supported harness", "verified_at": now}
 	rec, lease := fleet.SessionRecord(sid), fleet.Lease(key)
 	write := fleet.M(fleet.M(rec, "last_writes"), key)
 	if write == nil {
@@ -71,7 +72,29 @@ func requestStatus(d fleet.Rec, now float64) fleet.Rec {
 		row["activity_at"] = write["at"]
 		taskState(row, "Activity observed", "Acceptance and completion remain unconfirmed", "Read the worker's result and current checks")
 	}
+	if entry := fleet.M(d, "entry"); entry != nil {
+		row["entry"] = entry
+		row["current_head"] = requestCurrentHead(rid, branch, rec)
+		if fleet.S(row, "current_head") != fleet.S(entry, "head") {
+			taskState(row, "Status needs checking", "Input revision changed or is unavailable; admission is historical", "Inspect the recorded packet and recheck the revision before working")
+		}
+	}
 	return row
+}
+
+func requestCurrentHead(rid, branch string, session fleet.Rec) string {
+	co := checkoutFor(rid)
+	if co == "" && fleet.RepoID(fleet.S(session, "cwd")) == rid {
+		co = fleet.S(session, "cwd")
+	}
+	if co == "" {
+		return ""
+	}
+	rc, head := gitTry(co, gitTimeout, "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}")
+	if rc != 0 {
+		return ""
+	}
+	return strings.TrimSpace(head)
 }
 
 func taskState(row fleet.Rec, state, needs, next string) {

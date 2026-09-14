@@ -15,6 +15,7 @@ go install github.com/itsHabib/workbench/cmd/<tool>@latest
   Read [the overview](cmd/fleet/docs/OVERVIEW.md), then [install](cmd/fleet/docs/install.md) and [onboarding](cmd/fleet/docs/ONBOARDING.md);
   if you want the habits without the machinery, [the minimum](cmd/fleet/docs/MINIMUM.md).
 - **Decide whether an exact pull-request head may merge, with a record:** [`cmd/gate`](cmd/gate/README.md).
+- **Try an evidence check between work phases:** [Relay handoff POC](cmd/fleet/examples/relay-boundary/README.md), a local failure-and-recovery demo using Fleet's existing receipts and assignments.
 - **What is this whole system?** [`docs/workbench-101.md`](docs/workbench-101.md), the teaching
   doc; [`docs/plain-language-overview.md`](docs/plain-language-overview.md) is the same picture
   with no jargon; [`docs/README.md`](docs/README.md) is the full table of contents.
