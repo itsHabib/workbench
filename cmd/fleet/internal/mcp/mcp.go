@@ -73,6 +73,7 @@ var tools = []schema{
 		"description": "The one declared act: write a change's ownership row (relationship, accountable role, due), placed in a slot when named; refused over live hands unless take.",
 		"inputSchema": schema{"type": "object", "properties": schema{"repo": str("target owner/repo or checkout path; defaults to the selected slot repository, then caller cwd"), "change": str("branch name or #<n>"), "as": str("relationship: a short lowercase word; the receipt kind that means done"),
 			"for": str("accountable role; default: the dispatcher"), "due": str("duration like 45m or 2h"), "slot": str("free slot to place the work in (fleet_slots)"),
+			"requires": str("optional comma-separated receipt kinds demanded before dispatch; requires head, supports no slot placement in this POC"), "head": str("full commit SHA expected by requires; checked against the resolved branch"),
 			"brief": str("one line the slot's session reads at start"), "reply_to": str("optional reply mailbox address; defaults to the caller's concrete address"), "take": schema{"type": "boolean", "description": "rewrite a row that has live hands"}, "cwd": cwdArg},
 			"required": []any{"change", "as", "cwd"}}},
 	{"name": "fleet_request",
@@ -271,10 +272,7 @@ func dispatch(name string, a map[string]any) (string, bool) {
 			return verbs.CmdAssign(s("slot"), s("branch"), s("brief"), "mcp", s("for"), s("reply_to"))
 		})
 	case "fleet_dispatch":
-		take, _ := a["take"].(bool)
-		return runVerb(func() error {
-			return verbs.CmdDispatch(s("change"), s("as"), s("for"), s("due"), s("slot"), s("brief"), "mcp", s("reply_to"), take, s("repo"))
-		})
+		return dispatchAssignment(a)
 	case "fleet_request":
 		return runVerb(func() error { return verbs.CmdRequest(s("change"), s("id"), s("worker"), s("for"), s("brief")) })
 	case "fleet_status":
@@ -290,6 +288,24 @@ func dispatch(name string, a map[string]any) (string, bool) {
 		return runVerb(func() error { return verbs.CmdDrop(s("resource"), s("session")) })
 	}
 	return "", true
+}
+
+func dispatchAssignment(a map[string]any) (string, bool) {
+	for _, key := range []string{"requires", "head"} {
+		value, present := a[key]
+		if !present {
+			continue
+		}
+		text, ok := value.(string)
+		if !ok || strings.TrimSpace(text) == "" {
+			return fmt.Sprintf("fleet dispatch: %s needs a non-empty string", key), true
+		}
+	}
+	s := func(k string) string { v, _ := a[k].(string); return v }
+	take, _ := a["take"].(bool)
+	return runVerb(func() error {
+		return verbs.CmdDispatch(s("change"), s("as"), s("for"), s("due"), s("slot"), s("brief"), "mcp", s("reply_to"), take, verbs.DispatchOptions{Repo: s("repo"), Requires: s("requires"), Head: s("head")})
+	})
 }
 
 func rpcError(id any, code int, msg string) map[string]any {
