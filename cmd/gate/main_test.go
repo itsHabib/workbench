@@ -380,6 +380,51 @@ func TestMalformedJudgmentRouteDropsTheClaudeModel(t *testing.T) {
 	}
 }
 
+// judge_provider_unsupported normalizes a mistyped provider rather than
+// crossing: "Claude" routes to claude. The operator's pin must survive that,
+// or the escape quietly re-runs the default model the operator named -model to
+// avoid — the 2026-09-13 failure, reached through the recovery route.
+func TestUnsupportedProviderRouteKeepsTheClaudeModel(t *testing.T) {
+	got := terminalErrorFor(
+		errors.New(`judge_provider_unsupported: "Claude" (want claude or codex)`),
+		[]string{"judge", "-run", "run_1", "-grant", "grt_1", "-auto", "-provider", "Claude", "-model", "sonnet"},
+	)
+	if !strings.Contains(got.Escape.Next, "-provider claude") || !strings.Contains(got.Escape.Next, "-model sonnet") {
+		t.Fatalf("escape = %q, want the normalized claude route with the pin kept", got.Escape.Next)
+	}
+}
+
+// The flag, not just the option, must carry the model: a -model that never
+// reaches validation is a pin the operator believes in and gate never applies.
+// Both refusals land before any state is opened, so the real verb is driven —
+// against throwaway dirs, so a regression that gets past validation opens
+// those rather than whatever $GATE_STATE names on the machine running it.
+func TestJudgeModelFlagReachesValidation(t *testing.T) {
+	// Case names stay clear of the codes: t.TempDir embeds the subtest name,
+	// and a state path that spells the code would satisfy a match on its own.
+	cases := []struct {
+		name  string
+		flags []string
+		code  string
+	}{
+		{"codex", []string{"-auto", "-provider", "codex", "-model", "sonnet"}, "judge_model_unsupported"},
+		{"flag-shaped", []string{"-auto", "-provider", "claude", "-model=--tools=default"}, "judge_model_invalid"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"-run", "run_1", "-grant", "grt_1", "-state", t.TempDir(), "-key", t.TempDir()}, tc.flags...)
+			err := cmdJudge(args)
+			if err == nil || !strings.HasPrefix(err.Error(), tc.code+":") {
+				t.Fatalf("error = %v, want %s", err, tc.code)
+			}
+			if code := readiness.Code(err.Error()); code != tc.code || !readiness.SelfGated(code) {
+				t.Fatalf("readiness code = %q self-gated %v, want %s registered like its judge_provider_* siblings",
+					code, readiness.SelfGated(code), tc.code)
+			}
+		})
+	}
+}
+
 func TestMalformedEscalationDoesNotSwitchProviders(t *testing.T) {
 	got := terminalErrorFor(
 		errors.New("judgment_malformed_escalation: question is empty"),

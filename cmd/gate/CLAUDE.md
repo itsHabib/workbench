@@ -115,8 +115,8 @@ Constraints that are design decisions, not omissions:
   `ANTHROPIC_MODEL` to the environment allowlist. `-model` with `-provider codex`
   is refused, not ignored: `--ignore-user-config` already keeps the operator's
   model out of Codex. The pinned model is recorded in the producer and decider
-  identity (`claude-cli[claude@sha256:...;model=opus]:<reported>`), so the audit
-  names the model Gate ran, not only the one the provider claims.
+  identity (`claude-cli[<wrapper>@sha256:...;model=opus]:<reported>`), so the
+  audit names the alias Gate passed, not only the model the provider claims.
 - **The ladder law lives in code.** Local producers can never block, judgment
   cannot override a code block, tiers compose monotone-max, unknown values
   fail closed. These are reducer errors and pinned tests, not conventions.

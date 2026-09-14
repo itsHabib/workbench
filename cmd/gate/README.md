@@ -425,8 +425,10 @@ single authorized outcome.
 The selected CLI provider, resolved wrapper filename, SHA-256 digest, and, for
 Claude, the pinned model are prefixed into the stored producer provenance and
 the decider identity:
-`claude-cli[claude@sha256:<digest>;model=opus]:<provider-reported model>`.
-The bracketed part is what Gate ran. The text after the colon is the provider's
+`claude-cli[<wrapper>@sha256:<digest>;model=opus]:<provider-reported model>`,
+where `<wrapper>` is the basename of the resolved executable (`claude.exe` for
+a Homebrew install). The bracketed part is what Gate ran: `model=` is the alias
+Gate passed, which the CLI resolves. The text after the colon is the provider's
 own claim, which Gate cannot verify. PATH and the saved-login/config locations
 remain same-user dependencies, so this local path is advisory automation under the same
 operating-system identity as Gate—not independently custodied security

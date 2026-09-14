@@ -2946,25 +2946,29 @@ func alternateJudgeCommand(args []string) string {
 	if len(args) == 0 || args[0] != "judge" {
 		return ""
 	}
-	// A model names one provider's catalogue. The route crosses to the other
-	// provider, which runs its own pin — carrying -model across would hand
-	// codex a Claude model, which it refuses before it ever runs.
-	copyArgs := withoutFlag(args, "model")
-	found := false
+	copyArgs := append([]string(nil), args...)
+	target := ""
 	for i, arg := range copyArgs {
 		if strings.HasPrefix(arg, "-provider=") || strings.HasPrefix(arg, "--provider=") {
 			parts := strings.SplitN(arg, "=", 2)
-			copyArgs[i] = parts[0] + "=" + otherProvider(parts[1])
-			found = true
+			target = otherProvider(parts[1])
+			copyArgs[i] = parts[0] + "=" + target
 			continue
 		}
 		if (arg == "-provider" || arg == "--provider") && i+1 < len(copyArgs) {
-			copyArgs[i+1] = otherProvider(copyArgs[i+1])
-			found = true
+			target = otherProvider(copyArgs[i+1])
+			copyArgs[i+1] = target
 		}
 	}
-	if !found {
+	if target == "" {
 		return ""
+	}
+	// A model names one provider's catalogue, and codex refuses -model before
+	// it ever runs, so a route that lands on codex sheds it. One that lands on
+	// claude — a mistyped "Claude" normalized — keeps the operator's pin rather
+	// than quietly falling back to the default.
+	if target == verify.JudgeProviderCodex {
+		copyArgs = withoutFlag(copyArgs, "model")
 	}
 	return shellJoin(append([]string{"gate"}, copyArgs...))
 }
