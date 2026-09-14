@@ -72,7 +72,7 @@ func TestUnassignRepairsMissingPlacementButPreservesRequestRows(t *testing.T) {
 
 func TestExplicitRepoRejectsSeatFromAnotherRepository(t *testing.T) {
 	lead, _, seat := crossRepoSeat(t)
-	if err := CmdDispatch("task", "implementation", "lead", "", "worker-seat", "wrong target", "", "", false, lead); err == nil {
+	if err := CmdDispatch("task", "implementation", "lead", "", "worker-seat", "wrong target", "", "", false, DispatchOptions{Repo: lead}); err == nil {
 		t.Fatal("assigned a seat from a different repository")
 	}
 	if fleet.BranchOf(seat) != "" || len(dispatchRows()) != 0 {
@@ -83,7 +83,7 @@ func TestExplicitRepoRejectsSeatFromAnotherRepository(t *testing.T) {
 func TestUnknownDispatchSeatRefusesBeforeResolvingWork(t *testing.T) {
 	lead, _, seat := crossRepoSeat(t)
 	for _, repo := range []string{"", lead} {
-		err := CmdDispatch("missing-branch", "implementation", "lead", "", "missing-seat", "do work", "", "", false, repo)
+		err := CmdDispatch("missing-branch", "implementation", "lead", "", "missing-seat", "do work", "", "", false, DispatchOptions{Repo: repo})
 		if err == nil || !strings.Contains(err.Error(), "no slot named 'missing-seat'") {
 			t.Fatalf("did not report the unknown seat: %v", err)
 		}

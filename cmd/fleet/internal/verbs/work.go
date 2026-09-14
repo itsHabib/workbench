@@ -96,13 +96,22 @@ func liveHands(key string) string {
 // CmdDispatch is the one declared act: write the row, and place the work when a
 // slot is named. Placement is `assign`, under the slot's lock, before the row is
 // written, so a refused placement leaves no row behind.
-func CmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, take bool, repo ...string) error {
+func CmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, take bool, options ...DispatchOptions) error {
+	opts := DispatchOptions{}
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	return fleet.KeyLock("dispatch", func() error {
-		return cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo, take, first(repo))
+		if opts.Requires != "" || opts.Head != "" {
+			return fleet.KeyLock("receipts", func() error {
+				return cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo, take, opts)
+			})
+		}
+		return cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo, take, opts)
 	})
 }
 
-func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, take bool, repo string) error {
+func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, take bool, opts DispatchOptions) error {
 	usage := `usage: fleet dispatch <branch|#n> --as <relationship> [--for <role>] [--due 45m] [--slot <name>] [--brief "<one line>"] [--reply-to <address>] [--repo <owner/repo|path>] [--take]`
 	if change == "" || rel == "" {
 		return refuse("%s", usage)
@@ -117,7 +126,11 @@ func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, tak
 			return refuse("fleet dispatch: --due wants a duration like 45m or 2h, got %s", fleet.PyRepr(due))
 		}
 	}
-	rid, branch, sha, err := dispatchTarget(change, repo, slot)
+	required, err := opts.requirements(slot)
+	if err != nil {
+		return err
+	}
+	rid, branch, sha, err := dispatchTarget(change, opts.Repo, slot)
 	if err != nil {
 		return err
 	}
@@ -137,6 +150,10 @@ func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, tak
 		return refuse("fleet dispatch: %s/%s already has live hands (%s, for %s); `--take` rewrites the row, or `fleet work` to see it",
 			branch, rel, fleet.Short(hands), fleet.S(existing, "for"))
 	}
+	admission, err := admitDispatch(rid, branch, rel, by, sha, opts.Head, required)
+	if err != nil {
+		return err
+	}
 	replyTo = assignmentReplyTo(replyTo)
 	if slot != "" {
 		if row := slotRow(slot); row != nil && fleet.RepoID(fleet.S(row, "path")) != rid {
@@ -149,14 +166,26 @@ func cmdDispatch(change, rel, forRole, due, slot, brief, by, replyTo string, tak
 	now := fleet.Now()
 	rec := fleet.Rec{"change": branch, "repo": rid, "relationship": rel, "for": forRole, "by": by, "at": now,
 		"due": nil, "slot": nilIfEmpty(slot), "brief": nilIfEmpty(strings.TrimSpace(brief)), "reply_to": nilIfEmpty(replyTo), "head_at_dispatch": nilIfEmpty(sha)}
-	if dueSecs > 0 {
-		rec["due"] = now + dueSecs
+	return publishDispatch(rec, admission, dueSecs)
+}
+
+func publishDispatch(rec, admission fleet.Rec, dueSecs float64) error {
+	if admission != nil {
+		rec["admission"] = admission
 	}
+	if dueSecs > 0 {
+		rec["due"] = fleet.F(rec, "at") + dueSecs
+	}
+	rid, branch, rel := fleet.S(rec, "repo"), fleet.S(rec, "change"), fleet.S(rec, "relationship")
 	if err := fleet.WriteJSON(dispatchFile(rid, branch, rel), rec); err != nil {
 		return err
 	}
 	fleet.ObserveAction("dispatch", rec)
-	reportDispatch(branch, rel, forRole, slot, brief, rid, dueSecs)
+	if admission != nil {
+		say("dispatched %s/%s for %s at %s; record: local receipt admission", branch, rel, fleet.S(rec, "for"), fleet.S(rec, "head_at_dispatch"))
+		return nil
+	}
+	reportDispatch(branch, rel, fleet.S(rec, "for"), fleet.S(rec, "slot"), fleet.S(rec, "brief"), rid, dueSecs)
 	return nil
 }
 
