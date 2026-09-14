@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -39,6 +40,35 @@ class RoomsAdapterTest(unittest.TestCase):
             with patch.object(sys, "argv", argv), patch.object(adapter.subprocess, "run") as call, self.assertRaises(FileExistsError):
                 adapter.main()
             call.assert_not_called()
+
+    def test_lima_transport_runs_this_adapter_in_the_guest_and_collects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "worker.patch").write_bytes(b"diff\n")
+            collected = io.BytesIO()
+            with tarfile.open(fileobj=collected, mode="w") as archive:
+                data = json.dumps({"cli_exit": 0}).encode()
+                info = tarfile.TarInfo("summary.json")
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
+            calls = []
+
+            def fake(argv, **options):
+                calls.append((argv, options))
+                return subprocess.CompletedProcess(argv, 0, stdout=collected.getvalue() if "tar" in argv else None)
+
+            argv = ["rooms-check.py", "--lima", "rooms-host", "--rooms", "/guest/rooms", "--image", "/guest/image",
+                    "--toolstore", "/guest/store", "--patch", str(root / "worker.patch"), "--out", str(root / "result")]
+            with patch.object(sys, "argv", argv), patch.object(adapter.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(adapter.main(), 0)
+            staged, run = calls[1], calls[2]
+            self.assertEqual(staged[1]["input"], b"diff\n")
+            self.assertEqual(run[0][:4], ["limactl", "shell", "rooms-host", "sudo"])
+            self.assertEqual(run[0][run[0].index("--rooms") + 1], "/guest/rooms")
+            self.assertEqual(run[1]["input"], Path(adapter.__file__).read_bytes())
+            self.assertIn("rm", calls[-1][0])
+            self.assertEqual(json.loads((root / "result/summary.json").read_text()), {"cli_exit": 0})
+            self.assertEqual(json.loads((root / "result/transport.json").read_text())["exit"], 0)
 
 
 if __name__ == "__main__":

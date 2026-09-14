@@ -18,8 +18,9 @@ Inspect slots/work. Only when no matching work row exists, dispatch the existing
 task branch to the author seat. In that initial case, record a useful role handoff
 with `fleet handoff --role CONCLUSION NEXT`
 and write lab-root/control/supervisor-ready with a brief explanation. Then run
-sleep 120 as the explicit interruption fixture. Do not answer worker mail before
-that wait finishes. The external fixture will interrupt this disposable turn.
+`sleep 300` as one foreground command allowed more than five minutes; that is the
+explicit interruption fixture. Do not answer worker mail before that wait
+finishes. The external fixture will interrupt this disposable turn.
 
 When the matching work row already exists, skip the interruption fixture and
 inspect actual work, checkpoint and mail. This can be a new provider conversation. Preserve the original
@@ -28,12 +29,17 @@ new. Answer the author's status-policy question through Fleet: preserve every
 observed label; absent checks mean unknown. Use a stable message ID and repeat
 that exact send once to exercise mail replay. Acknowledge handled mail.
 
-When the author reports an exact result head, send the verifier that head and
-the author's checkout path. The verifier must fetch the actual commit, use a
-clean detached checkout and independently test the output contract. Require an
-actual verify/pass receipt at that head and inspect its provenance. Write the
-final assessment outside the repository under lab-root/result/ASSESSMENT.md,
-including the result head, patch hash, tests, missing evidence and runtime limits.
+When the author reports an exact result head, export
+`git -C AUTHOR diff BASE HEAD` to lab-root/result/worker.patch (again if the head
+later changes) and send the verifier that head, the author's checkout path and the
+patch path and SHA-256. The verifier must fetch the actual commit, use a clean
+detached checkout, confirm the patch identity and independently test the output
+contract. Require an actual verify/pass receipt at that head and inspect its
+provenance. When resolved.json names a Rooms backend, also require the verifier's
+rooms/pass receipt at that head and read its summary.json and lifecycle.ndjson
+under rooms.out yourself. Write the final assessment outside the repository under
+lab-root/result/ASSESSMENT.md, including the result head, patch hash, tests, the
+Rooms outcome, missing evidence and runtime limits.
 Record a final `fleet handoff --role CONCLUSION NEXT`, stop the author, verifier and your own address, and
 end. Do not stop the watcher; the outer fixture collects its final exits.
 

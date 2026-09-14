@@ -8,8 +8,8 @@ RUN.md, resolved.json and the supplied task tests. Keep all effects in the lab;
 no desktop tools, subagents, MCP, installs, remote writes, grants or merges. Use
 one shell command per tool call and preserve useful existing work when resuming.
 
-Before implementation, write a short PLAN.md in the task directory describing
-your approach. Keep it dirty and ask the supervisor by Fleet mail whether skipped,
+Before implementation, create a short PLAN.md in the task directory with your
+file-writing tool, not a shell redirect, describing your approach. Keep it dirty and ask the supervisor by Fleet mail whether skipped,
 neutral and unfinished checks should be combined with success or preserved.
 This deliberate product clarification supplies an in-flight recovery point.
 Write a branch handoff explaining the owned draft and question, then end the turn.

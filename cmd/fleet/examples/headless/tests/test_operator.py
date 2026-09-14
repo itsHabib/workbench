@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import audit
 import lab
 
 
@@ -80,6 +81,49 @@ class OperatorTest(unittest.TestCase):
         watcher.wait.assert_called_once_with(timeout=15)
         self.assertTrue(start.call_args.kwargs["stdout"].closed)
         self.assertEqual(json.loads((self.root / "control/collection-error.json").read_text())["error"], "status unavailable")
+
+    def test_parent_session_does_not_reach_lab_agents(self):
+        lab.write_json(self.root / "resolved.json", {"provider": {"name": "claude", "runtime_home": "/sdk"}})
+        inherited = {"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "parent", "CLAUDE_CODE_MESSAGING_SOCKET": "/tmp/s",
+                     "CLAUDE_CONFIG_DIR": "/config", "PATH": "/usr/bin", "HOME": "/home/operator"}
+        with patch.dict(lab.os.environ, inherited, clear=True):
+            env = lab.env_for(self.root)
+        self.assertFalse({"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET"} & set(env))
+        self.assertEqual((env["CLAUDE_CONFIG_DIR"], env["HOME"], env["FLEET_RUNTIME_HOME"]), ("/config", "/home/operator", "/sdk"))
+
+    def test_claude_policy_keeps_fleet_hooks_and_denies(self):
+        checkout = self.root / "seat"
+        (checkout / ".claude").mkdir(parents=True)
+        hooks = {"SessionStart": [{"hooks": [{"type": "command", "command": "fleet hook claude"}]}]}
+        lane_deny = "Bash(git reset --hard:*)"
+        lab.write_json(checkout / ".claude/settings.local.json", {"hooks": hooks, "permissions": {"allow": ["Bash(FLEET_ALLOW_SLOW=x:*)"], "deny": [lane_deny]}})
+        lab.claude_settings(checkout, self.root)
+        settings = json.loads((checkout / ".claude/settings.local.json").read_text())
+        self.assertEqual(settings["hooks"], hooks)
+        self.assertLessEqual({"Bash(FLEET_ALLOW_SLOW=x:*)", *lab.CLAUDE_ALLOW}, set(settings["permissions"]["allow"]))
+        self.assertLessEqual({lane_deny, *lab.CLAUDE_DENY}, set(settings["permissions"]["deny"]))
+        self.assertEqual(settings["permissions"]["additionalDirectories"], [str(self.root)])
+        self.assertIs(settings["autoMemoryEnabled"], False)
+
+    def test_claude_draft_continuity_uses_attempt_launch_times(self):
+        draft = self.root / "seat/PLAN.md"
+        body = "plan\n"
+        delivery = self.root / "state/watch/delivery"
+
+        def attempt(name, launched, *edits):
+            lab.write_json(delivery / (name + ".meta.json"), {"at": launched})
+            events = [{"type": "assistant", "session_id": "author", "message": {"content": [
+                {"type": "tool_use", "name": tool, "input": {"file_path": str(draft), **fields}}]}} for tool, fields in edits]
+            (delivery / (name + ".trace.jsonl")).write_text("".join(json.dumps(e) + "\n" for e in events))
+
+        attempt("first", 100, ("Write", {"content": body}))
+        interruption = {"draft_sha256": audit.hashlib.sha256(body.encode()).hexdigest(), "requested_at": 150, "resumed_at": 200}
+        self.assertTrue(audit.draft_continuity(self.root, draft, interruption, "author"))
+        self.assertFalse(audit.draft_continuity(self.root, draft, interruption, "replacement"))
+        attempt("later", 300, ("Edit", {"old_string": "plan", "new_string": "done"}))
+        self.assertTrue(audit.draft_continuity(self.root, draft, interruption, "author"))
+        attempt("during", 180, ("Edit", {"old_string": "plan", "new_string": "raced"}))
+        self.assertFalse(audit.draft_continuity(self.root, draft, interruption, "author"))
 
     def test_edit_once_inspect_then_project_using_real_fleet(self):
         info = {}
