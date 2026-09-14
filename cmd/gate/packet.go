@@ -242,8 +242,9 @@ func checkEvidenceRepair(arts []state.Artifact, run, esc string, added []verify.
 // Check the same renderer while holding the append lock. Raw source size alone
 // cannot account for required reviews, headers, or a concurrent supplement.
 // Sources may displace a required diff while a run is still incomplete, since
-// smaller exact-head source can then repair it. A packet that is already
-// complete never admits a supplement that would leave it incomplete.
+// smaller exact-head source can then repair it. A packet that is complete, or
+// that this supplement's file index alone would complete, never admits sources
+// that would leave it incomplete.
 func checkPacketEvidenceBudget(arts []state.Artifact, run string, body verify.SourceEvidence) error {
 	var current []state.Artifact
 	for _, a := range arts {
@@ -267,7 +268,17 @@ func checkPacketEvidenceBudget(arts []state.Artifact, run string, body verify.So
 	if packet.Complete {
 		return nil
 	}
-	before, err := verify.JudgmentPacket(current, body.Subject)
+	// The baseline carries this supplement's file index but not its sources, so
+	// a gap the index alone closes cannot hide that the sources displace evidence
+	// an otherwise complete packet already renders.
+	indexOnly := body
+	indexOnly.Sources = nil
+	rawIndex, err := json.Marshal(indexOnly)
+	if err != nil {
+		return err
+	}
+	baseline := append(append([]state.Artifact(nil), current...), state.Artifact{ID: candidateEvidenceID, Kind: state.KindEvidence, Run: run, Body: rawIndex})
+	before, err := verify.JudgmentPacket(baseline, body.Subject)
 	if err != nil {
 		return err
 	}

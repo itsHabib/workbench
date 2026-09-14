@@ -23,7 +23,9 @@ nothing. Each recorded path and blob renders and counts once, and the collector
 skips paths the run already holds, so two collectors racing on the same required
 file do not consume its space twice. Collected source may displace a required
 diff while the packet is still incomplete, because smaller source can then
-repair it; a supplement that would leave a complete packet incomplete is refused.
+repair it; a supplement whose sources would leave a complete packet incomplete
+is refused, counting the packet as complete when the supplement's own file index
+would complete it.
 
 The initial recorded-history and diff rendering remain separate. This change
 does not establish an overall context or token limit. It does not change review
