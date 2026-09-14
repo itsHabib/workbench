@@ -222,7 +222,17 @@ def card_projection(root, apply=False):
 
 
 def states(root):
-    return [json.loads(p.read_text()) for p in (root / "state/watch/delivery").glob("*.state.json")]
+    records = []
+    for path in (root / "state/watch/delivery").glob("*.meta.json"):
+        meta = json.loads(path.read_text())
+        attempt = str(path).removesuffix(".meta.json")
+        if meta.get("attempt") != attempt or meta.get("state_file") != attempt + ".state.json":
+            raise RuntimeError("attempt metadata identity is unavailable or mismatched")
+        state = json.loads(Path(attempt + ".state.json").read_text())
+        if state.get("attempt") != attempt or state.get("provider") != meta.get("provider"):
+            raise RuntimeError("provider state belongs to a different attempt")
+        records.append(state)
+    return records
 
 
 def exits_collected(root):
