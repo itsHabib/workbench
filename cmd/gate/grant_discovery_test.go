@@ -350,11 +350,8 @@ func runDiscoveryFixture() int {
 		return 0
 	}
 	if strings.HasPrefix(args, "pr view") {
-		head := discoveryHead
+		head := discoveryFixtureViewHead(mode)
 		status := "MERGED"
-		if mode == "moved before view" {
-			head = strings.Repeat("c", 40)
-		}
 		if mode == "model failure" {
 			status = "OPEN"
 		}
@@ -396,6 +393,18 @@ func runDiscoveryFixture() int {
 	}
 	fmt.Fprintln(os.Stderr, "unexpected fixture command:", args)
 	return 99
+}
+
+func discoveryFixtureViewHead(mode string) string {
+	switch mode {
+	case "moved before view":
+		return strings.Repeat("c", 40)
+	case "missing view head":
+		return ""
+	case "invalid view head":
+		return strings.Repeat("x", 40)
+	}
+	return discoveryHead
 }
 
 func TestDiscoverCommandJSON(t *testing.T) {

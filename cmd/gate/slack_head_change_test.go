@@ -82,6 +82,30 @@ func TestSlackHeadRefusalDoesNotHideRunErrors(t *testing.T) {
 	}
 }
 
+func TestSlackUnreadViewHeadRemainsHardError(t *testing.T) {
+	for _, mode := range []string{"missing view head", "invalid view head"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("GATE_ANCHOR_RECORD", "")
+			e := discoveryFixtureTools(t)
+			t.Setenv("GO_DISCOVERY_FAILURE", mode)
+			if _, err := e.st.Append(state.KindEvidence, state.NewRunID(), nil, "fixture initialization"); err != nil {
+				t.Fatal(err)
+			}
+			out, code := runSlackGateWithFixtureApproval(t, e)
+			var terminal terminalError
+			if err := json.Unmarshal(out, &terminal); err != nil {
+				t.Fatal(err)
+			}
+			if code != codeError || !strings.Contains(terminal.Error, "gate_view_invalid") || bytes.Contains(out, []byte(`"outcome"`)) {
+				t.Fatalf("unread evidence became a capability decision: exit %d: %s", code, out)
+			}
+			if got := mustCycleCount(t, e, verify.Subject{Repo: "o/r", Number: 7, HeadSHA: discoveryHead}); got != 0 {
+				t.Fatalf("invalid view consumed %d cycles", got)
+			}
+		})
+	}
+}
+
 func runSlackGateWithFixtureApproval(t *testing.T, e env) ([]byte, int) {
 	t.Helper()
 	executable, err := os.Executable()

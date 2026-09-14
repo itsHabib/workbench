@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -322,6 +323,10 @@ func matchBoundView(head string, view json.RawMessage) error {
 	}
 	if err := json.Unmarshal(view, &fields); err != nil {
 		return err
+	}
+	observed, err := hex.DecodeString(fields.HeadSHA)
+	if err != nil || len(observed) != 20 {
+		return errors.New("gate_view_invalid: expected a full Git head SHA")
 	}
 	if fields.HeadSHA != head {
 		return &gateHeadChangedError{expected: head, observed: fields.HeadSHA}
