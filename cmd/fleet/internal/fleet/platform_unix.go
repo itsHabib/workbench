@@ -20,16 +20,6 @@ func platformLongPath(p string) string { return p }
 // platformNormCase is the identity on POSIX, as os.path.normcase is.
 func platformNormCase(p string) string { return p }
 
-// PidAlive is liveness without side effects. Any error reads as dead — including
-// EPERM — because that is what the Python's `except OSError` did, and a store the two
-// share must judge a holder the same way.
-func PidAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	return syscall.Kill(pid, 0) == nil
-}
-
 // PidGone reports only proven process absence; an inspection error is unknown.
 func PidGone(pid int) bool {
 	return pid > 0 && errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
