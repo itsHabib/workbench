@@ -14,7 +14,7 @@ the supplied tests include synthetic boundary cases.
 
 ## Run
 
-Requirements: Python 3.11+, Go, Git and one authenticated provider for all three
+Requirements: Python 3.11.4+ (tarfile extraction filters), Go, Git and one authenticated provider for all three
 agents: the Codex CLI with the existing trusted Fleet hooks (the default), or
 Claude Code plus a directory whose `node_modules` holds the Claude Agent SDK
 (`--provider claude --runtime-home DIR`). Preparation installs nothing and does
@@ -95,6 +95,13 @@ adopted the change. `control/run-inputs.json` freezes card and run-input hashes
 at launch. One provider serves all three agents; `--provider` and `--model`
 choose it at preparation.
 
+Claude does not load Fleet's `CLAUDE.local.md` import of a card outside the
+checkout without a per-project approval. With `--provider claude` the lab's
+`claude` wrapper therefore appends the checkout's current `LAB/lanes/<kind>/card.md`
+to the system prompt at every launch (`--append-system-prompt-file`). An edited
+card reaches the next launch without `update`, which projects only the Codex
+instructions. `cards` reports both.
+
 ## What the demonstration does
 
 The author deliberately writes a dirty plan and asks a policy question already
@@ -149,13 +156,18 @@ whole-process-tree isolation; agents share the lab and its local state.
 - **Claude**: the Agent SDK starts the installed CLI through a lab wrapper that
   loads only project and local settings (no user hooks or memory files), an
   empty strict MCP configuration and the tools Bash, Read, Write, Edit, Glob and
-  Grep. Auto memory is off. Fleet's projected hooks run from the private binary.
-  Each checkout's local settings allow those tools, confine the file tools to the
-  lab root and deny push, `gh`, `curl`, `wget`, `limactl` and web tools under
-  `dontAsk`, which refuses anything else without prompting. There is no OS
-  sandbox: Bash can read and write outside the lab and reach the network. The
-  first complete Claude run observed exactly that (temporary files under /tmp),
-  so treat the Claude topology as trusted-local, not contained.
+  Grep, and appends the role card. Auto memory is off. Fleet's projected hooks
+  run from the private binary. Each checkout's local settings run under
+  `dontAsk`, which refuses anything not allowed without prompting. They allow
+  Bash, and file tools only by path, `Edit(//LAB/**)` and `Read(//LAB/**)`: a
+  probe wrote inside the lab and was refused outside it. They also deny push,
+  `gh`, `curl`, `wget`, `limactl` and web tools, but those are command-prefix
+  rules that an absolute path or a wrapper script gets past. There is no OS
+  sandbox: Bash can read and write outside the lab and reach the network. Run 2
+  wrote temporary files under /tmp, so treat the Claude topology as trusted-local,
+  not contained. Runs 2 and 3 predate the path rules and card injection: they
+  allowed the file tools without a path and read their cards because RUN.md told
+  them to.
 
 Rooms is the optional execution backend. With `--rooms` the verifier runs the
 exported patch through `LAB/bin/rooms-run PATCH OUT`, which applies it to the same
@@ -186,13 +198,12 @@ as success.
 ## Measured runs
 
 These runs were on one macOS host, with the local Lima Rooms host for the patch
-execution. The evidence is under
-`/Users/mh/Documents/Codex/2026-09-14/headless-workbench-claude/` (RESULTS.md,
-lab archives, per-attempt measurements).
+execution. Their evidence is retained outside the repository: RESULTS.md, the lab
+archives and per-attempt measurements. PR #344 names where.
 
 | Run | Provider | Outcome | Wall | Supervisor sessions | Rooms (in room / with transport) |
 |---|---|---|---|---|---|
-| Codex, 2026-09-13 | Codex app-server | patch `83da8be4` verified; Rooms ran separately outside the headless path | bound expired; one continuation | 3 | 18.29 s cold baseline (owner's probe) |
+| Codex, 2026-09-13 | Codex app-server | patch `83da8be4` verified; Rooms ran separately outside the headless path | bound expired; one continuation | 3 (that lab's audit.json) | 18.29 s cold baseline (owner's probe) |
 | Claude 1 | claude-sonnet-5 | fixture failed: Claude Code refuses a standalone `sleep`; the driver stopped instead of waiting | — | 1 | — |
 | Claude 2 | claude-sonnet-5 | audit pass at `b288e388`, three receipts; see deviations below | 1,099 s | 2 | 14.53 s / 15.28 s |
 | Claude 3 | claude-sonnet-5 | audit pass at `07ed940c`, 26/26 checks, three receipts, assessment reads Rooms directly | 784 s | 4 (interrupted + 3 mail wakes) | 17.30 s / 20.19 s |
@@ -212,7 +223,7 @@ author, verifier and a cold Rooms execution with no desktop task tools. They
 also show what stands between this and a fully headless peer-to-peer fleet:
 
 - **Agents run on the host; only the patch runs in a room.** A cold room applied
-  and tested the exact patch in about 15 seconds, while the three model agents
+  and tested the exact patch in 14.5–18.8 seconds, while the three model agents
   ran as host processes. The Claude agents had no OS sandbox and wrote under
   /tmp. Moving an agent into a room needs:
   - a room that holds a provider turn for minutes rather than a 120-second
@@ -224,9 +235,10 @@ also show what stands between this and a fully headless peer-to-peer fleet:
     returns a byte-identical patch.
 - **Fleet identity is a host directory and a host PID.** Delivery launches the
   bridge as a host process. Liveness reads host PIDs (the #342 sysctl fix), and
-  the PreToolUse guard ties a session to its launch directory. A verifier that
-  `cd`'d inside the lab lost its own checkout and could not record a receipt
-  until it worked around the guard. In a room, identity has to be the room and
+  a session's recorded directory follows its shell's cwd. After a verifier
+  `cd`'d inside the lab, the PreToolUse guard judged its own checkout another
+  seat and refused the way back, and it could not record a receipt until it
+  worked around the guard. In a room, identity has to be the room and
   attempt, and liveness has to come from the room lifecycle
   (`vmm_started` … `cleanup_done`), not `kill`/`sysctl` on the host.
 - **Mail and wakes need a host-side watcher.** Mail, receipts and handoffs live

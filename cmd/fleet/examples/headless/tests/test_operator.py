@@ -21,7 +21,7 @@ class OperatorTest(unittest.TestCase):
     def setUpClass(cls):
         cls.build = tempfile.TemporaryDirectory(prefix="headless-cli-")
         cls.binary = Path(cls.build.name) / "fleet"
-        lab.run(["go", "build", "-o", cls.binary, "./cmd/fleet"], lab.REPO)
+        lab.run(["go", "build", "-o", cls.binary, "./cmd/fleet"], lab.REPO, timeout=900)
 
     @classmethod
     def tearDownClass(cls):
@@ -85,11 +85,13 @@ class OperatorTest(unittest.TestCase):
     def test_parent_session_does_not_reach_lab_agents(self):
         lab.write_json(self.root / "resolved.json", {"provider": {"name": "claude", "runtime_home": "/sdk"}})
         inherited = {"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "parent", "CLAUDE_CODE_MESSAGING_SOCKET": "/tmp/s",
-                     "CLAUDE_CONFIG_DIR": "/config", "PATH": "/usr/bin", "HOME": "/home/operator"}
+                     "CLAUDE_CODE_ENTRYPOINT": "claude-desktop", "CLAUDE_CONFIG_DIR": "/config", "CLAUDE_CODE_OAUTH_TOKEN": "token",
+                     "CLAUDE_CODE_USE_VERTEX": "1", "PATH": "/usr/bin", "HOME": "/home/operator"}
         with patch.dict(lab.os.environ, inherited, clear=True):
             env = lab.env_for(self.root)
-        self.assertFalse({"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET"} & set(env))
+        self.assertFalse({"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_ENTRYPOINT"} & set(env))
         self.assertEqual((env["CLAUDE_CONFIG_DIR"], env["HOME"], env["FLEET_RUNTIME_HOME"]), ("/config", "/home/operator", "/sdk"))
+        self.assertEqual((env["CLAUDE_CODE_OAUTH_TOKEN"], env["CLAUDE_CODE_USE_VERTEX"]), ("token", "1"))
 
     def test_claude_policy_keeps_fleet_hooks_and_denies(self):
         checkout = self.root / "seat"
@@ -100,10 +102,63 @@ class OperatorTest(unittest.TestCase):
         lab.claude_settings(checkout, self.root)
         settings = json.loads((checkout / ".claude/settings.local.json").read_text())
         self.assertEqual(settings["hooks"], hooks)
-        self.assertLessEqual({"Bash(FLEET_ALLOW_SLOW=x:*)", *lab.CLAUDE_ALLOW}, set(settings["permissions"]["allow"]))
+        self.assertLessEqual({"Bash(FLEET_ALLOW_SLOW=x:*)", *lab.claude_allow(self.root)}, set(settings["permissions"]["allow"]))
+        self.assertFalse({"Read", "Write", "Edit"} & set(settings["permissions"]["allow"]), "bare file-tool allows escape the lab")
+        self.assertIn(f"Edit(/{self.root}/**)", settings["permissions"]["allow"])
         self.assertLessEqual({lane_deny, *lab.CLAUDE_DENY}, set(settings["permissions"]["deny"]))
         self.assertEqual(settings["permissions"]["additionalDirectories"], [str(self.root)])
         self.assertIs(settings["autoMemoryEnabled"], False)
+
+    def test_claude_wrapper_overrides_sdk_settings_and_appends_the_live_card(self):
+        runtime = self.root / "sdk"
+        (runtime / "node_modules/@anthropic-ai/claude-agent-sdk").mkdir(parents=True)
+        (runtime / "node_modules/@anthropic-ai/claude-agent-sdk/package.json").write_text("{}")
+        record = self.root / "argv.json"
+        fake = self.root / "real-claude"
+        fake.write_text("#!/usr/bin/env python3\nimport json,os,sys\n"
+                        f"open({str(record)!r}, 'w').write(json.dumps({{'argv': sys.argv[1:], 'memory': os.environ.get('CLAUDE_CODE_DISABLE_AUTO_MEMORY')}}))\n")
+        fake.chmod(0o700)
+        seats = [self.root / name for name in ("lead", "author", "verifier")]
+        for seat in seats:
+            (seat / ".claude").mkdir(parents=True)
+            lab.write_json(seat / ".claude/settings.local.json", {"hooks": {}})
+        with patch.object(lab.shutil, "which", return_value=str(fake)):
+            info = lab.claude_wrapper(self.root, seats, runtime)
+        self.assertEqual(info["cards"][str(seats[1])], str(self.root / "lanes/author/card.md"))
+        lab.run([self.root / "bin/claude", "--setting-sources=user,project,local", "--print"], seats[1])
+        observed = json.loads(record.read_text())
+        argv = observed["argv"]
+        # The CLI keeps the last --setting-sources, so the lab's must follow the SDK's.
+        self.assertGreater(argv.index("project,local"), argv.index("--setting-sources=user,project,local"))
+        self.assertEqual(argv[-2:], ["--append-system-prompt-file", str(self.root / "lanes/author/card.md")])
+        self.assertEqual(observed["memory"], "1")
+
+    def test_cancelled_supervisor_must_end_interrupted(self):
+        lab.ended_otherwise([{"attempt": "a", "provider_terminal": True, "provider_state": "interrupted"}], "a")
+        lab.ended_otherwise([{"attempt": "b", "provider_terminal": True, "provider_state": "failed"}], "a")
+        with self.assertRaisesRegex(RuntimeError, "not interrupted"):
+            lab.ended_otherwise([{"attempt": "a", "provider_terminal": True, "provider_state": "failed"}], "a")
+
+    def test_rooms_evidence_requires_identical_patch_success_and_cleanup(self):
+        patch_file = self.root / "worker.patch"
+        patch_file.write_bytes(b"diff\n")
+        digest = audit.digest(patch_file)
+        out = self.root / "result/rooms"
+        out.mkdir(parents=True)
+        (self.root / "bin/rooms-check.py").write_text("adapter")
+        info = {"rooms": {"out": str(out), "adapter_sha256": audit.digest(self.root / "bin/rooms-check.py")},
+                "verifier": {"cwd": "/lab/verifier"}}
+        lab.write_json(out / "summary.json", {"input_patch_sha256": digest, "returned_patch_sha256": digest,
+                                              "cli_exit": 0, "command_status": "succeeded", "command_exit": 0})
+        (out / "lifecycle.ndjson").write_text('{"event":"collection_done"}\n{"event":"cleanup_done"}\n')
+        receipt = {"head": "h", "kind": "rooms", "verdict": "pass", "dirty": False, "cwd": "/lab/verifier", "at": 1}
+        checks, _ = audit.rooms_evidence(self.root, info, patch_file, [receipt], "h")
+        self.assertTrue(all(checks.values()), checks)
+        lab.write_json(out / "summary.json", {"input_patch_sha256": digest, "returned_patch_sha256": "other",
+                                              "cli_exit": 0, "command_status": "succeeded", "command_exit": 0})
+        (out / "lifecycle.ndjson").write_text('{"event":"collection_done"}\n')
+        checks, _ = audit.rooms_evidence(self.root, info, patch_file, [receipt], "h")
+        self.assertEqual({k for k, v in checks.items() if not v}, {"rooms_identical_patch", "rooms_collected"})
 
     def test_claude_draft_continuity_uses_attempt_launch_times(self):
         draft = self.root / "seat/PLAN.md"

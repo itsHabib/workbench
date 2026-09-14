@@ -61,14 +61,16 @@ class RoomsAdapterTest(unittest.TestCase):
                     "--toolstore", "/guest/store", "--patch", str(root / "worker.patch"), "--out", str(root / "result")]
             with patch.object(sys, "argv", argv), patch.object(adapter.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(adapter.main(), 0)
-            staged, run = calls[1], calls[2]
+            staged = next(c for c in calls if "tee" in c[0])
+            run = next(c for c in calls if "python3" in c[0])
             self.assertEqual(staged[1]["input"], b"diff\n")
             self.assertEqual(run[0][:4], ["limactl", "shell", "rooms-host", "sudo"])
             self.assertEqual(run[0][run[0].index("--rooms") + 1], "/guest/rooms")
             self.assertEqual(run[1]["input"], Path(adapter.__file__).read_bytes())
-            self.assertIn("rm", calls[-1][0])
+            self.assertIn("--one-file-system", calls[-1][0])
             self.assertEqual(json.loads((root / "result/summary.json").read_text()), {"cli_exit": 0})
-            self.assertEqual(json.loads((root / "result/transport.json").read_text())["exit"], 0)
+            transport = json.loads((root / "result/transport.json").read_text())
+            self.assertEqual((transport["exit"], transport["guest_removed"]), (0, True))
 
 
 if __name__ == "__main__":

@@ -99,7 +99,8 @@ def rooms_evidence(root, info, patch, receipts, head):
                                 and latest.get("cwd") == info["verifier"]["cwd"]),
               "rooms_identical_patch": (summary.get("input_patch_sha256") == summary.get("returned_patch_sha256") == digest(patch)),
               "rooms_succeeded": summary.get("cli_exit") == 0 and summary.get("command_status") == "succeeded" and summary.get("command_exit") == 0,
-              "rooms_collected": "collection_done" in events and "cleanup_done" in events}
+              "rooms_collected": "collection_done" in events and "cleanup_done" in events,
+              "rooms_adapter_unchanged": digest(root / "bin/rooms-check.py") == info["rooms"]["adapter_sha256"]}
     return checks, {"receipt": latest, "summary": summary, "events": events}
 
 
@@ -117,13 +118,15 @@ def audit(root):
     checks["patch_matches_result"] = patch.read_bytes() == git(author, "diff", info["base"], head)
     task = author / info["task_path"]
     for name in ("input.json", "test_report.py", "INPUT.md"):
-        checks["preserved_" + name] = (task / name).read_bytes() == git(author, "show", info["seed_head"] + ":" + info["task_path"] + "/" + name)
+        # The committed result is what the verifier and Rooms test, not the working tree.
+        path = info["task_path"] + "/" + name
+        checks["preserved_" + name] = git(author, "show", head + ":" + path) == git(author, "show", info["seed_head"] + ":" + path)
     interruption = read(root / "control/interruption.json")
     draft = task / "PLAN.md"
     # Final PLAN.md may legitimately document the answer and completed tests.
     # The trace distinguishes the original author's continuation from replacement.
-    checks["assignment_retained"] = all(digest(root / "state/assign" / name) == value["sha256"]
-                                         for name, value in interruption["assignments"].items())
+    checks["assignment_retained"] = bool(interruption["assignments"]) and all(
+        digest(root / "state/assign" / name) == value["sha256"] for name, value in interruption["assignments"].items())
     receipts = [read(p) for p in (root / "state/receipts").glob("*.json")]
     evidence = {}
     for kind, cwd in (("implementation", author), ("verify", verifier)):

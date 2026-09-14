@@ -70,7 +70,9 @@ def through_lima(args):
     """Transport only: stage the patch, run this file in the VM, copy the attempt back.
 
     Rooms reaches the room with $HOME/.ssh/id_rooms. The Lima user's own key is
-    staged into a private HOME, so root's run leaves no state in that user's home.
+    staged into a private per-attempt HOME, so root's run leaves no state in that
+    user's home. Rooms keeps slot claims under HOME, so these attempts must not
+    run concurrently with each other or with other Rooms runs on the host.
     """
     output = args.out.resolve()
     output.mkdir()  # Never reuse a local attempt directory either.
@@ -79,7 +81,22 @@ def through_lima(args):
     guest = "/tmp/rc" + uuid.uuid4().hex[:8]
     shell = ["limactl", "shell", args.lima, "sudo"]
     started = time.monotonic()
-    stage = (f"mkdir -p {guest}/h/.ssh && "
+    try:
+        code = run_in_guest(args, shell, guest, output)
+    finally:
+        # Never follow a mount Rooms failed to release out of the private directory.
+        removed = subprocess.run([*shell, "rm", "-rf", "--one-file-system", guest]).returncode == 0
+    transport = {"lima_host": args.lima, "guest_attempt": guest + "/a", "exit": code, "guest_removed": removed,
+                 "local_patch_sha256": sha(args.patch), "elapsed_seconds": time.monotonic() - started,
+                 "scope": "includes VM transport; the guest copy, including its staged key, is removed after collection"}
+    (output / "transport.json").write_text(json.dumps(transport, indent=2) + "\n")
+    print((output / "summary.json").read_text() if (output / "summary.json").exists() else json.dumps(transport, indent=2))
+    return code
+
+
+def run_in_guest(args, shell, guest, output):
+    """Stage the key and patch, run this file as root, and copy the attempt back."""
+    stage = (f"mkdir -m 700 {guest} && mkdir -p {guest}/h/.ssh && "
              f"install -m 600 \"$(getent passwd \"$SUDO_USER\" | cut -d: -f6)/.ssh/id_rooms\" {guest}/h/.ssh/id_rooms")
     subprocess.run([*shell, "sh", "-c", stage], check=True)
     subprocess.run([*shell, "tee", guest + "/input.patch"], input=args.patch.read_bytes(), stdout=subprocess.DEVNULL, check=True)
@@ -89,13 +106,6 @@ def through_lima(args):
     archive = subprocess.run([*shell, "tar", "-C", guest + "/a", "-cf", "-", "."], capture_output=True, check=True).stdout
     with tarfile.open(fileobj=io.BytesIO(archive)) as collected:
         collected.extractall(output, filter="data")
-    # Never follow a mount Rooms failed to release out of the private directory.
-    subprocess.run([*shell, "rm", "-rf", "--one-file-system", guest], check=True)
-    transport = {"lima_host": args.lima, "guest_attempt": guest + "/a", "exit": code,
-                 "local_patch_sha256": sha(args.patch), "elapsed_seconds": time.monotonic() - started,
-                 "scope": "includes VM transport; the guest copy was removed after collection"}
-    (output / "transport.json").write_text(json.dumps(transport, indent=2) + "\n")
-    print((output / "summary.json").read_text() if (output / "summary.json").exists() else json.dumps(transport, indent=2))
     return code
 
 
