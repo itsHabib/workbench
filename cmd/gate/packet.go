@@ -16,6 +16,9 @@ import (
 // enclosing repository when building from a nested Git worktree.
 var buildRevision string
 
+// The real store's generated evidence ID width is checked by a regression.
+const candidateEvidenceID = "evd_0000000000000000"
+
 func gateVersion() map[string]any {
 	revision := buildRevision
 	if revision == "" {
@@ -219,7 +222,7 @@ func checkPacketEvidenceBudget(arts []state.Artifact, run string, body verify.So
 		return err
 	}
 	// The placeholder has the same width as the store's generated evidence ID.
-	candidate = append(candidate, state.Artifact{ID: "evd_0000000000000000", Kind: state.KindEvidence, Run: run, Body: raw})
+	candidate = append(candidate, state.Artifact{ID: candidateEvidenceID, Kind: state.KindEvidence, Run: run, Body: raw})
 	packet, err := verify.JudgmentPacket(candidate, body.Subject)
 	if err != nil {
 		return err

@@ -20,6 +20,17 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/verify"
 )
 
+func TestCandidateEvidenceIDMatchesStoreWidth(t *testing.T) {
+	e := testEnv(t)
+	a, err := e.st.Append(state.KindEvidence, state.NewRunID(), nil, map[string]string{"fixture": "ID width"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.ID) != len(candidateEvidenceID) {
+		t.Fatalf("candidate header width %d differs from stored evidence ID width %d", len(candidateEvidenceID), len(a.ID))
+	}
+}
+
 func TestPacketCLI(t *testing.T) {
 	if os.Getenv("GATE_PACKET_HELPER") == "1" {
 		os.Args = append([]string{"gate"}, os.Args[3:]...)
