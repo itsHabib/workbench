@@ -34,6 +34,10 @@ At `10b066cac0bb959ca3dfa7dc2d77886eed277e78` (2026-09-13):
 - [Issue #324](https://github.com/itsHabib/workbench/issues/324) calls for Windows validation
   after the `fleet.exe` packaging fix. It does not authorize unconditional duplicate SDK hook
   callbacks. See the dated [provider evidence](provider-runtime-validation.md).
+- [#350](https://github.com/itsHabib/workbench/pull/350) (2026-09-13): a branch lease blocks
+  only a holder active on the branch within `FLEET_IDLE_S`. A dead or idle holder's branch
+  passes to the next writer with a `takeover` record, and both sessions are told. Sections 2
+  and 5 are updated in place; see [Active or idle](#active-or-idle).
 - Hook trust/configuration and observed lifecycle events do not establish write protection.
   The current [setup inspection](run-a-fleet.md#inspect-codex-setup-before-delivery) separates
   configuration discovery from actual execution evidence.
