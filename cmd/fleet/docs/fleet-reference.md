@@ -137,7 +137,7 @@ identity, because the role comes from `launch_dir`, not the event's cwd
 `pushd` into another session's bound directory before the shell runs it, because the next
 tool call there would lease that seat's branch (`cmd/fleet/internal/fleet/hook.go:381-410`).
 The session's own tree is read from `launch_dir` too, so a session whose shell stepped into
-an unbound directory may always `cd` home.
+an unbound directory may `cd` back to its launch directory.
 
 **Rule 2. Runtime activity comes from hooks and process evidence.** Identity, branch, liveness, turn
 state and last assistant text are written by the hook from harness events
@@ -505,9 +505,9 @@ the two writes can leave an assignment that wakes its worker with no row. This i
 `fleet receipt <sha> <kind> pass|fail "<observable>" [--card <url>]`
 (`cmd/fleet/internal/verbs/receipts.go:42-85`). The requirements:
 
-- the caller is a live session recorded at this directory — where its shell last stood, or
-  where it was launched, so `(cd <its checkout> && fleet receipt …)` works from a shell that
-  has wandered off (`cmd/fleet/internal/verbs/verbs.go:635-690`);
+- the caller is a live session recorded at this directory — one whose shell last stood here,
+  else one launched here, so `(cd <its checkout> && fleet receipt …)` works from a shell that
+  has wandered off (`cmd/fleet/internal/verbs/verbs.go:635-714`);
 - the tree's `HEAD` starts with the named sha, and `git status --porcelain` is empty
   (`cmd/fleet/internal/verbs/receipts.go:194-213`);
 - the observable is non-empty: it is "what would have read differently had the claim been

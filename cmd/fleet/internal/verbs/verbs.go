@@ -647,10 +647,36 @@ func recordedAt(rec fleet.Rec, dir string) bool {
 	return false
 }
 
+// recordedWhere is where a record places its session, for a refusal: the directory
+// its shell stood in, and the one it was launched in when that differs.
+func recordedWhere(rec fleet.Rec) string {
+	where, launch := fleet.S(rec, "cwd"), fleet.S(rec, "launch_dir")
+	if launch == "" || canon(launch) == canon(where) {
+		return where
+	}
+	return where + " (launched in " + launch + ")"
+}
+
+// liveSessionsAt is every live session whose record names dir in field.
+func liveSessionsAt(field, dir string) []fleet.Rec {
+	want := canon(dir)
+	var live []fleet.Rec
+	for _, r := range sessionRows() {
+		if !fleet.B(r, "ended") && fleet.S(r, field) != "" && canon(fleet.S(r, field)) == want && fleet.SessionAlive(r) {
+			live = append(live, r)
+		}
+	}
+	return live
+}
+
 // currentSession is the session this verb acts for: `--session <id8>` when given,
-// else the live session recorded at this cwd (recordedAt), most recent event first.
-// Two live sessions in one directory is a real ambiguity and is refused rather than
-// guessed.
+// else the live session recorded at this cwd, most recent event first. Two live
+// sessions in one directory is a real ambiguity and is refused rather than guessed.
+//
+// A session standing here is the caller before one that was only launched here: two
+// sessions launched in one checkout must not trade identities because the other's
+// shell wandered off and acted more recently. The launch directory is the fallback,
+// so it resolves only where the shell's directory found nobody.
 func currentSession(explicit string) (string, error) {
 	if explicit != "" {
 		sid, err := findSession(explicit)
@@ -664,16 +690,14 @@ func currentSession(explicit string) (string, error) {
 			return "", refuse("fleet: session %s is not live; --session names the tab you are running in, not a past one", fleet.Short(sid))
 		}
 		if !recordedAt(rec, cwd()) {
-			return "", refuse("fleet: session %s is recorded at %s, not %s; --session only disambiguates live sessions in this directory", fleet.Short(sid), fleet.S(rec, "cwd"), cwd())
+			return "", refuse("fleet: session %s is recorded at %s, not %s; --session only disambiguates live sessions in this directory", fleet.Short(sid), recordedWhere(rec), cwd())
 		}
 		return sid, nil
 	}
 	here := cwd()
-	var live []fleet.Rec
-	for _, r := range sessionRows() {
-		if !fleet.B(r, "ended") && recordedAt(r, here) && fleet.SessionAlive(r) {
-			live = append(live, r)
-		}
+	live := liveSessionsAt("cwd", here)
+	if len(live) == 0 {
+		live = liveSessionsAt("launch_dir", here)
 	}
 	if len(live) == 0 {
 		return "", refuse("fleet: no live session is recorded at %s; run this from the session's own tab, or pass --session <id8>", here)
