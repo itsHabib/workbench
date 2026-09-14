@@ -1,0 +1,11 @@
+{
+  "name": "Example change",
+  "phases": [
+    {"name": "discovery", "brief": "Find prior art, constraints and unanswered questions.", "inputs": ["discovery.md"], "git": false, "requires": ["sources-assessed"]},
+    {"name": "design", "brief": "Choose an approach and explain the trade-offs.", "inputs": ["discovery.md", "design.md"], "git": false, "requires": ["design-accepted"]},
+    {"name": "plan", "brief": "Specify the workload, success checks and escalation conditions.", "inputs": ["design.md", "plan.md"], "git": false, "requires": ["plan-accepted"]},
+    {"name": "implementation", "brief": "Build and exercise the proposed change.", "inputs": ["plan.md"], "git": true, "requires": ["checks-passed"]},
+    {"name": "verification", "brief": "Challenge the result against the acceptance conditions.", "inputs": ["plan.md"], "git": true, "requires": ["result-accepted"]},
+    {"name": "release", "brief": "Collect the independently authorized release outcome. Passage cannot authorize or execute it.", "inputs": ["plan.md"], "git": true, "requires": ["release-observed"]}
+  ]
+}
