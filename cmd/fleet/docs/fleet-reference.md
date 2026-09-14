@@ -73,7 +73,7 @@ can stop here and come back to sections 5 (leases) and 8 (the watcher) for detai
   taken over on the next write, and so is an idle one's: a live session with no activity on
   that branch within `FLEET_IDLE_S`. A resource is never taken over automatically. On that
   path a record that cannot be read is never treated as death
-  (`cmd/fleet/internal/fleet/policy.go:398-492`).
+  (`cmd/fleet/internal/fleet/policy.go:398-494`).
   Seat occupancy and delivery's presence check are exceptions. Section 5.
 - **The watcher** (`fleet watch`) folds the store into a board every tick, mails
   lateness, and starts one Claude or Codex turn per directory when there is mail, a new
@@ -108,14 +108,14 @@ Fleet's answer is to derive the facts from actions the agents take anyway. The h
 around tool calls, and when a turn or session ends; Fleet installs itself as those hooks.
 It records who the session is, which branch it writes, whether it is alive, and what it
 said last, and it refuses recognized tool admissions that would break recorded ownership
-(`cmd/fleet/internal/fleet/hook.go:37-67`). A lead session dispatches work to worker seats;
+(`cmd/fleet/internal/fleet/hook.go:37-76`). A lead session dispatches work to worker seats;
 workers answer to the lead; a lead stays accountable for each row it dispatched until a
 receipt says the row is done (`cmd/fleet/README.md:12-19`).
 
 What Fleet is not: the README calls it neither a scheduler nor a workflow engine
 (`cmd/fleet/README.md:8-10`), although its watcher does schedule provider launches (drift
 log). It keeps no cross-machine store; two machines share only the git remote, and a pull
-request carries the ownership row between them (`cmd/fleet/README.md:400-410`). Merge
+request carries the ownership row between them (`cmd/fleet/README.md:403-413`). Merge
 permission stays with Gate (`docs/features/org-fleet-boundary/spec.md:46`).
 
 **Fleet and Org.** Org (`cmd/org`) is a registry of editable Markdown role cards with an
@@ -127,27 +127,27 @@ them is the table at `docs/features/org-fleet-boundary/spec.md:33-46`.
 
 ## 2. The five rules
 
-The five rules are stated in `cmd/fleet/README.md:21-67`. Each is enforced somewhere
+The five rules are stated in `cmd/fleet/README.md:21-70`. Each is enforced somewhere
 specific.
 
 **Rule 1. Location is identity.** A session's role is decided by the directory it was
 launched in. `roles.map` is plain text, one line per directory: `path tenant role [seat]`
 (`cmd/fleet/internal/fleet/lanes.go:107-138`). At SessionStart the hook records the launch
-directory once (`cmd/fleet/internal/fleet/session.go:96-98`) and resolves the role from it
-(`cmd/fleet/internal/fleet/session.go:103-115`). Two different match rules apply
+directory once (`cmd/fleet/internal/fleet/session.go:97-99`) and resolves the role from it
+(`cmd/fleet/internal/fleet/session.go:104-116`). Two different match rules apply
 (`cmd/fleet/internal/fleet/lanes.go:143-167`): the **role** needs an exact path match, so
 an unlisted nested worktree has no role rather than borrowing its parent's; the **tenant**
 is the longest-prefix match, so it is inherited down a tree. A later `cd` does not change
 identity, because the role comes from `launch_dir`, not the event's cwd
-(`cmd/fleet/internal/fleet/session.go:91-102`). The hook also refuses a Bash `cd` or
+(`cmd/fleet/internal/fleet/session.go:92-103`). The hook also refuses a Bash `cd` or
 `pushd` into another session's bound directory before the shell runs it, because the next
-tool call there would lease that seat's branch (`cmd/fleet/internal/fleet/hook.go:393-422`).
+tool call there would lease that seat's branch (`cmd/fleet/internal/fleet/hook.go:426-455`).
 The session's own tree is read from `launch_dir` too, so a session whose shell stepped into
 an unbound directory may `cd` back to its launch directory.
 
 **Rule 2. Runtime activity comes from hooks and process evidence.** Identity, branch, liveness, turn
 state and last assistant text are written by the hook from harness events
-(`cmd/fleet/internal/fleet/session.go:52-131`, `cmd/fleet/internal/fleet/hook.go:532-539`).
+(`cmd/fleet/internal/fleet/session.go:52-139`, `cmd/fleet/internal/fleet/hook.go:565-572`).
 Assignments, handoffs and receipts are authored records. A receipt can change a row to done;
 Fleet does not execute its claimed check or establish the checker's independence.
 No verb lets an agent set its own liveness directly. The one declared act is
@@ -155,11 +155,11 @@ No verb lets an agent set its own liveness directly. The one declared act is
 computed at read time from leases, session records and receipts (section 6).
 
 **Rule 3. One holder per key.** A key is `repo:<repo-id>:<branch>` or `slot:<name>`
-(`cmd/fleet/internal/fleet/store.go:410-430`). At most one session holds a key. A rival is
+(`cmd/fleet/internal/fleet/store.go:418-438`). At most one session holds a key. A rival is
 refused only while the holder is active on the key: for a branch, live with activity there
 within `FLEET_IDLE_S`; for a resource, live. The refusal names the holder and, for a branch,
 when it would change hands; it does not send a routine handover to the operator
-(`cmd/fleet/internal/fleet/policy.go:476-492`). Section 5.
+(`cmd/fleet/internal/fleet/policy.go:474-494`). Section 5.
 
 **Rule 4. The substrate learns no domain word.** Kinds of agent are data: a lane is a
 directory with a `manifest.json` (kind, requires, produces, cadence, watch) and a prose
@@ -176,13 +176,13 @@ process exit is not done (`cmd/fleet/docs/headless.md:5`). Section 6.
 
 ## 3. The store and who writes each file
 
-`$FLEET_STATE`, default `~/.fleet` (`cmd/fleet/internal/fleet/store.go:36-48`). Every JSON
+`$FLEET_STATE`, default `~/.fleet` (`cmd/fleet/internal/fleet/store.go:36-49`). Every JSON
 file is written to a per-process temporary name and renamed into place, so a reader never
-sees half a file (`cmd/fleet/internal/fleet/store.go:123-138`). JSONL files are appended
-(`cmd/fleet/internal/fleet/store.go:140-155`). Per-key files are named
+sees half a file (`cmd/fleet/internal/fleet/store.go:131-146`). JSONL files are appended
+(`cmd/fleet/internal/fleet/store.go:148-163`). Per-key files are named
 `<dir>/<Safe(key)>.json`, where `Safe` replaces every character outside `[A-Za-z0-9._-]`
-with `__` (`cmd/fleet/internal/fleet/store.go:298-301`,
-`cmd/fleet/internal/fleet/store.go:415-416`); because that mapping is not reversible, a
+with `__` (`cmd/fleet/internal/fleet/store.go:306-309`,
+`cmd/fleet/internal/fleet/store.go:423-424`); because that mapping is not reversible, a
 lease file must name its own key or it is treated as malformed
 (`cmd/fleet/internal/fleet/lease.go:44-49`).
 
@@ -199,23 +199,23 @@ The processes that write:
 | path | written by | holds | code |
 |---|---|---|---|
 | `$ORG_STATE/roles.map` | verb: `fleet role`, `fleet pool` | `path tenant role [seat]`, one line per bound directory | `cmd/fleet/internal/verbs/role.go:441-473` |
-| `sessions/<sid>.json` | hook (every event); the lease path writes a minimal one before a first lease | identity, launch dir, role, seat, lane, branch, pid and pid kind, turn state, last event, `last_writes` | `cmd/fleet/internal/fleet/session.go:52-131`, `cmd/fleet/internal/fleet/policy.go:532-540` |
-| `leases/<key>.json` | hook (first write, branch switch, takeover, seat occupancy at start, release at end); verbs `take`, `drop`, `revoke` | one holder per key; after a takeover, its `takeover` record | `cmd/fleet/internal/fleet/policy.go:438`, `cmd/fleet/internal/fleet/policy.go:462-474`, `cmd/fleet/internal/fleet/session.go:631-633`, `cmd/fleet/internal/fleet/lease.go:127-240`, `cmd/fleet/internal/verbs/keys.go:117-231` |
+| `sessions/<sid>.json` | hook (every event); the lease path writes a minimal one before a first lease | identity, launch dir, role, seat, lane, branch, pid and pid kind, turn state, last event, `last_writes` | `cmd/fleet/internal/fleet/session.go:52-139`, `cmd/fleet/internal/fleet/policy.go:534-542` |
+| `leases/<key>.json` | hook (first write, branch switch, takeover, seat occupancy at start, release at end); verbs `take`, `drop`, `revoke` | one holder per key; after a takeover, its `takeover` record | `cmd/fleet/internal/fleet/policy.go:434`, `cmd/fleet/internal/fleet/policy.go:458-472`, `cmd/fleet/internal/fleet/session.go:662-664`, `cmd/fleet/internal/fleet/lease.go:127-240`, `cmd/fleet/internal/verbs/keys.go:117-231` |
 | `keylocks/<key>.lock` | any process taking `KeyLock` | an empty file whose kernel lock serializes one key; never removed | `cmd/fleet/internal/fleet/lock.go:47-73` |
-| `stop/<key>.json` | verbs `stop`, `revoke`; removed by `resume`, by the hook once a revoke has reached the displaced session, or at SessionEnd of the session a revoke flag excepts | a stand-down flag on a branch, resource or mail address | `cmd/fleet/internal/verbs/keys.go:22-63`, `cmd/fleet/internal/fleet/session.go:143-157`, `cmd/fleet/internal/fleet/lease.go:239` |
+| `stop/<key>.json` | verbs `stop`, `revoke`; removed by `resume`, by the hook once a revoke has reached the displaced session, or at SessionEnd of the session a revoke flag excepts | a stand-down flag on a branch, resource or mail address | `cmd/fleet/internal/verbs/keys.go:22-63`, `cmd/fleet/internal/fleet/session.go:174-188`, `cmd/fleet/internal/fleet/lease.go:239` |
 | `dispatch/<repo>__<branch>__<rel>.json` | verbs `dispatch`, `reassign`, `undispatch`, `request` | the declared part of an ownership row | `cmd/fleet/internal/verbs/work.go:44-48`, `cmd/fleet/internal/verbs/work.go:150-157`, `cmd/fleet/internal/verbs/work.go:218-221` |
 | `assign/<seat>.json` | verb `assign` (and `dispatch --slot`); the SessionStart hook stamps `delivered_to` | what a seat's next session reads at start | `cmd/fleet/internal/verbs/views.go:873-875`, `cmd/fleet/internal/fleet/startup_continuity.go:44-47` |
 | `receipts/<sha>.<kind>.json` and `receipts/<head>.<kind>.jsonl` | verb `receipt` | latest verdict at a head, and every verdict at that head | `cmd/fleet/internal/verbs/receipts.go:93-129` |
 | `mail/.v2/<sha256 tenant>/<role or seat>/<sha256 address>/<id>.json` | verbs `send`, `ack`; watcher (delivery stamps and lateness reports) | one message, retained after acknowledgement | `cmd/fleet/internal/fleet/mail_address.go:12-19`, `cmd/fleet/internal/fleet/mail.go:145-180`, `cmd/fleet/internal/fleet/mail_store.go:193-252`, `cmd/fleet/internal/watch/late.go:106-120` |
-| `handoff/<key>.json` | verb `handoff <branch>` | the latest authored conclusion for a branch | `cmd/fleet/internal/verbs/keys.go:415-439` |
+| `handoff/<key>.json` | verb `handoff <branch>` | the latest authored conclusion for a branch | `cmd/fleet/internal/verbs/keys.go:437-460` |
 | `role-handoff/<sha1>.json` | verb `handoff --role` | the latest authored conclusion for a tenant and role | `cmd/fleet/internal/fleet/startup_continuity.go:98-127` |
-| `last-word/<key>.json` | hook at Stop | the session's last assistant text on that branch | `cmd/fleet/internal/fleet/session.go:314-335` |
-| `inflight/`, `locks/` | hook (Bash PreToolUse writes, PostToolUse and SessionEnd remove) | a running command's start time; a running expensive rule | `cmd/fleet/internal/fleet/hook.go:465-514`, `cmd/fleet/internal/fleet/lease.go:233-240` |
-| `costs.jsonl`, `overrides.jsonl` | hook | measured command durations; accepted `FLEET_ALLOW_SLOW` overrides | `cmd/fleet/internal/fleet/hook.go:511`, `cmd/fleet/internal/fleet/policy.go:619` |
+| `last-word/<key>.json` | hook at Stop | the session's last assistant text on that branch | `cmd/fleet/internal/fleet/session.go:345-366` |
+| `inflight/`, `locks/` | hook (Bash PreToolUse writes, PostToolUse and SessionEnd remove) | a running command's start time; a running expensive rule | `cmd/fleet/internal/fleet/hook.go:498-547`, `cmd/fleet/internal/fleet/lease.go:233-240` |
+| `costs.jsonl`, `overrides.jsonl` | hook | measured command durations; accepted `FLEET_ALLOW_SLOW` overrides | `cmd/fleet/internal/fleet/hook.go:544`, `cmd/fleet/internal/fleet/policy.go:621` |
 | `events.jsonl` | hook | every evaluation's verdict and latency | `cmd/fleet/main.go:242-263` |
-| `hook-errors.jsonl` | hook and watcher | errors that did not change a verdict | `cmd/fleet/internal/fleet/store.go:157-161`, `cmd/fleet/internal/watch/watch.go:636` |
+| `hook-errors.jsonl` | hook and watcher | errors that did not change a verdict | `cmd/fleet/internal/fleet/store.go:165-169`, `cmd/fleet/internal/watch/watch.go:636` |
 | `actions.jsonl`, `decisions.jsonl` | verbs (`dispatch`, `reassign`, `revoke`; `decide`, `undecide`) | action telemetry; operator decisions in force | `cmd/fleet/internal/fleet/telemetry.go:5-12`, `cmd/fleet/internal/verbs/keys.go:353-377` |
-| `prs/<repo>__<n>.json` | hook at PostToolUse of a `gh pr` command | which pull request a branch's change is | `cmd/fleet/internal/fleet/policy.go:916-957` |
+| `prs/<repo>__<n>.json` | hook at PostToolUse of a `gh pr` command | which pull request a branch's change is | `cmd/fleet/internal/fleet/policy.go:918-959` |
 | `cache/github/<slug>.json` | verb `sync`; watcher every tenth tick | ownership rows and receipts other machines posted | `cmd/fleet/internal/verbs/remote.go:268-334`, `cmd/fleet/internal/watch/watch.go:153-166` |
 | `migrated-keys.v1` | hook | marker that the legacy key migration completed | `cmd/fleet/internal/fleet/lease.go:344-367` |
 | `lanes/<kind>/` | `install.sh` | manifests and cards | `cmd/fleet/internal/fleet/lanes.go:20-36` |
@@ -233,7 +233,7 @@ The processes that write:
 
 Two properties of the store matter everywhere below. No hook, watcher or operator verb
 deletes a session record; a session that ends is marked `ended: true`
-(`cmd/fleet/internal/fleet/hook.go:541-551`). The only deletion path is the reference
+(`cmd/fleet/internal/fleet/hook.go:574-584`). The only deletion path is the reference
 suite's test verb `fleet x-remove-owned` (`cmd/fleet/internal/verbs/xtest.go:78-83`). And
 the lock files under `keylocks/` are never
 unlinked, because unlinking would let the next caller lock a different file under the same
@@ -266,7 +266,7 @@ matcher: `^(Bash|Edit|Write|MultiEdit|NotebookEdit)$` for Claude
    (`cmd/fleet/internal/fleet/platform_windows.go:67-71`).
 
 **The fail-open law.** A malformed event or an internal panic exits 0 with no output
-(`cmd/fleet/main.go:200-219`, `cmd/fleet/internal/fleet/hook.go:37-46`). Two paths fail
+(`cmd/fleet/main.go:200-219`, `cmd/fleet/internal/fleet/hook.go:37-55`). Two paths fail
 closed instead. On the lease path every error is a refusal
 (`cmd/fleet/internal/fleet/policy.go:391-403`). A stop-flag file that exists but cannot be
 read is reported as a malformed flag, and a malformed flag still stands the session down
@@ -275,36 +275,36 @@ The hook also spawns nothing except at SessionStart, where it may walk `ps` to f
 harness pid (`cmd/fleet/internal/fleet/platform_unix.go:32-44`) and may revive a dead
 watcher (`cmd/fleet/main.go:81-92`).
 
-**What each event does** (`cmd/fleet/internal/fleet/hook.go:52-65`):
+**What each event does** (`cmd/fleet/internal/fleet/hook.go:61-74`):
 
 | event | reads | writes |
 |---|---|---|
-| SessionStart | roles.map, lane manifest, role handoff, mail, assignment, branch lease, stop flag | session record with pid and launch dir; seat occupancy lease; `delivered_to` on the seat's assignment; injects `[fleet]` lines (`cmd/fleet/internal/fleet/hook.go:69-114`) |
-| UserPromptSubmit | the previous record, mail, the board when the lane watches it | `turn_open`, `turn_open_at`, `last_prompt_at` (`cmd/fleet/internal/fleet/hook.go:211-235`) |
-| PreToolUse | stop flags, bound directories, lease, switch targets, requires, cost rules | a lease on a first write; then the session record; then in-flight records for Bash (`cmd/fleet/internal/fleet/hook.go:263-325`) |
-| PostToolUse | the in-flight record | `last_write`/`last_writes`, `costs.jsonl`, the `gh pr` cache (`cmd/fleet/internal/fleet/hook.go:474-526`) |
-| Stop | the transcript | `turn_open: false`, `last_stop_at`, `last-word/` (`cmd/fleet/internal/fleet/hook.go:532-539`) |
-| SessionEnd | the store's leases, locks, in-flight records and stop flags | `ended: true`; releases branch leases, cost locks, in-flight records and revoke flags in its favour (`cmd/fleet/internal/fleet/hook.go:541-551`, `cmd/fleet/internal/fleet/lease.go:223-240`) |
+| SessionStart | roles.map, lane manifest, role handoff, mail, assignment, branch lease, stop flag | session record with pid and launch dir; seat occupancy lease; `delivered_to` on the seat's assignment; injects `[fleet]` lines (`cmd/fleet/internal/fleet/hook.go:78-123`) |
+| UserPromptSubmit | the previous record, mail, the board when the lane watches it | `turn_open`, `turn_open_at`, `last_prompt_at` (`cmd/fleet/internal/fleet/hook.go:223-247`) |
+| PreToolUse | stop flags, bound directories, lease, switch targets, requires, cost rules | a lease on a first write; then the session record; then in-flight records for Bash (`cmd/fleet/internal/fleet/hook.go:275-358`) |
+| PostToolUse | the in-flight record | `last_write`/`last_writes`, `costs.jsonl`, the `gh pr` cache (`cmd/fleet/internal/fleet/hook.go:507-559`) |
+| Stop | the transcript | `turn_open: false`, `last_stop_at`, `last-word/` (`cmd/fleet/internal/fleet/hook.go:565-572`) |
+| SessionEnd | the store's leases, locks, in-flight records and stop flags | `ended: true`; releases branch leases, cost locks, in-flight records and revoke flags in its favour (`cmd/fleet/internal/fleet/hook.go:574-584`, `cmd/fleet/internal/fleet/lease.go:223-240`) |
 
 PreToolUse orders its work so that the session record is written only after the stop,
-directory, lease and switch verdicts (`cmd/fleet/internal/fleet/hook.go:263-305`). Three
+directory, lease and switch verdicts (`cmd/fleet/internal/fleet/hook.go:275-320`). Three
 details matter. `SettleHandoff` may drop leases from an earlier switch before any verdict
-(`cmd/fleet/internal/fleet/hook.go:269-270`). The lease verdict itself writes the lease when
-it grants one (`cmd/fleet/internal/fleet/policy.go:438`, `cmd/fleet/internal/fleet/policy.go:462-474`).
+(`cmd/fleet/internal/fleet/hook.go:281-282`). The lease verdict itself writes the lease when
+it grants one (`cmd/fleet/internal/fleet/policy.go:434`, `cmd/fleet/internal/fleet/policy.go:458-472`).
 And the checks for required resources and slow commands run after the record is written
-(`cmd/fleet/internal/fleet/hook.go:306-324`), so a call they deny keeps a lease the lease
+(`cmd/fleet/internal/fleet/hook.go:321-339`), so a call they deny keeps a lease the lease
 verdict just took. If the record write fails on a lease-bearing write, the call is denied,
 because a lease whose holder's record cannot be read would look like a dead holder's to the
-next session (`cmd/fleet/internal/fleet/hook.go:300-305`).
+next session (`cmd/fleet/internal/fleet/hook.go:315-320`).
 
 ## 5. Leases
 
 ### Keys
 
 A branch key is `repo:<repo-id>:<branch>`; a resource key is `slot:<name>`
-(`cmd/fleet/internal/fleet/store.go:410-455`). The repository id makes `main` in two
+(`cmd/fleet/internal/fleet/store.go:418-463`). The repository id makes `main` in two
 repositories two keys. The code's own comment says the prefix matters for one rule, what
-happens when the holder dies (`cmd/fleet/internal/fleet/store.go:410-413`). In practice it
+happens when the holder dies (`cmd/fleet/internal/fleet/store.go:418-421`). In practice it
 also decides whether a key can be taken or dropped by hand and whether SessionEnd releases
 it (below).
 
@@ -315,50 +315,52 @@ it (below).
 - A **resource** is taken on purpose with `fleet take slot:<name> "<why>"` and released
   with `fleet drop` (`cmd/fleet/internal/verbs/keys.go:116-231`). A lane manifest's
   `requires` names resources a session must hold before any effectful call
-  (`cmd/fleet/internal/fleet/policy.go:550-585`).
+  (`cmd/fleet/internal/fleet/policy.go:552-587`).
 - A **seat** is also a `slot:` key, but it is an occupancy lease the SessionStart hook
   writes for the session that starts in a pooled worktree
-  (`cmd/fleet/internal/fleet/session.go:588-645`). It cannot be taken or dropped by hand
+  (`cmd/fleet/internal/fleet/session.go:619-676`). It cannot be taken or dropped by hand
   (`cmd/fleet/internal/verbs/keys.go:126-128`, `cmd/fleet/internal/verbs/keys.go:203-205`).
 
 ### The decision: `CheckLease`
 
-`cmd/fleet/internal/fleet/policy.go:398-492`. It returns a refusal reason, or `""` when the
+`cmd/fleet/internal/fleet/policy.go:398-494`. It returns a refusal reason, or `""` when the
 session now holds the key.
 
 1. **Fast path.** If the lease already names this session, allow without taking the lock
    (`cmd/fleet/internal/fleet/policy.go:404-410`). Nearly every call is this one.
 2. Otherwise take `KeyLock(key)` and re-read the lease inside it
-   (`cmd/fleet/internal/fleet/policy.go:412-414`). Everything below happens under the lock.
+   (`cmd/fleet/internal/fleet/policy.go:411-413`). Everything below happens under the lock.
 3. **Free**: run the acquisition guards, then write the lease
-   (`cmd/fleet/internal/fleet/policy.go:434-438`). The guards publish this session's own
+   (`cmd/fleet/internal/fleet/policy.go:430-434`). The guards publish this session's own
    record before the lease names it, so no rival can read the new lease as a dead holder's,
    and refuse if a pre-migration lease still names a session that is live or unreadable
-   (`cmd/fleet/internal/fleet/policy.go:498-523`).
+   (`cmd/fleet/internal/fleet/policy.go:500-525`).
 4. **Malformed**: refuse. A file that exists but does not parse, lacks `key` or `session`,
    or names another key is never free and never taken over
-   (`cmd/fleet/internal/fleet/policy.go:440-442`, `cmd/fleet/internal/fleet/lease.go:28-51`).
+   (`cmd/fleet/internal/fleet/policy.go:436-438`, `cmd/fleet/internal/fleet/lease.go:28-51`).
 5. Otherwise classify the holder from one read of its record with `HolderState`
    (`cmd/fleet/internal/fleet/policy.go:331-351`, below), and:
-   - **its record cannot be read**: refuse (`cmd/fleet/internal/fleet/policy.go:448-450`);
+   - **its record cannot be read**: refuse (`cmd/fleet/internal/fleet/policy.go:444-446`);
    - **live and active on the key**: refuse. For a branch the refusal names the holder, how
      recently it was active there, and when the branch would change hands if it goes quiet;
-     it points the writer at another branch and never at the operator. A session reading a
-     refusal on a branch that was taken from it is told so, and that its checkout was not
-     touched. For a resource it names `fleet drop`
-     (`cmd/fleet/internal/fleet/policy.go:451-452`, `cmd/fleet/internal/fleet/policy.go:476-492`);
+     it points the writer at a branch of its own in a worktree of its own (`git worktree add
+     <dir> -b <new-branch> <branch>`; `git checkout -b` in the holder's tree would move the
+     holder's checkout and is itself a write there) and never at the operator. A session
+     reading a refusal on a branch that was taken from it is told so, and that Fleet touched
+     no files. For a resource it names `fleet drop`
+     (`cmd/fleet/internal/fleet/policy.go:447-448`, `cmd/fleet/internal/fleet/policy.go:474-494`);
    - **dead, resource key**: refuse; a person must confirm the machine is quiet and run
-     `fleet take --takeover` (`cmd/fleet/internal/fleet/policy.go:453-455`);
+     `fleet take --takeover` (`cmd/fleet/internal/fleet/policy.go:449-451`);
    - **dead or idle, branch key**: run the guards, then write the lease with a `takeover`
      record — `from`, `from_role`, `to`, `to_role`, `why` (`dead` or `idle`), `quiet_s`,
      `at` — and a one-line note, and add the same record to the evaluation's takeovers,
-     which `events.jsonl` carries (`cmd/fleet/internal/fleet/policy.go:460-474`,
-     `cmd/fleet/internal/fleet/takeover.go:49-67`). After the key's lock is released, each
-     side gets a notice for its next event (`cmd/fleet/internal/fleet/policy.go:425-427`;
+     which `events.jsonl` carries (`cmd/fleet/internal/fleet/policy.go:456-472`,
+     `cmd/fleet/internal/fleet/takeover.go:53-71`). Once the event's evaluation stands, each
+     side gets a notice for its next event (`cmd/fleet/internal/fleet/hook.go:37-44`;
      "Takeover, revoke, release" below).
 6. **Lock not obtained** within about 1.2 seconds (60 tries, 20 ms apart): refuse
-   (`cmd/fleet/internal/fleet/lock.go:43-45`, `cmd/fleet/internal/fleet/policy.go:419-421`).
-   Any other error is a refusal too (`cmd/fleet/internal/fleet/policy.go:422-424`).
+   (`cmd/fleet/internal/fleet/lock.go:43-45`, `cmd/fleet/internal/fleet/policy.go:418-420`).
+   Any other error is a refusal too (`cmd/fleet/internal/fleet/policy.go:421-423`).
 
 The same sequence of checks, returning a state instead of acting, is `HeldByOther`
 (`cmd/fleet/internal/fleet/policy.go:311-329`): free, malformed, unknown, live, idle (a live
@@ -392,9 +394,9 @@ three exceptions elsewhere:
 
 - **Seat occupancy.** At SessionStart, `occupySlot` displaces the seat's previous occupant
   whenever `SessionAlive` of its record is false, and an unreadable record reads as nil,
-  which `SessionAlive` treats as dead (`cmd/fleet/internal/fleet/session.go:619-633`,
+  which `SessionAlive` treats as dead (`cmd/fleet/internal/fleet/session.go:650-664`,
   `cmd/fleet/internal/fleet/lease.go:252-255`). The code accepts this on purpose: a wrongly
-  displaced seat costs a seat, not a collision (`cmd/fleet/internal/fleet/session.go:592-596`).
+  displaced seat costs a seat, not a collision (`cmd/fleet/internal/fleet/session.go:623-627`).
 - **Delivery's presence check.** `sessionRecords` skips a record it cannot parse, so an
   unreadable session record does not count as present in its directory
   (`cmd/fleet/internal/watch/deliver.go:395-408`).
@@ -417,16 +419,23 @@ the Codex desktop app's pid, which kept answering, and one had its turn left ope
 usage error. Every other session's write was refused and the only remedy was an operator
 `fleet revoke` per branch. So on a branch key `HolderState` asks a live holder a second
 question, activity on that branch (`cmd/fleet/internal/fleet/policy.go:331-351`,
-`cmd/fleet/internal/fleet/takeover.go:17-47`):
+`cmd/fleet/internal/fleet/takeover.go:17-51`):
 
-- `LastActiveOn` is the latest of the lease's own `since`, the holder's recorded write to
-  that key (`last_writes`, which PostToolUse keeps per key), and the holder's last hook
-  event of any kind if its record says it stands on that branch. A record that does not say
-  where the session stands — no `repo` or `branch`, as outside a repository or on a detached
-  head — counts every event, so missing evidence is never read as idleness. A session busy
-  on another branch is not active on this one.
+- `LastActiveOn` is the latest of the lease's own `since`; the holder's `last_seen` for
+  that key; and its recorded write there (`last_writes`, which PostToolUse keeps per key).
+  `last_seen` is stamped per branch key under the session's lock on every hook event, for
+  the checkout its shell stands in, and at PreToolUse for a write or switch the lease has
+  just admitted (`cmd/fleet/internal/fleet/session.go:132-163`,
+  `cmd/fleet/internal/fleet/hook.go:342-358`). It is kept per key because the record's
+  `repo` and `branch` say only where the session stands now: one event from another
+  checkout must not erase the time it spent on this one, and a commit it was just cleared
+  to run counts before its PostToolUse lands. A record that does not say where the session
+  stands — no `repo` or `branch`, as outside a repository or on a detached head — counts
+  every event, so missing evidence is never read as idleness. A session busy on another
+  branch, never seen on this one within the window, is not active on it.
 - A live holder is **active** while that is younger than `FLEET_IDLE_S`, default 1,800
-  seconds (`cmd/fleet/internal/fleet/store.go:43-47`), and **idle** after. Across 36,963
+  seconds (`cmd/fleet/internal/fleet/store.go:43-56`; zero or less reads as the default),
+  and **idle** after. Across 36,963
   in-turn gaps between hook events in this machine's `events.jsonl` on 2026-09-13, the
   99.9th percentile was about eleven minutes and eight gaps passed thirty; each of those
   was a hung or abandoned turn, or a wait on a person.
@@ -440,14 +449,14 @@ question, activity on that branch (`cmd/fleet/internal/fleet/policy.go:331-351`,
 ### Where the hook applies it
 
 `CheckLease` runs from two places in PreToolUse, both before the session record is written
-(`cmd/fleet/internal/fleet/hook.go:327-360`):
+(`cmd/fleet/internal/fleet/hook.go:360-393`):
 
 1. **The branch being written.** `preWriteVerdicts` checks, in order: a stop flag on this
-   branch (`cmd/fleet/internal/fleet/hook.go:332-337`); the directory guard, which must come
+   branch (`cmd/fleet/internal/fleet/hook.go:365-370`); the directory guard, which must come
    first because `cd /other-seat && git commit` would otherwise lease the other seat's
-   branch before being refused (`cmd/fleet/internal/fleet/hook.go:338-349`); then
+   branch before being refused (`cmd/fleet/internal/fleet/hook.go:371-382`); then
    `CheckLease` on the target branch, but only when the call is a write
-   (`cmd/fleet/internal/fleet/hook.go:350-354`). A call is a write when the tool is Edit,
+   (`cmd/fleet/internal/fleet/hook.go:383-387`). A call is a write when the tool is Edit,
    Write, MultiEdit or NotebookEdit, or when a Bash command has a git write subcommand
    (`push`, `commit`, `merge`, `rebase`, `reset`, `checkout`, `switch`, and others) at
    command position, or contains `gh pr` with `merge`, `close`, `edit`, `ready` or `checkout`
@@ -458,15 +467,15 @@ question, activity on that branch (`cmd/fleet/internal/fleet/policy.go:331-351`,
    cwd (`cmd/fleet/internal/fleet/policy.go:143-163`).
 2. **The branches a switch is headed for.** `switchDestinations` finds every branch a
    `git checkout`/`git switch` would move the tree to and leases each **before git runs**
-   (`cmd/fleet/internal/fleet/hook.go:441-463`, `cmd/fleet/internal/fleet/policy.go:644-681`).
+   (`cmd/fleet/internal/fleet/hook.go:474-496`, `cmd/fleet/internal/fleet/policy.go:646-683`).
    The origin branch stays held. At the next PreToolUse, `SettleHandoff` reads
    `<gitdir>/HEAD` to see where the tree landed and drops whichever lease the session no
-   longer needs (`cmd/fleet/internal/fleet/policy.go:844-914`). Between the two hooks the
+   longer needs (`cmd/fleet/internal/fleet/policy.go:846-916`). Between the two hooks the
    session may hold both branches; it never holds neither.
 
 After the lease verdicts pass, PreToolUse also applies stop flags on required resources,
 the lane's `requires`, and, for Bash, the cost gate
-(`cmd/fleet/internal/fleet/hook.go:306-324`).
+(`cmd/fleet/internal/fleet/hook.go:321-339`).
 
 ### Takeover, revoke, release
 
@@ -477,14 +486,20 @@ the lane's `requires`, and, for Bash, the cost gate
   and `fleet leases` marks an idle holder `idle <age> (next writer takes it)`
   (`cmd/fleet/internal/verbs/keys.go:334-351`). Each side also finds a notice in its session
   record, `lease_notices`, delivered once as a `[fleet]` line at its next SessionStart,
-  UserPromptSubmit or PostToolUse (`cmd/fleet/internal/fleet/takeover.go:69-124`,
-  `cmd/fleet/internal/fleet/hook.go:92`, `cmd/fleet/internal/fleet/hook.go:224`,
-  `cmd/fleet/internal/fleet/hook.go:489`). The displaced session hears who took the branch and
-  that its checkout was not touched; the taker hears that anything the previous holder left
-  uncommitted is still in the branch's checkout and must be preserved. A notice the lease no
-  longer bears out — the Codex adapter unwound the takeover, or the branch came back — is
-  retired unsaid (`cmd/fleet/internal/fleet/takeover.go:126-137`). Fleet itself never touches
-  a checkout's files, so a takeover discards nothing.
+  UserPromptSubmit or PostToolUse (`cmd/fleet/internal/fleet/takeover.go:73-137`,
+  `cmd/fleet/internal/fleet/hook.go:101`, `cmd/fleet/internal/fleet/hook.go:236`,
+  `cmd/fleet/internal/fleet/hook.go:522`). The displaced session hears who took the branch and
+  that Fleet touched no files; the taker hears that anything the previous holder left
+  uncommitted is still in the branch's checkout and must be preserved. Notices are filed only
+  once the event's evaluation stands: `Run` announces after `Evaluate`, and the Codex
+  adapter announces after unwinding a denied multi-file patch, whose unwound takeovers
+  `ForgetTakeover` has dropped (`cmd/fleet/internal/fleet/hook.go:37-44`,
+  `cmd/fleet/internal/codex/codex.go`, `cmd/fleet/internal/fleet/telemetry.go`). A notice the
+  lease no longer bears out when it is delivered — the branch came back — is retired unsaid
+  (`cmd/fleet/internal/fleet/takeover.go:139-150`). Fleet itself never touches a checkout's
+  files, so a takeover discards nothing. `fleet assign` follows the same rule: it refuses a
+  branch whose holder is active on it or unreadable, not one whose holder has gone quiet
+  (`cmd/fleet/internal/verbs/views.go`, `assignGuards`).
 - **Resource takeover** is `fleet take slot:<name> --takeover "<what you checked>"`, and
   only when the holder is known dead; an unknown holder is refused like a live one
   (`cmd/fleet/internal/verbs/keys.go:137-155`).
@@ -495,7 +510,7 @@ the lane's `requires`, and, for Bash, the cost gate
   `except` naming the new holder, so the displaced session is refused at its next tool call
   (`cmd/fleet/internal/verbs/keys.go:65-114`, `cmd/fleet/internal/fleet/lease.go:127-147`).
   The hook retires that flag once it has reached the displaced session
-  (`cmd/fleet/internal/fleet/session.go:143-157`).
+  (`cmd/fleet/internal/fleet/session.go:174-188`).
 - **Release at SessionEnd** frees branch leases and seat occupancy, but not resource leases:
   a session ending proves nothing about the machine it drove
   (`cmd/fleet/internal/fleet/lease.go:223-231`).
@@ -523,7 +538,7 @@ branch has changed hands. Resources taken with `fleet take` are safe
 against this particular schedule only because `CheckLease` never takes over a dead holder's
 resource automatically. A seat's occupancy lease is displaced automatically at SessionStart,
 so a seat is exposed the same way a branch is; `occupySlot` warns the new occupant that a
-process the old one left may still be writing (`cmd/fleet/internal/fleet/session.go:641-643`).
+process the old one left may still be writing (`cmd/fleet/internal/fleet/session.go:672-674`).
 
 ## 6. Rows, dispatch, receipts and `fleet done`
 
@@ -768,7 +783,7 @@ sequenceDiagram
 
 | # | process | durable write | code |
 |---|---|---|---|
-| 1 | verb: `fleet dispatch … --slot repo-author-1 --brief …` | a `git fetch` of the branch in the seat's worktree, then under the seat lock a checkout of it there and `assign/repo-author-1.json` | `cmd/fleet/internal/verbs/views.go:830-875`, `cmd/fleet/internal/verbs/views.go:935-956` |
+| 1 | verb: `fleet dispatch … --slot repo-author-1 --brief …` | a `git fetch` of the branch in the seat's worktree, then under the seat lock a checkout of it there and `assign/repo-author-1.json` | `cmd/fleet/internal/verbs/views.go:830-875`, `cmd/fleet/internal/verbs/views.go:944-965` |
 | 2 | same verb | `dispatch/<repo>__<branch>__<rel>.json`, then `actions.jsonl`, then a best-effort ownership comment on the pull request | `cmd/fleet/internal/verbs/work.go:149-159`, `cmd/fleet/internal/verbs/work.go:174` |
 | 3 | verb: `fleet send repo-author-1 …`, run by a live session whose directory has a mail identity in the same tenant | `mail/.v2/…/<id>.json` under `KeyLock("mail")` | `cmd/fleet/internal/fleet/mail.go:158-177` |
 
@@ -826,10 +841,10 @@ of the proof (`cmd/fleet/internal/provider/observe.go:10-11`).
 
 | # | process | durable write | code |
 |---|---|---|---|
-| 26 | hook (SessionStart) | `sessions/<sid>.json` with `launch_dir`, role and seat; the seat occupancy lease; `delivered_to` and `delivered_at` on `assign/repo-author-1.json`; a line in `events.jsonl` | `cmd/fleet/internal/fleet/session.go:52-131`, `cmd/fleet/internal/fleet/session.go:597-634`, `cmd/fleet/internal/fleet/startup_continuity.go:44-47`, `cmd/fleet/main.go:242-263` |
-| 27 | hook (PreToolUse on the first write) | `leases/<branch key>.json` | `cmd/fleet/internal/fleet/policy.go:434-438` |
-| 28 | verb run by the agent | `acked_at` on each message it handled; a `handoff/` checkpoint; a receipt when it records one (any live session can; section 6) | `cmd/fleet/internal/fleet/mail.go:249-277`, `cmd/fleet/internal/verbs/keys.go:415-439`, `cmd/fleet/internal/verbs/receipts.go:108-129` |
-| 29 | hook (Stop, SessionEnd) | `turn_open: false`, `last-word/`; at SessionEnd `ended: true` and branch leases released | `cmd/fleet/internal/fleet/hook.go:532-551` |
+| 26 | hook (SessionStart) | `sessions/<sid>.json` with `launch_dir`, role and seat; the seat occupancy lease; `delivered_to` and `delivered_at` on `assign/repo-author-1.json`; a line in `events.jsonl` | `cmd/fleet/internal/fleet/session.go:52-139`, `cmd/fleet/internal/fleet/session.go:628-665`, `cmd/fleet/internal/fleet/startup_continuity.go:44-47`, `cmd/fleet/main.go:242-263` |
+| 27 | hook (PreToolUse on the first write) | `leases/<branch key>.json` | `cmd/fleet/internal/fleet/policy.go:430-434` |
+| 28 | verb run by the agent | `acked_at` on each message it handled; a `handoff/` checkpoint; a receipt when it records one (any live session can; section 6) | `cmd/fleet/internal/fleet/mail.go:249-277`, `cmd/fleet/internal/verbs/keys.go:437-460`, `cmd/fleet/internal/verbs/receipts.go:108-129` |
+| 29 | hook (Stop, SessionEnd) | `turn_open: false`, `last-word/`; at SessionEnd `ended: true` and branch leases released | `cmd/fleet/internal/fleet/hook.go:565-584` |
 
 **After the bridge exits**
 
@@ -958,7 +973,7 @@ Quint describes a system as state plus the steps that change it. Take
   (`cmd/fleet/model/model/reference.qnt:47-49`).
 - **The decision.** `action write(s)` abstracts `CheckLease` as one atomic step. In the
   code, a claim or takeover reads, decides and writes under `KeyLock`
-  (`cmd/fleet/internal/fleet/policy.go:412-418`, `cmd/fleet/internal/fleet/policy.go:433-474`); the holder's own repeat write takes an
+  (`cmd/fleet/internal/fleet/policy.go:411-417`, `cmd/fleet/internal/fleet/policy.go:429-472`); the holder's own repeat write takes an
   unlocked fast path that only reads its own lease and writes nothing
   (`cmd/fleet/internal/fleet/policy.go:404-410`, `cmd/fleet/model/SOURCE_MAP.md:21`). The
   lock makes a rival's decision atomic; the model assumes that and does not model the lock
@@ -1401,23 +1416,23 @@ Both directions are listed: docs behind the code, and docs ahead of it.
 
 | claim | where | reality |
 |---|---|---|
-| "the hook resolves a session's role from where it was launched, longest prefix wins" | `cmd/fleet/README.md:101-103` | Only the tenant is longest-prefix; a role needs an exact path match (`cmd/fleet/internal/fleet/lanes.go:143-167`) |
-| "The watcher writes only under `watch/` plus those stamps on mail records"; "That is the whole of what it writes outside watch/" | `cmd/fleet/README.md:300`, `cmd/fleet/internal/watch/watch.go:20-21` | It also publishes lateness reports as new mail records (`cmd/fleet/internal/watch/late.go:109-120`), writes `cache/github/` every tenth tick (`cmd/fleet/internal/watch/watch.go:153-166`), and appends to `hook-errors.jsonl` (`cmd/fleet/internal/watch/watch.go:636`) |
-| "The command launcher is a transitional interface; durable Claude/Codex session integration is the next runtime step" | `cmd/fleet/README.md:467-469` | Behind code since #318: the watcher runs provider sessions through the bridge and resumes them (`cmd/fleet/internal/watch/runtime.go:97-213`); `FOLLOWUPS.md:699-700` records it as a known stale paragraph |
+| "the hook resolves a session's role from where it was launched, longest prefix wins" | `cmd/fleet/README.md:104-106` | Only the tenant is longest-prefix; a role needs an exact path match (`cmd/fleet/internal/fleet/lanes.go:143-167`) |
+| "The watcher writes only under `watch/` plus those stamps on mail records"; "That is the whole of what it writes outside watch/" | `cmd/fleet/README.md:303`, `cmd/fleet/internal/watch/watch.go:20-21` | It also publishes lateness reports as new mail records (`cmd/fleet/internal/watch/late.go:109-120`), writes `cache/github/` every tenth tick (`cmd/fleet/internal/watch/watch.go:153-166`), and appends to `hook-errors.jsonl` (`cmd/fleet/internal/watch/watch.go:636`) |
+| "The command launcher is a transitional interface; durable Claude/Codex session integration is the next runtime step" | `cmd/fleet/README.md:470-472` | Behind code since #318: the watcher runs provider sessions through the bridge and resumes them (`cmd/fleet/internal/watch/runtime.go:97-213`); `FOLLOWUPS.md:699-700` records it as a known stale paragraph |
 | "Next runtime step, after this pass … The present command launcher still uses bounded command invocations such as `claude -p`" | `docs/features/org-fleet-boundary/spec.md:112-136` | Behind code since #318: `cmd` entries are rejected (`cmd/fleet/internal/watch/deliver.go:135-140`) |
 | TLC "exhausts the reference graph to twelve steps"; "complete finite-state exploration to 12 steps"; "12-step configuration" | `cmd/fleet/model/README.md:23-24`, `cmd/fleet/model/CLAIMS.md:24-26`, `cmd/fleet/model/CRASH-REPLACEMENT.md:28-29`, `cmd/fleet/model/judge.sh:36`, `cmd/fleet/model/judge.sh:46` | Understated: Quint's TLC backend ignores `--max-steps` and explores the complete reachable graph (325, 349, 20 and 26 distinct states, unchanged across every `--max-steps` value tried; section 9) |
-| verb exit codes are 0, 1, 2, and 3 for `fleet done` | `cmd/fleet/README.md:78-80` | `fleet watch --once` exits 4 on error (`cmd/fleet/main.go:160-165`); `fleet done` also uses 2 for an unresolvable revision, not only usage (`cmd/fleet/internal/verbs/receipts.go:611-630`) |
+| verb exit codes are 0, 1, 2, and 3 for `fleet done` | `cmd/fleet/README.md:81-83` | `fleet watch --once` exits 4 on error (`cmd/fleet/main.go:160-165`); `fleet done` also uses 2 for an unresolvable revision, not only usage (`cmd/fleet/internal/verbs/receipts.go:611-630`) |
 | after release, "the next eligible wake … resumes the recorded session" | `cmd/fleet/docs/headless.md:159-160` | It resumes the launch record's requested `resume` value (`cmd/fleet/internal/watch/runtime.go:188-190`), not the session the released attempt observed; if that attempt started fresh, the next wake starts fresh again |
 | a receipt's pull-request copy "is what another machine's `done` reads" | `cmd/fleet/internal/verbs/receipts.go:80-81` (comment) | `fleet done` reads only the local `receipts/` directory (`cmd/fleet/internal/verbs/receipts.go:229-267`, `cmd/fleet/internal/verbs/receipts.go:584-609`); posted receipts feed only `fleet work`'s remote rows (`cmd/fleet/internal/verbs/remote.go:429-449`) |
 | seven row states; the pull-request record "is a later rung" | `cmd/fleet/internal/verbs/work.go:11-26` (comment) | Ten states including `failed`, `unoccupied` and `remote` (`cmd/fleet/internal/verbs/work.go:302`); the remote record exists (`cmd/fleet/internal/verbs/remote.go:387-427`) |
 | "the MCP face and, later, the watcher" | `cmd/fleet/main.go:2` (comment) | The watcher exists (`cmd/fleet/main.go:74-75`, `cmd/fleet/internal/watch/watch.go`) |
-| "Four rules" | `cmd/fleet/docs/OVERVIEW.md:13-29` | A different set from the README's five (`cmd/fleet/README.md:21-67`): OVERVIEW has "addresses survive sessions" and lacks "one holder per key" and "no domain word". This guide follows the README |
+| "Four rules" | `cmd/fleet/docs/OVERVIEW.md:13-29` | A different set from the README's five (`cmd/fleet/README.md:21-70`): OVERVIEW has "addresses survive sessions" and lacks "one holder per key" and "no domain word". This guide follows the README |
 | "a launcher starting four sessions for one role was absorbed by Org's one-holder rule" | `cmd/fleet/docs/OVERVIEW.md:69-70` | A true account of the 2026-09-09/10 runs, but Org's claim protocol was removed in #310 (`docs/features/org-fleet-boundary/spec.md:7-12`, `docs/features/org-fleet-boundary/spec.md:93-100`); delivery's one-launch-per-directory rule does that job now (`cmd/fleet/internal/watch/deliver.go:14-17`) |
-| the store table | `cmd/fleet/README.md:87-99` | The mail path shows a raw `<tenant>` and `<address>` (`cmd/fleet/README.md:95`); the code uses their SHA-256 digests (`cmd/fleet/internal/fleet/mail_address.go:15-17`). The README's table also omits `deliver.json`, `handoff/`, `role-handoff/`, `stop/`, `last-word/`, `prs/`, `cache/github/`, `inflight/`, `locks/`, `decisions.jsonl`, `costs.jsonl`, `overrides.jsonl`, `actions.jsonl`, `hook-errors.jsonl`, `migrated-keys.v1`, `watch/delivery/`, `watch/late.json` and `watch/owner.lock`, all of which this guide's section 3 lists |
+| the store table | `cmd/fleet/README.md:90-102` | The mail path shows a raw `<tenant>` and `<address>` (`cmd/fleet/README.md:98`); the code uses their SHA-256 digests (`cmd/fleet/internal/fleet/mail_address.go:15-17`). The README's table also omits `deliver.json`, `handoff/`, `role-handoff/`, `stop/`, `last-word/`, `prs/`, `cache/github/`, `inflight/`, `locks/`, `decisions.jsonl`, `costs.jsonl`, `overrides.jsonl`, `actions.jsonl`, `hook-errors.jsonl`, `migrated-keys.v1`, `watch/delivery/`, `watch/late.json` and `watch/owner.lock`, all of which this guide's section 3 lists |
 | "The lock's kernel release on process death … `~/verify-windows.md` names the probe" | `cmd/fleet/model/CLAIMS.md:63-64` | Points at a file outside the repository; the probe cannot be followed from the tree |
-| the key prefix "is the only thing the substrate ever branches on, for one rule: what happens to a dead holder" | `cmd/fleet/internal/fleet/store.go:410-413` (comment) | The prefix also decides whether a key may be taken or dropped by hand (`cmd/fleet/internal/verbs/keys.go:118-120`, `cmd/fleet/internal/verbs/keys.go:196-198`), whether SessionEnd releases it (`cmd/fleet/internal/fleet/lease.go:223-231`), and whether a live holder that has gone quiet keeps it (`cmd/fleet/internal/fleet/policy.go:331-351`) |
+| the key prefix "is the only thing the substrate ever branches on, for one rule: what happens to a dead holder" | `cmd/fleet/internal/fleet/store.go:418-421` (comment) | The prefix also decides whether a key may be taken or dropped by hand (`cmd/fleet/internal/verbs/keys.go:118-120`, `cmd/fleet/internal/verbs/keys.go:196-198`), whether SessionEnd releases it (`cmd/fleet/internal/fleet/lease.go:223-231`), and whether a live holder that has gone quiet keeps it (`cmd/fleet/internal/fleet/policy.go:331-351`) |
 | `noSilentResourceTakeover`: "a resource never changes hands after a death without a takeover" | `cmd/fleet/model/README.md:49` | The invariant checks only that no `Silent` fact was recorded (`cmd/fleet/model/model/reference.qnt:151-154`); an unlabelled change of hands would pass it (section 9) |
-| "Unreadable evidence is never death." | `cmd/fleet/README.md:51` | True for `CheckLease`, `HeldByOther` and `fleet take`. Seat occupancy displaces an occupant whose record is unreadable (`cmd/fleet/internal/fleet/session.go:619-633`), and delivery's presence check skips unreadable records (`cmd/fleet/internal/watch/deliver.go:395-408`) |
+| "Unreadable evidence is never death." | `cmd/fleet/README.md:54` | True for `CheckLease`, `HeldByOther` and `fleet take`. Seat occupancy displaces an occupant whose record is unreadable (`cmd/fleet/internal/fleet/session.go:650-664`), and delivery's presence check skips unreadable records (`cmd/fleet/internal/watch/deliver.go:395-408`) |
 | "A recycled PID cannot keep an address occupied." | `docs/features/org-fleet-boundary/spec.md:103-104` | A pid reused by another user's process reads `unknown` and keeps the address reserved (`cmd/fleet/internal/watch/status.go:85-91`, `cmd/fleet/internal/fleet/platform_unix.go:23-26`, `cmd/fleet/internal/fleet/pid_alive_darwin.go`) |
 | "It is not a scheduler or a workflow engine" | `cmd/fleet/README.md:8-10` | The watcher package calls itself "Fleet's Go scheduler, delivery launcher and observer" (`cmd/fleet/internal/watch/watch.go:1`) and does schedule provider launches (section 8) |
 | `ReleaseSessionState` is in `session.go` | `cmd/fleet/model/SOURCE_MAP.md:25` | It is in `cmd/fleet/internal/fleet/lease.go:233-240` |

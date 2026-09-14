@@ -14,17 +14,21 @@ import (
 // over, on the record. A resource lease is never idle: the machine it names can be
 // busy with no session touching it.
 
-// LastActiveOn is when a session last showed activity on key: the lease's own claim,
-// its last recorded write there, or any hook event while its shell stood on that
-// branch. A record that does not say where the session stands counts every event, so
-// missing evidence is never read as idleness. Zero when the records show none.
+// LastActiveOn is when a session last showed activity on key: the lease's own claim; a
+// write there it was admitted to or completed; or any hook event while its shell stood
+// on that branch, which last_seen keeps per key. A record that does not say where the
+// session stands counts every event, so missing evidence is never read as idleness.
+// Zero when the records show none.
 func LastActiveOn(rec, lease Rec, key string) float64 {
-	last := F(lease, "since")
+	last := max(F(lease, "since"), F(M(rec, "last_seen"), key))
+	// last_write, the one latest write, is the only write evidence in a record from
+	// before last_writes was kept per key.
 	for _, w := range []Rec{M(M(rec, "last_writes"), key), M(rec, "last_write")} {
 		if S(w, "key") == key && F(w, "at") > last {
 			last = F(w, "at")
 		}
 	}
+	// Standing on the branch now also covers a record from before last_seen existed.
 	if at := sessionKey(rec); (at == "" || at == key) && F(rec, "last_event_at") > last {
 		last = F(rec, "last_event_at")
 	}
@@ -66,17 +70,26 @@ func takeoverNote(t Rec) string {
 	return "took over from dead session " + Short(S(t, "from"))
 }
 
-// announceTakeover leaves both sessions a notice for their next event. Best effort: the
-// lease is the record, and each notice is checked against it when it is delivered.
-func announceTakeover(t Rec) {
+// unannounced is the takeovers this evaluation made and has not yet told anyone about.
+// ForgetTakeover drops one the Codex adapter unwinds, so it is never announced.
+var unannounced []Rec
+
+// AnnounceTakeovers leaves both sessions of every takeover still standing a notice for
+// their next event, once the caller is done unwinding. Best effort: the lease is the
+// record, and each notice is checked against it again when it is delivered.
+func AnnounceTakeovers() {
 	defer func() {
 		if r := recover(); r != nil {
 			logError(Rec{"error": fmt.Sprintf("takeover notice: %v", r)})
 		}
 	}()
-	for _, sid := range []string{S(t, "from"), S(t, "to")} {
-		if err := noteLease(sid, t); err != nil {
-			logError(Rec{"session": sid, "error": "takeover notice: " + err.Error()})
+	pending := unannounced
+	unannounced = nil
+	for _, t := range pending {
+		for _, sid := range []string{S(t, "from"), S(t, "to")} {
+			if err := noteLease(sid, t); err != nil {
+				logError(Rec{"session": sid, "error": "takeover notice: " + err.Error()})
+			}
 		}
 	}
 }
@@ -178,8 +191,9 @@ func orSession(role string) string {
 	return role
 }
 
-// retireNotices removes the notices that were read, under the record's lock. A notice
-// filed for the same key after the read is kept.
+// retireNotices removes the notices that were read, under the record's lock. The lease
+// reads above take no lock, so a takeover can file a new notice for the same key in
+// between; comparing `at` keeps that one for the next event.
 func retireNotices(sid string, seen Rec) {
 	err := KeyLock("session:"+sid, func() error {
 		p := Path("sessions", sid+".json")

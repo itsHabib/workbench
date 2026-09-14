@@ -12,16 +12,26 @@ import (
 func idleLab(t *testing.T) (string, string) {
 	t.Helper()
 	oldState, oldOrg, oldIdle, oldTakeovers := State, OrgState, IdleS, HookTakeovers
-	State, OrgState, IdleS, HookTakeovers = t.TempDir(), t.TempDir(), 1800, nil
-	t.Cleanup(func() { State, OrgState, IdleS, HookTakeovers = oldState, oldOrg, oldIdle, oldTakeovers })
-	checkout := filepath.Join(t.TempDir(), "rooms")
-	if err := os.MkdirAll(filepath.Join(checkout, ".git"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(checkout, ".git", "HEAD"), []byte("ref: refs/heads/feat/work\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	State, OrgState, IdleS, HookTakeovers, unannounced = t.TempDir(), t.TempDir(), 1800, nil, nil
+	t.Cleanup(func() {
+		State, OrgState, IdleS, HookTakeovers, unannounced = oldState, oldOrg, oldIdle, oldTakeovers, nil
+	})
+	checkout := fakeCheckout(t, "rooms", "feat/work")
 	return checkout, Scope(checkout, "feat/work")
+}
+
+// fakeCheckout is a directory whose .git names branch: enough for the hook, which reads
+// the branch from .git without running git.
+func fakeCheckout(t *testing.T, name, branch string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), name)
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte("ref: refs/heads/"+branch+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 // holdAs publishes a session record for sid and gives it the lease on key, claimed
@@ -96,10 +106,54 @@ func TestAnIdleHoldersBranchGoesToTheNextWriter(t *testing.T) {
 	}
 
 	v = Run(editEvent("PreToolUse", holder, checkout))
-	if v.Code != 2 || !strings.Contains(v.Err, "was taken from you") || !strings.Contains(v.Err, "not touched") {
+	if v.Code != 2 || !strings.Contains(v.Err, "was taken from you") || !strings.Contains(v.Err, "Fleet touched no files") {
 		t.Fatalf("the displaced holder's write is refused while the taker is active, naming the takeover:\n%s", v.Err)
 	}
 	refusesOnlyByPolicy(t, v.Err)
+}
+
+// Review of #350: activity on a branch must survive the session's next event elsewhere.
+// A holder that ran commands in the branch's checkout a minute ago, then one command
+// from another checkout, is still active on the branch; and a write it has just been
+// admitted to counts from admission, before its PostToolUse lands.
+func TestActivityOnABranchSurvivesAnEventElsewhere(t *testing.T) {
+	checkout, key := idleLab(t)
+	other := fakeCheckout(t, "main", "main")
+	const holder, rival = "a11ce000", "b0b00000"
+	holdAs(t, holder, key, 2*3600, Rec{"cwd": checkout, "last_writes": Rec{key: Rec{"key": key, "at": Now() - 40*60}}})
+	for _, ev := range []Event{bashEvent(holder, checkout, "go test ./..."), bashEvent(holder, other, "ls")} {
+		if v := Run(ev); v.Code != 0 {
+			t.Fatalf("holder's own command refused:\n%s", v.Err)
+		}
+	}
+	if state, _ := HolderState(key, Lease(key)); state != HeldLive {
+		t.Fatalf("one event from another checkout erased the holder's activity on the branch: %q", state)
+	}
+	v := Run(editEvent("PreToolUse", rival, checkout))
+	if v.Code != 2 || !strings.Contains(v.Err, "active on it") || !strings.Contains(v.Err, "git worktree add <new-dir> -b <new-branch> feat/work") {
+		t.Fatalf("a rival must be refused and pointed at a worktree of its own:\n%s", v.Err)
+	}
+	refusesOnlyByPolicy(t, v.Err)
+}
+
+// An admitted write is activity on its branch from its admission, not only once its
+// PostToolUse lands: a holder standing elsewhere whose last recorded write here has aged
+// out is active again the moment its next write here is cleared.
+func TestAnAdmittedWriteIsActivityFromAdmission(t *testing.T) {
+	checkout, key := idleLab(t)
+	other := fakeCheckout(t, "main", "main")
+	const holder = "a11ce000"
+	holdAs(t, holder, key, 2*3600, Rec{"cwd": other, "repo": RepoID(other), "branch": "main", "last_event_at": Now(),
+		"last_writes": Rec{key: Rec{"key": key, "at": Now() - 2*float64(IdleS)}}})
+	if state, _ := HolderState(key, Lease(key)); state != HeldIdle {
+		t.Fatalf("fixture: the holder should start idle on the branch, got %q", state)
+	}
+	if v := Run(bashEvent(holder, other, "git -C "+checkout+" commit -m wip")); v.Code != 0 {
+		t.Fatalf("the holder's own commit was refused:\n%s", v.Err)
+	}
+	if state, _ := HolderState(key, Lease(key)); state != HeldLive {
+		t.Fatalf("an admitted write did not count as activity before its PostToolUse: %q", state)
+	}
 }
 
 // A holder active on its branch is never displaced, and the refusal says when the
@@ -116,7 +170,7 @@ func TestAnActiveHolderIsNeverDisplaced(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			holdAs(t, "a11ce000", key, 3*3600, fields)
 			reason := CheckLease(key, "feat/work", "b0b00000", "", checkout)
-			if !strings.Contains(reason, "held by a session a11ce000, active on it") || !strings.Contains(reason, "another branch") {
+			if !strings.Contains(reason, "held by a session a11ce000, active on it") || !strings.Contains(reason, "git worktree add <new-dir> -b <new-branch> feat/work") {
 				t.Fatalf("an active holder must be refused, naming the way on:\n%s", reason)
 			}
 			refusesOnlyByPolicy(t, reason)
@@ -141,6 +195,8 @@ func TestALiveProcessWithNoRecentTurnsIsIdle(t *testing.T) {
 		{"busy on another branch", Rec{"repo": RepoID(checkout), "branch": "feat/other", "turn_open": true, "last_event_at": Now() - 5,
 			"last_writes": Rec{key: Rec{"key": key, "at": Now() - 3*3600}}}, HeldIdle},
 		{"where it stands unknown", Rec{"cwd": "/Users/mh/dev", "turn_open": true, "last_event_at": Now() - 5}, HeldLive},
+		{"on the branch a minute ago, elsewhere now", Rec{"repo": RepoID(checkout), "branch": "feat/other", "last_event_at": Now() - 5,
+			"last_seen": Rec{key: Now() - 60}}, HeldLive},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -178,8 +234,9 @@ func TestResourceLeasesStayHard(t *testing.T) {
 	}
 }
 
-// The Codex adapter unwinds the leases a denied multi-file patch took. A notice the
-// lease no longer bears out retires unsaid, so an unwound takeover tells nobody.
+// The Codex adapter unwinds the leases a denied multi-file patch took. Takeovers are
+// announced only once the caller is done unwinding, so an unwound one tells nobody —
+// not even after the holder's own lease has since been released.
 func TestAnUnwoundTakeoverTellsNobody(t *testing.T) {
 	_, key := idleLab(t)
 	holdAs(t, "a11ce000", key, 3*3600, Rec{"last_event_at": Now() - 3*3600})
@@ -190,10 +247,13 @@ func TestAnUnwoundTakeoverTellsNobody(t *testing.T) {
 	if restored, err := RestoreLease(key, "b0b00000", old); !restored || err != nil {
 		t.Fatalf("restore: %v %v", restored, err)
 	}
+	ForgetTakeover(key)
+	AnnounceTakeovers()
+	ReleaseLeases("a11ce000")
+	if Has(SessionRecord("a11ce000"), "lease_notices") || Has(SessionRecord("b0b00000"), "lease_notices") {
+		t.Fatalf("an unwound takeover left a notice: %v", SessionRecord("a11ce000"))
+	}
 	if lines := leaseNoticeLines("a11ce000", SessionRecord("a11ce000")); len(lines) != 0 {
 		t.Fatalf("an unwound takeover was reported: %v", lines)
-	}
-	if Has(SessionRecord("a11ce000"), "lease_notices") {
-		t.Fatal("a notice the lease does not bear out must retire")
 	}
 }

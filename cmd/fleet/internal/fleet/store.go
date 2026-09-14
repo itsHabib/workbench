@@ -43,9 +43,17 @@ var (
 	// IdleS is how long a live holder may show no activity on a branch before its lease
 	// there stops blocking the next writer. On this machine 36,963 in-turn gaps between
 	// hook events had a 99.9th percentile near eleven minutes; eight passed thirty, and
-	// every one of those was a hung or abandoned turn.
-	IdleS = envInt("FLEET_IDLE_S", 1800)
+	// every one of those was a hung or abandoned turn. Zero or less would make every
+	// live holder idle at once, so it reads as the default.
+	IdleS = positive(envInt("FLEET_IDLE_S", 1800), 1800)
 )
+
+func positive(n, d int) int {
+	if n > 0 {
+		return n
+	}
+	return d
+}
 
 const slowNoteS = 30 // PostToolUse reports elapsed above this
 

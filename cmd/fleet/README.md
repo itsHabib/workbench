@@ -37,18 +37,21 @@ card registry, not a communication or authority gate.
 - **One holder per key; a branch lease blocks only an active writer.** A branch
   (`repo:<id>:<branch>`) is leased on first write; a machine resource
   (`slot:<name>`) is taken on purpose. A holder is active on a branch while its
-  session is live and has shown activity there — the claim, a write, or any hook
-  event while its shell stands on that branch — within `FLEET_IDLE_S` (default 30
-  minutes). A live process with no recent turns is idle, not working: a desktop app
-  keeps its pid for sessions that are out of usage for days. Only an active holder
-  refuses a rival, and the refusal says when the branch would change hands. A dead
-  or idle holder's branch goes to the next writer: the lease records who took it
-  from whom, when and why, the hook's event row carries the takeover, and each side
-  is told at its next event — the displaced session that its checkout was not
-  touched, the taker to preserve any uncommitted work it finds. No operator command
-  is involved. A resource is never idle: a live holder keeps it until `fleet drop`,
-  and a dead holder's resource is orphaned and needs `--takeover`, because the
-  machine it drives may still be running. Unreadable evidence is never death.
+  session is live and has shown activity there — the claim, a write it was
+  admitted to, or any hook event while its shell stood on that branch, kept per
+  branch — within `FLEET_IDLE_S` (default 30 minutes). A live process with no
+  recent turns is idle, not working: a desktop app keeps its pid for sessions that
+  are out of usage for days. Only an active holder refuses a rival, and the
+  refusal says when the branch would change hands and points at a worktree of the
+  rival's own (`git worktree add <dir> -b <new-branch> <branch>`). A dead or idle
+  holder's branch goes to the next writer: the lease records who took it from
+  whom, when and why, the hook's event row carries the takeover, and each side is
+  told at its next event — the displaced session that Fleet touched no files, the
+  taker to preserve any uncommitted work it finds. No operator command is
+  involved, and `fleet assign` follows the same rule. A resource is never idle: a
+  live holder keeps it until `fleet drop`, and a dead holder's resource is
+  orphaned and needs `--takeover`, because the machine it drives may still be
+  running. Unreadable evidence is never death.
   Branch leases cover recognized file-edit tools and Git/GitHub shell operations.
   Ordinary shell writes, scripts and generators can miss the branch check; tools
   outside the hook matcher bypass it. These leases gate recognized future admissions; they do not terminate an already
@@ -86,7 +89,7 @@ temp-then-rename, or an append-only JSONL. Nothing needs a server.
 
 | path | written by | meaning |
 |---|---|---|
-| `sessions/<sid>.json` | hook | identity, role, branch, liveness, turn state, writes per branch, takeover notices not yet delivered |
+| `sessions/<sid>.json` | hook | identity, role, branch, liveness, turn state, activity and writes per branch, takeover notices not yet delivered |
 | `leases/<key>.json` | hook, `take`, `drop` | one holder per key; after a takeover, who took it from whom, when and why |
 | `receipts/<sha>.<kind>.json` | `fleet receipt` | the latest evidence of done at an exact head |
 | `receipts/<sha>.<kind>.jsonl` | `fleet receipt` | every verdict recorded at that head, oldest first |

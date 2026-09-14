@@ -34,10 +34,19 @@ var HookTakeovers []Rec
 
 var allow = &Verdict{}
 
-// Run handles one event. It never panics out: the fail-open law says an internal
+// Run handles one event, then tells both sessions of any takeover it made. A caller
+// that may still unwind the event's leases — the Codex adapter — calls Evaluate and
+// announces once it has decided, so an unwound takeover is never announced.
+func Run(ev Event) *Verdict {
+	v := Evaluate(ev)
+	AnnounceTakeovers()
+	return v
+}
+
+// Evaluate handles one event. It never panics out: the fail-open law says an internal
 // error exits 0 with no output, logged — except on the lease path, which CheckLease
 // already turns into a refusal before it can reach here.
-func Run(ev Event) (v *Verdict) {
+func Evaluate(ev Event) (v *Verdict) {
 	defer func() {
 		if r := recover(); r != nil {
 			logError(Rec{"error": fmt.Sprint(r)})
@@ -154,7 +163,8 @@ func branchStartLines(rec Rec, sid, cwd string) []string {
 }
 
 // foreignHolderLine is another session's lease on this session's branch as the session
-// starts: whether it blocks writes, or whether the first write takes it over.
+// starts: whether it blocks writes, or whether the first write takes it over. A read
+// for the context line only; CheckLease decides the write under the key's lock.
 func foreignHolderLine(key, branch string, cur Rec) string {
 	who := orSession(S(cur, "role")) + " " + Short(S(cur, "session"))
 	state, holder := HolderState(key, cur)
@@ -163,6 +173,8 @@ func foreignHolderLine(key, branch string, cur Rec) string {
 		return fmt.Sprintf("[fleet] %s is held by %s, quiet on it for %s: your first write takes it over, and the lease records it", branch, who, FmtAge(Now()-LastActiveOn(holder, cur, key)))
 	case HeldDead:
 		return fmt.Sprintf("[fleet] %s is held by %s, whose session has stopped: your first write takes it over, and the lease records it", branch, who)
+	case HeldUnknown:
+		return fmt.Sprintf("[fleet] %s is held by %s, whose session record cannot be read — writes there are refused until it can", branch, who)
 	}
 	return fmt.Sprintf("[fleet] %s is held by %s — you cannot write to it while it is active there", branch, who)
 }
@@ -297,6 +309,9 @@ func onPreTool(ev Event, sid string) *Verdict {
 		}
 		fields["handoff"] = Rec{"from": nilIfEmpty(key), "to": tos, "start": target, "at": Now()}
 	}
+	if seen := admitted(writes, key, toKeys); seen != nil {
+		fields["last_seen"] = seen
+	}
 	var terr error
 	rec, terr = TouchErr(sid, ev, fields)
 	if terr != nil && branch != "" && writes {
@@ -322,6 +337,24 @@ func onPreTool(ev Event, sid string) *Verdict {
 	}
 	recordInflight(ev, sid, cmd)
 	return allow
+}
+
+// admitted is the branch keys this call was just cleared to write or switch to, each
+// stamped now. A write is activity on its branch from its admission, not only once
+// PostToolUse records it: a commit still running is working on the branch.
+func admitted(writes bool, key string, toKeys []string) Rec {
+	keys := toKeys
+	if writes && key != "" {
+		keys = append([]string{key}, toKeys...)
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	seen := Rec{}
+	for _, k := range keys {
+		seen[k] = Now()
+	}
+	return seen
 }
 
 // preWriteVerdicts is every refusal that must be reached before this session's record

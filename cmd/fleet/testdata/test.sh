@@ -194,7 +194,7 @@ S1I=local_1d1e1d1e
 "$PY" - "$FLEET_STATE/sessions/$S1.json" "$(ls "$FLEET_STATE/leases"/*__feat__y.json | head -1)" "$$" <<'PY'
 import json,sys,time
 s,l,pid=sys.argv[1],sys.argv[2],int(sys.argv[3]); old=time.time()-7200
-r=json.load(open(s)); r.update(pid=pid, pid_kind='harness', last_event_at=old, turn_open=True); r.pop('last_writes',None); r.pop('last_write',None); json.dump(r,open(s,'w'))
+r=json.load(open(s)); r.update(pid=pid, pid_kind='harness', last_event_at=old, turn_open=True); [r.pop(k,None) for k in ('last_writes','last_write','last_seen')]; json.dump(r,open(s,'w'))
 x=json.load(open(l)); x['since']=old; json.dump(x,open(l,'w'))
 PY
 run "an idle holder (pid answers, no activity on the branch past FLEET_IDLE_S) → the next writer takes it" 0 "$(tool PreToolUse $S1I $WT Edit t15i "{\"file_path\":\"$WT/a.ts\"}")"

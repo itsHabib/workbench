@@ -911,7 +911,9 @@ func assignmentReplyTo(address string) string {
 }
 
 // assignGuards, under the seat's lock: the seat exists and is free, and the branch is
-// not held by a live session (two sessions on one branch is the thing this prevents).
+// not held by a session active on it (two sessions on one branch is the thing this
+// prevents). A dead or idle holder's branch goes to the seat's first write, as it would
+// to any writer's; a holder whose record cannot be read is not assumed gone.
 func assignGuards(slot, path, branch string) error {
 	r := slotRow(slot)
 	if r == nil {
@@ -920,12 +922,19 @@ func assignGuards(slot, path, branch string) error {
 	if err := refuseUnlessAssignable(slot, r, branch); err != nil {
 		return err
 	}
-	cur := fleet.Lease(fleet.Scope(path, branch))
+	key := fleet.Scope(path, branch)
+	cur := fleet.Lease(key)
 	if fleet.IsMalformed(cur) {
 		return refuse("fleet assign: the lease file for %s is malformed (%s); inspect and remove it first", branch, fleet.S(cur, "malformed"))
 	}
-	if cur != nil && fleet.SessionAlive(fleet.ReadJSON(fleet.Path("sessions", fleet.S(cur, "session")+".json"))) {
-		return refuse("fleet assign: %s is held by %s %s right now; assigning it to %s would put two sessions on one branch", branch, roleOr(cur, "a session"), fleet.Short(fleet.S(cur, "session")), slot)
+	if cur == nil {
+		return nil
+	}
+	switch state, _ := fleet.HolderState(key, cur); state {
+	case fleet.HeldLive:
+		return refuse("fleet assign: %s is held by %s %s, active on it right now; assigning it to %s would put two sessions on one branch", branch, roleOr(cur, "a session"), fleet.Short(fleet.S(cur, "session")), slot)
+	case fleet.HeldUnknown:
+		return refuse("fleet assign: %s is held by %s %s, whose session record cannot be read; unreadable evidence is not death. Check %s, then retry", branch, roleOr(cur, "a session"), fleet.Short(fleet.S(cur, "session")), fleet.Path("sessions"))
 	}
 	return nil
 }
