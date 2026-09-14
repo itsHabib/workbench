@@ -110,3 +110,58 @@ func TestPacketChecksAmbiguityAcrossDiffAndIndex(t *testing.T) {
 		t.Fatal("hint was mislabeled as required context unavailable")
 	}
 }
+
+func TestPacketBareTokenNeverRequiresUnchangedIndexBlob(t *testing.T) {
+	diff := "diff --git a/web/package-lock.json b/web/package-lock.json\n--- a/web/package-lock.json\n+++ b/web/package-lock.json\n@@ -1 +1 @@\n-old\n+new\n"
+	comments := []map[string]any{{"is_bot": true, "body": "The `package-lock.json` churn looks unrelated."}}
+	arts := []state.Artifact{packetArtifact(t, map[string]any{"diff": diff, "comments": comments})}
+	p, err := JudgmentPacket(arts, Subject{})
+	if err != nil || !p.Complete || len(p.RequiredSources) != 0 {
+		t.Fatalf("bare token matching a changed file lost its diff coverage: %v %v", p.Missing, err)
+	}
+	// Recording the index must not re-resolve the mention to an unchanged
+	// (possibly oversized) root blob the collector cannot supply.
+	arts = append(arts, packetArtifact(t, SourceEvidence{IndexComplete: true, FileIndex: []string{"package-lock.json", "web/package-lock.json"}}))
+	p, err = JudgmentPacket(arts, Subject{})
+	if err != nil || !p.Complete || len(p.RequiredSources) != 0 {
+		t.Fatalf("bare token promoted an unchanged index blob: %v %v %v", p.Missing, p.RequiredSources, err)
+	}
+	if !strings.Contains(p.Context, "+++ b/web/package-lock.json") {
+		t.Fatal("changed file named by the bare token is not represented")
+	}
+}
+
+func TestPacketBareTokenAmbiguousAcrossChangedFiles(t *testing.T) {
+	diff := "diff --git a/a/Makefile b/a/Makefile\n--- a/a/Makefile\n+++ b/a/Makefile\n@@ -1 +1 @@\n-old\n+new\n" +
+		"diff --git a/b/Makefile b/b/Makefile\n--- a/b/Makefile\n+++ b/b/Makefile\n@@ -1 +1 @@\n-old\n+new\n"
+	comments := []map[string]any{{"is_bot": true, "body": "Update `Makefile` too."}}
+	arts := []state.Artifact{packetArtifact(t, map[string]any{"diff": diff, "comments": comments}), packetArtifact(t, SourceEvidence{IndexComplete: true, FileIndex: []string{"Makefile", "a/Makefile", "b/Makefile"}})}
+	p, err := JudgmentPacket(arts, Subject{})
+	if err != nil || !p.Complete || len(p.RequiredSources) != 0 {
+		t.Fatalf("ambiguous bare token invented a requirement: %v %v %v", p.Missing, p.RequiredSources, err)
+	}
+	if !strings.Contains(strings.Join(p.SourceHints, " "), "ambiguous Makefile; candidates [a/Makefile b/Makefile]") {
+		t.Fatalf("ambiguous bare token hint missing: %v", p.SourceHints)
+	}
+}
+
+func TestPacketPreciseBasenameWithSeveralChangedMatchesNeedsIndex(t *testing.T) {
+	diff := "diff --git a/a/spec.md b/a/spec.md\n--- a/a/spec.md\n+++ b/a/spec.md\n@@ -50 +50 @@\n-old\n+new\n" +
+		"diff --git a/b/spec.md b/b/spec.md\n--- a/b/spec.md\n+++ b/b/spec.md\n@@ -50 +50 @@\n-old\n+new\n"
+	comments := []map[string]any{{"is_bot": true, "body": "P1: `spec.md:50` accepts arbitrary users."}}
+	arts := []state.Artifact{packetArtifact(t, map[string]any{"diff": diff, "comments": comments})}
+	p, err := JudgmentPacket(arts, Subject{})
+	if err != nil || p.Complete || !strings.Contains(strings.Join(p.Missing, " "), "file index unavailable") {
+		t.Fatalf("several changed basenames claimed coverage without the index: %v %v", p.Missing, err)
+	}
+	withRoot := append(append([]state.Artifact(nil), arts...), packetArtifact(t, SourceEvidence{IndexComplete: true, FileIndex: []string{"spec.md", "a/spec.md", "b/spec.md"}}))
+	p, err = JudgmentPacket(withRoot, Subject{})
+	if err != nil || p.Complete || strings.Join(p.RequiredSources, ",") != "spec.md" {
+		t.Fatalf("exact root file not required once indexed: %v %v", p.RequiredSources, err)
+	}
+	nested := append(append([]state.Artifact(nil), arts...), packetArtifact(t, SourceEvidence{IndexComplete: true, FileIndex: []string{"a/spec.md", "b/spec.md"}}))
+	p, err = JudgmentPacket(nested, Subject{})
+	if err != nil || !p.Complete || len(p.RequiredSources) != 0 || !strings.Contains(strings.Join(p.SourceHints, " "), "ambiguous spec.md") {
+		t.Fatalf("indexed ambiguity not reported as a hint: %v %v %v", p.Missing, p.SourceHints, err)
+	}
+}

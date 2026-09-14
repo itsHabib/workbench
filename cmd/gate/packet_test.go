@@ -242,3 +242,48 @@ func TestEvidenceRepairConcurrentBound(t *testing.T) {
 func packetTestIndex(string, string) ([]string, error) {
 	return []string{"docs/companion.md", "x"}, nil
 }
+
+// A bare mention matching a changed nested file must stay satisfiable once the
+// collector records the index, even when an unchanged root blob of the same
+// name is unreadable by the collector.
+func TestEvidenceRepairBareTokenStaysSatisfiable(t *testing.T) {
+	e := testEnv(t)
+	subject := verify.Subject{Repo: "o/r", Number: 7, HeadSHA: strings.Repeat("a", 40)}
+	grant, err := capability.Mint(e.st, e.keyPath, subject.Repo, "merge", "T2", 1, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	diff := "diff --git a/web/package-lock.json b/web/package-lock.json\n--- a/web/package-lock.json\n+++ b/web/package-lock.json\n@@ -1 +1 @@\n-old\n+new\n"
+	body := "The `package-lock.json` churn looks unrelated; also check `docs/companion.md`."
+	if _, err := e.st.Append(state.KindEvidence, run, nil, map[string]any{"diff": diff, "head": subject.HeadSHA, "comments": []map[string]any{{"is_bot": true, "body": body}}}); err != nil {
+		t.Fatal(err)
+	}
+	v := reducedVerdict(subject, verify.DecisionEscalate, "T0")
+	id := recordReduced(t, e, run, v)
+	if _, code, err := act(e, run, grant.ID, v, id, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park %d %v", code, err)
+	}
+	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
+	index := func(string, string) ([]string, error) {
+		return []string{"package-lock.json", "web/package-lock.json", "docs/companion.md"}, nil
+	}
+	read := func(_, _, path string) (string, string, error) {
+		if path == "package-lock.json" {
+			return "", "", fmt.Errorf("evidence_source_invalid: expected bounded regular file %s", path)
+		}
+		return "text\n", "blob-" + path, nil
+	}
+	if _, err := supplementEvidence(e, run, grant.ID, nil, head, read, index); err != nil {
+		t.Fatalf("default collection selected an unreadable unchanged blob: %v", err)
+	}
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := verify.JudgmentPacket(arts, subject)
+	if err != nil || !p.Complete {
+		t.Fatalf("bare token left the packet unsatisfiable: %v %v %v", p.Missing, p.RequiredSources, err)
+	}
+}

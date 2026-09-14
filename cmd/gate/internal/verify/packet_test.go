@@ -24,7 +24,13 @@ func TestPacketReportsAmbiguousHintWithoutRequiringEveryCandidate(t *testing.T) 
 		diff += fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1 +1 @@\n-old\n+complete %s\n", path, path, path, path, path)
 	}
 	arts := []state.Artifact{packetArtifact(t, map[string]any{"diff": diff, "comments": []map[string]any{{"is_bot": true, "body": "Check `README.md:1`"}}})}
+	// Several changed basenames do not rule out an exact root README.md.
 	p, err := JudgmentPacket(arts, Subject{})
+	if err != nil || p.Complete || !strings.Contains(strings.Join(p.Missing, " "), "file index unavailable") {
+		t.Fatalf("ambiguous precise reference claimed coverage without the index: %+v %v", p.Missing, err)
+	}
+	arts = append(arts, packetArtifact(t, SourceEvidence{IndexComplete: true, FileIndex: []string{"huge", "a/README.md", "b/README.md", "c/README.md"}}))
+	p, err = JudgmentPacket(arts, Subject{})
 	if err != nil || !p.Complete {
 		t.Fatalf("%+v %v", p, err)
 	}

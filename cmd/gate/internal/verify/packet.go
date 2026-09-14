@@ -280,19 +280,14 @@ func (refs *packetReferences) addComment(c recordedReview, changed, index []stri
 func (refs *packetReferences) addHint(review string, match, changed, index []string) {
 	hint := strings.TrimPrefix(match[1], "./")
 	matches := matchingPacketPaths(match[1], changed)
-	if len(matches) == 0 {
-		// A bare token outside the diff can name a command, symbol or example.
-		// Even a matching repository blob does not make it required source.
-		if !strings.Contains(match[1], "/") && match[2] == "" {
-			if candidates := matchingPacketPaths(hint, index); len(candidates) > 0 {
-				refs.hints = append(refs.hints, fmt.Sprintf("review %s: %s is an unchanged bare token; candidates %v are not represented as required source", review, hint, candidates))
-			}
-			return
-		}
+	if !strings.Contains(match[1], "/") && match[2] == "" {
+		refs.addBareToken(review, hint, matches, index)
+		return
 	}
-	// A basename selected from the diff does not establish which file a precise
-	// reference names. Resolve against the complete index before claiming coverage.
-	if len(matches) == 0 || len(matches) == 1 && match[2] != "" && matches[0] != hint {
+	// Only an exact diff path establishes which file a precise reference names.
+	// A basename fallback, unique or not, is resolved against the complete index
+	// before claiming coverage.
+	if len(matches) != 1 || matches[0] != hint {
 		refs.needsIndex = true
 	}
 	known := append(append([]string(nil), changed...), index...)
@@ -307,6 +302,24 @@ func (refs *packetReferences) addHint(review string, match, changed, index []str
 	refs.paths = append(refs.paths, matches[0])
 	if ref, ok := parseLocus(matches[0] + ":" + match[2]); ok {
 		refs.loci = append(refs.loci, ref)
+	}
+}
+
+// addBareToken handles a line-less name without a directory. Such a token can
+// name a command, symbol or example, so it resolves only among changed files:
+// an unchanged repository blob never becomes required source because a review
+// mentioned its name, even once the file index is recorded.
+func (refs *packetReferences) addBareToken(review, hint string, changed, index []string) {
+	if len(changed) == 1 {
+		refs.paths = append(refs.paths, changed[0])
+		return
+	}
+	if len(changed) > 1 {
+		refs.hints = append(refs.hints, fmt.Sprintf("review %s: ambiguous %s; candidates %v; no source selected or finding resolved", review, hint, changed))
+		return
+	}
+	if candidates := matchingPacketPaths(hint, index); len(candidates) > 0 {
+		refs.hints = append(refs.hints, fmt.Sprintf("review %s: %s is an unchanged bare token; candidates %v are not represented as required source", review, hint, candidates))
 	}
 }
 

@@ -72,9 +72,11 @@ Before invoking a judge, Gate checks the recorded packet. Structured review
 anchors, verifier loci, and precise resolvable prose references require source
 coverage. An exact path wins over other files with the same basename; otherwise
 a basename must resolve uniquely. Ambiguous references are reported with their
-candidates, never expanded into mandatory reads of every candidate. A bare token
-outside the diff can name a command or example; repository existence alone does
-not make it required text source. These hints and their original review bodies
+candidates, never expanded into mandatory reads of every candidate. A precise
+reference that matches a changed file only by basename waits for the file index.
+A bare token (no directory, no line) can name a command or example, so it
+resolves only among changed files; repository existence alone never makes it
+required text source. These hints and their original review bodies
 remain visible, with no claim that the finding is resolved.
 
 An exact-head Git file index grounds unchanged companions and file absence.

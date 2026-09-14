@@ -2,6 +2,29 @@
 
 Tracked in-repo per portfolio convention (status doc, not issues).
 
+## gate packet: pre-existing reference-parsing gaps (PR #341 review, 2026-09-13)
+
+An independent exact-head review of #341 found two gaps that exist on the base
+as well; #341 does not widen them. Both leave a precise prose reference out of
+the packet's required source while it reports `complete=true`, so the judge
+still sees the review body but not a guaranteed file window.
+
+- **P2, partial slash paths are exact-only:** a reference such as
+  `internal/verify/packet.go:44` for `cmd/gate/internal/verify/packet.go` is
+  neither required nor reported as a hint, while `resolveReviewPath` in
+  `judgereviews.go` suffix-matches the same text for the main context. Resolve a
+  slash path by unique path-suffix against diff plus index, keeping ambiguous
+  suffixes as hints.
+- **P2, a non-path backtick span desynchronises `reviewPathPattern`:** in
+  "The call `err := check()` at `auth/policy.go:42`", the `:=` span makes the
+  pattern consume the text between spans, and the following reference is lost.
+  Match backtick spans first, then test each span against the path grammar.
+- **P3, a bare mention of an oversized changed file:** a bare token such as
+  `package-lock.json` that uniquely names a changed file requires that file's
+  complete diff section, as on the base. When both the diff section and the
+  file exceed their bounds the packet cannot complete. Consider demoting bare,
+  line-less mentions to hints when their complete coverage is unsatisfiable.
+
 ## fleet visibility: final-review residuals on PR #319
 
 The two permitted fix rounds ended at code head `3a36614`. The final Copilot
