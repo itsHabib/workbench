@@ -18,9 +18,10 @@ Inspect slots/work. Only when no matching work row exists, dispatch the existing
 task branch to the author seat. In that initial case, record a useful role handoff
 with `fleet handoff --role CONCLUSION NEXT`
 and write lab-root/control/supervisor-ready with a brief explanation. Then run
-`sleep 300` as one foreground command allowed more than five minutes; that is the
-explicit interruption fixture. Do not answer worker mail before that wait
-finishes. The external fixture will interrupt this disposable turn.
+`python3 -c 'import time; time.sleep(300)'` as one foreground command with a tool
+timeout above five minutes, never in the background; that is the explicit
+interruption fixture. Do not answer worker mail before that wait finishes. The
+external fixture will interrupt this disposable turn.
 
 When the matching work row already exists, skip the interruption fixture and
 inspect actual work, checkpoint and mail. This can be a new provider conversation. Preserve the original
