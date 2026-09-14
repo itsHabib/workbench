@@ -194,7 +194,8 @@ Constraints that are design decisions, not omissions:
   32 paths per call and 256 KiB per verified text file. Complete supplemental
   source, additional required reviews and required diffs share their combined
   832 KiB allowance, including rendered headers. Collector admission rechecks
-  the candidate under the append lock. Repairs spend no new cycle, never reopen
+  the candidate under the append lock, counts a recorded file once and refuses a
+  supplement that would leave a complete packet incomplete. Repairs spend no new cycle, never reopen
   a substantive judgment, and refuse changed heads. Inspect every missing item
   together; do not start another run merely to repair packet construction.
 - **The cycle ceiling is a pre-flight, not a post-mortem.** `gate gate` counts

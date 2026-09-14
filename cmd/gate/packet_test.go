@@ -368,3 +368,136 @@ func TestEvidenceRepairBareTokenStaysSatisfiable(t *testing.T) {
 		t.Fatalf("bare token left the packet unsatisfiable: %v %v %v", p.Missing, p.RequiredSources, err)
 	}
 }
+
+func parkedPacketRun(t *testing.T, evidenceBody map[string]any) (env, verify.Subject, string, string) {
+	t.Helper()
+	e := testEnv(t)
+	subject := verify.Subject{Repo: "o/r", Number: 7, HeadSHA: strings.Repeat("a", 40)}
+	grant, err := capability.Mint(e.st, e.keyPath, subject.Repo, "merge", "T2", 1, "test", time.Hour, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := state.NewRunID()
+	recordVerifier(t, e, run, subject, verify.DecisionEscalate)
+	if _, err := e.st.Append(state.KindEvidence, run, nil, evidenceBody); err != nil {
+		t.Fatal(err)
+	}
+	v := reducedVerdict(subject, verify.DecisionEscalate, "T0")
+	id := recordReduced(t, e, run, v)
+	if _, code, err := act(e, run, grant.ID, v, id, gateResult{}, false, nil); err != nil || code != codeParked {
+		t.Fatalf("park %d %v", code, err)
+	}
+	return e, subject, grant.ID, run
+}
+
+func runPacket(t *testing.T, e env, run string, subject verify.Subject) (verify.Packet, int) {
+	t.Helper()
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := verify.JudgmentPacket(arts, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p, len(arts)
+}
+
+func largeDiff(path string, pairs int) string {
+	var body strings.Builder
+	for i := 0; i < pairs; i++ {
+		fmt.Fprintf(&body, "-old line %06d %s\n+new line %06d %s\n", i, strings.Repeat("o", 40), i, strings.Repeat("n", 40))
+	}
+	return fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1,%d +1,%d @@\n", path, path, path, path, pairs, pairs) + body.String()
+}
+
+// A supplement that fits the source/review share must still not push a
+// rendered required diff out of a complete packet: the run would then need
+// source that no longer fits and could never reach judgment.
+func TestEvidenceRepairRefusesDisplacingCompletePacket(t *testing.T) {
+	body := map[string]any{"diff": largeDiff("q.go", 2000), "comments": []map[string]any{{"is_bot": true, "body": "Bug at `q.go:1`"}}}
+	e, subject, grant, run := parkedPacketRun(t, body)
+	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
+	index := func(string, string) ([]string, error) { return []string{"q.go", "c1", "c2", "c3"}, nil }
+	read := func(_, _, path string) (string, string, error) {
+		return strings.Repeat("c", 250*1024), "blob-" + path, nil
+	}
+	before, n := runPacket(t, e, run, subject)
+	if !before.Complete {
+		t.Fatalf("fixture must start complete: %v", before.Missing)
+	}
+	if _, err := supplementEvidence(e, run, grant, []string{"c1", "c2", "c3"}, head, read, index); err == nil || !strings.Contains(err.Error(), "evidence_budget_exceeded") {
+		t.Fatalf("displacing supplement admitted: %v", err)
+	}
+	after, m := runPacket(t, e, run, subject)
+	if !after.Complete || m != n {
+		t.Fatalf("refused supplement changed the run: complete=%v artifacts %d -> %d", after.Complete, n, m)
+	}
+	if _, err := supplementEvidence(e, run, grant, []string{"c1"}, head, read, index); err != nil {
+		t.Fatalf("companion that keeps the packet complete was refused: %v", err)
+	}
+}
+
+// Two collectors that race on the same required path both see it missing. The
+// duplicate copy must not consume capacity a required diff still needs.
+func TestEvidenceRepairConcurrentDuplicateKeepsPacketComplete(t *testing.T) {
+	review := "Bug at `r.go:1`; also compare `docs/p.md`. " + strings.Repeat("z", 300000)
+	body := map[string]any{"diff": largeDiff("r.go", 2000), "comments": []map[string]any{{"is_bot": true, "body": review}}}
+	e, subject, grant, run := parkedPacketRun(t, body)
+	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
+	index := func(string, string) ([]string, error) { return []string{"docs/p.md", "r.go"}, nil }
+	var ready sync.WaitGroup
+	ready.Add(2)
+	read := func(_, _, path string) (string, string, error) {
+		if path == "docs/p.md" {
+			ready.Done()
+			ready.Wait()
+			return strings.Repeat("p", 200*1024), "blob-p", nil
+		}
+		return strings.Repeat("r", 150*1024), "blob-r", nil
+	}
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, err := supplementEvidence(e, run, grant, nil, head, read, index)
+			results <- err
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		if err := <-results; err != nil {
+			t.Fatalf("concurrent collector: %v", err)
+		}
+	}
+	p, _ := runPacket(t, e, run, subject)
+	if !p.Complete || strings.Count(p.Context, "## Exact-head source docs/p.md") != 1 {
+		t.Fatalf("duplicate collection stranded the packet: complete=%v missing=%v", p.Complete, p.Missing)
+	}
+}
+
+func TestEvidenceRepairSkipsCollectedPaths(t *testing.T) {
+	e, subject, grant, run, _ := packetCLIFixture(t)
+	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
+	read := func(_, _, path string) (string, string, error) { return "text", "blob-" + path, nil }
+	if _, err := supplementEvidence(e, run, grant, []string{"docs/companion.md"}, head, read, packetTestIndex); err != nil {
+		t.Fatal(err)
+	}
+	id, err := supplementEvidence(e, run, grant, []string{"docs/companion.md"}, head, read, packetTestIndex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arts, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range arts {
+		var s verify.SourceEvidence
+		if a.ID != id || json.Unmarshal(a.Body, &s) != nil {
+			continue
+		}
+		if len(s.Sources) != 0 {
+			t.Fatalf("already collected path copied again: %+v", s.Sources)
+		}
+		return
+	}
+	t.Fatal("second supplement not recorded")
+}

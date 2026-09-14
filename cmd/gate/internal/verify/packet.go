@@ -341,14 +341,22 @@ func sameNamePaths(name string, known []string) []string {
 	return uniquePacketStrings(result)
 }
 
+// writePacketSources renders each recorded path and blob once. A repeated
+// collection of the same exact-head file adds no context and consumes no
+// capacity, so a duplicate supplement cannot displace required evidence.
 func writePacketSources(b *strings.Builder, arts []state.Artifact, subject Subject, remaining *int) []string {
 	var missing []string
+	rendered := make(map[SourceFile]bool)
 	for _, a := range arts {
 		var s SourceEvidence
 		if a.Kind != state.KindEvidence || json.Unmarshal(a.Body, &s) != nil || len(s.Sources) == 0 {
 			continue
 		}
 		for _, f := range s.Sources {
+			if rendered[f] {
+				continue
+			}
+			rendered[f] = true
 			entry := fmt.Sprintf("\n## Exact-head source %s (%s, blob %s, evidence %s)\n```\n%s\n```\n", scrub(f.Path), subject.HeadSHA, f.Blob, a.ID, scrub(f.Content))
 			if len(entry) > *remaining {
 				missing = append(missing, fmt.Sprintf("source %s: exceeds shared evidence budget", f.Path))

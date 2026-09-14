@@ -18,8 +18,12 @@ A diff section that cannot fit requests exact-head source, which can be smaller
 than a large deletion or replacement diff. Missing source/review capacity is
 reported explicitly and keeps judgment incomplete. The evidence collector
 evaluates the candidate packet under its existing audited append lock. That check
-includes prior supplements and reviews, so concurrent collectors cannot each
-consume the same space and an impossible supplement appends nothing.
+includes prior supplements and reviews, and an impossible supplement appends
+nothing. Each recorded path and blob renders and counts once, and the collector
+skips paths the run already holds, so two collectors racing on the same required
+file do not consume its space twice. Collected source may displace a required
+diff while the packet is still incomplete, because smaller source can then
+repair it; a supplement that would leave a complete packet incomplete is refused.
 
 The initial recorded-history and diff rendering remain separate. This change
 does not establish an overall context or token limit. It does not change review

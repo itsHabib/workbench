@@ -61,3 +61,23 @@ func TestPacketCountsSourceHeadersAndScrubbing(t *testing.T) {
 		})
 	}
 }
+
+func TestPacketRendersRepeatedSourceOnce(t *testing.T) {
+	subject := Subject{Repo: "o/r", Number: 1, HeadSHA: "head"}
+	comments := []map[string]any{{"is_bot": true, "body": "Check `p.md:1`."}}
+	file := SourceFile{Path: "p.md", Blob: "blob-p", Content: strings.Repeat("p", 500*1024)}
+	source := SourceEvidence{Subject: subject, Sources: []SourceFile{file}, IndexComplete: true, FileIndex: []string{"p.md"}}
+	arts := []state.Artifact{packetArtifact(t, map[string]any{"comments": comments}), packetArtifact(t, source)}
+	once, err := JudgmentPacket(arts, subject)
+	if err != nil || !once.Complete {
+		t.Fatalf("single copy: %v %v", once.Missing, err)
+	}
+	// A second copy of the same exact-head file would overflow if charged twice.
+	twice, err := JudgmentPacket(append(arts, packetArtifact(t, source)), subject)
+	if err != nil || !twice.Complete || twice.EvidenceBudgetExceeded {
+		t.Fatalf("repeated source charged twice: %v %v", twice.Missing, err)
+	}
+	if n := strings.Count(twice.Context, "## Exact-head source p.md"); n != 1 {
+		t.Fatalf("repeated source rendered %d times", n)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"runtime/debug"
+	"strings"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/evidence"
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
@@ -114,7 +115,7 @@ func supplementEvidence(e env, run, grant string, paths []string, head func(stri
 	if err != nil {
 		return "", err
 	}
-	if err := checkEvidenceRepair(arts, run, esc, 0); err != nil {
+	if err := checkEvidenceRepair(arts, run, esc, nil); err != nil {
 		return "", err
 	}
 	current, err := head(subject.Repo, subject.Number)
@@ -142,7 +143,9 @@ func supplementEvidence(e env, run, grant string, paths []string, head func(stri
 		return "", fmt.Errorf("evidence_path_limit: %d required paths; select at most 32 with -path", len(paths))
 	}
 	bytes := 0
-	seen := make(map[string]bool)
+	// A path already collected at this exact head adds nothing; skip it rather
+	// than record a second copy against the shared allowance.
+	seen := recordedSourcePaths(arts, run)
 	for _, path := range paths {
 		if seen[path] {
 			continue
@@ -170,7 +173,7 @@ func supplementEvidence(e env, run, grant string, paths []string, head func(stri
 		if e.now().After(grantCap.ExpiresAt) {
 			return errors.New("grant_expired: evidence repair")
 		}
-		if err := checkEvidenceRepair(audit.All, run, esc, bytes); err != nil {
+		if err := checkEvidenceRepair(audit.All, run, esc, body.Sources); err != nil {
 			return err
 		}
 		return checkPacketEvidenceBudget(audit.All, run, body)
@@ -178,11 +181,39 @@ func supplementEvidence(e env, run, grant string, paths []string, head func(stri
 	return a.ID, err
 }
 
-func checkEvidenceRepair(arts []state.Artifact, run, esc string, added int) error {
+func recordedSourcePaths(arts []state.Artifact, run string) map[string]bool {
+	paths := make(map[string]bool)
+	for _, a := range arts {
+		var s verify.SourceEvidence
+		if a.Run != run || a.Kind != state.KindEvidence || json.Unmarshal(a.Body, &s) != nil {
+			continue
+		}
+		for _, f := range s.Sources {
+			paths[f.Path] = true
+		}
+	}
+	return paths
+}
+
+// checkEvidenceRepair bounds supplements by count and by raw source bytes, the
+// early bound ahead of the rendered check. Each recorded path and blob counts
+// once, as the packet renders it once.
+func checkEvidenceRepair(arts []state.Artifact, run, esc string, added []verify.SourceFile) error {
 	if esc == "" || newestTerminal(arts, run) != esc {
 		return errors.New("evidence_repair_closed: no open escalation")
 	}
-	count, total := 0, added
+	count, total := 0, 0
+	counted := make(map[verify.SourceFile]bool)
+	addSource := func(f verify.SourceFile) {
+		if counted[f] {
+			return
+		}
+		counted[f] = true
+		total += len(f.Content)
+	}
+	for _, f := range added {
+		addSource(f)
+	}
 	for _, a := range arts {
 		if a.Run != run {
 			continue
@@ -196,7 +227,7 @@ func checkEvidenceRepair(arts []state.Artifact, run, esc string, added int) erro
 		}
 		count++
 		for _, f := range s.Sources {
-			total += len(f.Content)
+			addSource(f)
 		}
 	}
 	if count >= 3 {
@@ -210,11 +241,14 @@ func checkEvidenceRepair(arts []state.Artifact, run, esc string, added int) erro
 
 // Check the same renderer while holding the append lock. Raw source size alone
 // cannot account for required reviews, headers, or a concurrent supplement.
+// Sources may displace a required diff while a run is still incomplete, since
+// smaller exact-head source can then repair it. A packet that is already
+// complete never admits a supplement that would leave it incomplete.
 func checkPacketEvidenceBudget(arts []state.Artifact, run string, body verify.SourceEvidence) error {
-	var candidate []state.Artifact
+	var current []state.Artifact
 	for _, a := range arts {
 		if a.Run == run {
-			candidate = append(candidate, a)
+			current = append(current, a)
 		}
 	}
 	raw, err := json.Marshal(body)
@@ -222,13 +256,23 @@ func checkPacketEvidenceBudget(arts []state.Artifact, run string, body verify.So
 		return err
 	}
 	// The placeholder has the same width as the store's generated evidence ID.
-	candidate = append(candidate, state.Artifact{ID: candidateEvidenceID, Kind: state.KindEvidence, Run: run, Body: raw})
+	candidate := append(append([]state.Artifact(nil), current...), state.Artifact{ID: candidateEvidenceID, Kind: state.KindEvidence, Run: run, Body: raw})
 	packet, err := verify.JudgmentPacket(candidate, body.Subject)
 	if err != nil {
 		return err
 	}
 	if packet.EvidenceBudgetExceeded {
 		return fmt.Errorf("evidence_budget_exceeded: required sources and reviews exceed %d KiB shared packet budget", verify.RequiredEvidenceBudget/1024)
+	}
+	if packet.Complete {
+		return nil
+	}
+	before, err := verify.JudgmentPacket(current, body.Subject)
+	if err != nil {
+		return err
+	}
+	if before.Complete {
+		return fmt.Errorf("evidence_budget_exceeded: supplement would displace required evidence from a complete packet: %s", strings.Join(packet.Missing, "; "))
 	}
 	return nil
 }

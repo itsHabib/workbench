@@ -116,7 +116,9 @@ This pools their former 512 + 64 + 256 KiB allowances. Already included reviews
 do not consume the shared budget again. Full required reviews and collected
 source take priority; a diff section that does not fit requests exact-head source.
 The collector checks source and review capacity again under the append lock, so
-an impossible supplement records no partial evidence. Packet JSON reports
+an impossible supplement records no partial evidence. A recorded file renders
+and counts once, the collector skips paths the run already holds, and a
+supplement that would leave a complete packet incomplete is refused. Packet JSON reports
 `evidence_budget_exceeded` when required source or review entries cannot fit.
 The existing initial history and recorded-diff sections remain separate; 832 KiB
 is not a limit on the entire context. See [shared evidence capacity](docs/shared-evidence-budget.md).
