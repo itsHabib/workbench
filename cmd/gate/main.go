@@ -523,6 +523,7 @@ func cmdGate(args []string) error {
 			code = codeRefused
 		} else {
 			res, code, err = runGateBound(e, *repo, *pr, request.Request.Subject.HeadSHA, grant.ID, *live, *modelBackend, *reviewsOptional)
+			res, code, err = slackBoundResult(e, fs, res, code, err)
 		}
 	} else {
 		res, code, err = runGateSelected(e, *repo, *pr, *grantID, *live, *modelBackend, *reviewsOptional)
@@ -2777,6 +2778,9 @@ func decorateTerminalCodeContext(res *gateResult, code string, substrateOK bool,
 	retry := readiness.RetryHelps(code)
 	res.SelfGated = readiness.SelfGated(code)
 	res.RetryHelps = &retry
+	if res.Escape != nil {
+		return // Preserve a command's more specific recovery route.
+	}
 	if res.Discovery != nil && res.Discovery.Status != "available" {
 		res.Escape = discoveryRoute(*res.Discovery)
 		return

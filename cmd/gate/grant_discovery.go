@@ -54,6 +54,16 @@ type grantAssessmentError struct {
 
 var errGateHeadChanged = errors.New("grant_assessment_required: PR head changed after selection")
 
+type gateHeadChangedError struct {
+	expected, observed string
+}
+
+func (e *gateHeadChangedError) Error() string {
+	return fmt.Sprintf("%s: %s to %s", errGateHeadChanged, e.expected, e.observed)
+}
+
+func (*gateHeadChangedError) Unwrap() error { return errGateHeadChanged }
+
 func (e *grantAssessmentError) Error() string {
 	return "grant_assessment_required: " + strings.TrimPrefix(e.discovery.Why, "grant_assessment_required: ")
 }
@@ -314,7 +324,7 @@ func matchBoundView(head string, view json.RawMessage) error {
 		return err
 	}
 	if fields.HeadSHA != head {
-		return fmt.Errorf("%w: %s to %s", errGateHeadChanged, head, fields.HeadSHA)
+		return &gateHeadChangedError{expected: head, observed: fields.HeadSHA}
 	}
 	return nil
 }
