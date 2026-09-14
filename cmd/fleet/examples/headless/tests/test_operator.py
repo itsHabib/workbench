@@ -86,12 +86,14 @@ class OperatorTest(unittest.TestCase):
         lab.write_json(self.root / "resolved.json", {"provider": {"name": "claude", "runtime_home": "/sdk"}})
         inherited = {"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "parent", "CLAUDE_CODE_MESSAGING_SOCKET": "/tmp/s",
                      "CLAUDE_CODE_ENTRYPOINT": "claude-desktop", "CLAUDE_CONFIG_DIR": "/config", "CLAUDE_CODE_OAUTH_TOKEN": "token",
-                     "CLAUDE_CODE_USE_VERTEX": "1", "PATH": "/usr/bin", "HOME": "/home/operator"}
+                     "CLAUDE_CODE_USE_VERTEX": "1", "CLAUDE_CODE_SKIP_FOUNDRY_AUTH": "1", "CLAUDE_CODE_CLIENT_CERT": "/c",
+                     "PATH": "/usr/bin", "HOME": "/home/operator"}
         with patch.dict(lab.os.environ, inherited, clear=True):
             env = lab.env_for(self.root)
         self.assertFalse({"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_ENTRYPOINT"} & set(env))
         self.assertEqual((env["CLAUDE_CONFIG_DIR"], env["HOME"], env["FLEET_RUNTIME_HOME"]), ("/config", "/home/operator", "/sdk"))
         self.assertEqual((env["CLAUDE_CODE_OAUTH_TOKEN"], env["CLAUDE_CODE_USE_VERTEX"]), ("token", "1"))
+        self.assertEqual((env["CLAUDE_CODE_SKIP_FOUNDRY_AUTH"], env["CLAUDE_CODE_CLIENT_CERT"]), ("1", "/c"))
 
     def test_claude_policy_keeps_fleet_hooks_and_denies(self):
         checkout = self.root / "seat"
@@ -132,12 +134,37 @@ class OperatorTest(unittest.TestCase):
         self.assertGreater(argv.index("project,local"), argv.index("--setting-sources=user,project,local"))
         self.assertEqual(argv[-2:], ["--append-system-prompt-file", str(self.root / "lanes/author/card.md")])
         self.assertEqual(observed["memory"], "1")
+        refused = lab.run([self.root / "bin/claude", "--print"], self.root, check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("no role card", refused.stderr)
 
     def test_cancelled_supervisor_must_end_interrupted(self):
-        lab.ended_otherwise([{"attempt": "a", "provider_terminal": True, "provider_state": "interrupted"}], "a")
-        lab.ended_otherwise([{"attempt": "b", "provider_terminal": True, "provider_state": "failed"}], "a")
+        lab.ended_otherwise([{"attempt": "a", "provider_terminal": True, "provider_state": "interrupted"}], "a", True)
+        lab.ended_otherwise([{"attempt": "b", "provider_terminal": True, "provider_state": "failed"}], "a", True)
+        lab.ended_otherwise([{"attempt": "a", "provider_state": "interrupting"}], "a", False)
         with self.assertRaisesRegex(RuntimeError, "not interrupted"):
-            lab.ended_otherwise([{"attempt": "a", "provider_terminal": True, "provider_state": "failed"}], "a")
+            lab.ended_otherwise([{"attempt": "a", "provider_terminal": True, "provider_state": "failed"}], "a", False)
+        with self.assertRaisesRegex(RuntimeError, "not interrupted"):  # a bridge runtime error exits unmarked
+            lab.ended_otherwise([{"attempt": "a", "provider_state": "failed"}], "a", True)
+
+    def test_preservation_reads_the_committed_head_not_the_working_tree(self):
+        repo = self.root / "repo"
+        lab.run(["git", "init", "-q", repo], self.root)
+        for key, value in (("user.name", "t"), ("user.email", "t@example.invalid")):
+            lab.git(repo, "config", key, value)
+        (repo / "test.py").write_text("strict\n")
+        lab.git(repo, "add", ".")
+        lab.git(repo, "commit", "-qm", "seed")
+        seed = lab.git(repo, "rev-parse", "HEAD")
+        self.assertTrue(audit.preserved(repo, seed, seed, "test.py"))
+        (repo / "test.py").write_text("weakened\n")
+        lab.git(repo, "commit", "-qam", "weaken")
+        head = lab.git(repo, "rev-parse", "HEAD")
+        (repo / "test.py").write_text("strict\n")  # the working tree looks untouched
+        self.assertFalse(audit.preserved(repo, head, seed, "test.py"))
+        lab.git(repo, "rm", "-qf", "test.py")
+        lab.git(repo, "commit", "-qm", "delete")
+        self.assertFalse(audit.preserved(repo, lab.git(repo, "rev-parse", "HEAD"), seed, "test.py"))
 
     def test_rooms_evidence_requires_identical_patch_success_and_cleanup(self):
         patch_file = self.root / "worker.patch"
@@ -146,14 +173,22 @@ class OperatorTest(unittest.TestCase):
         out = self.root / "result/rooms"
         out.mkdir(parents=True)
         (self.root / "bin/rooms-check.py").write_text("adapter")
-        info = {"rooms": {"out": str(out), "adapter_sha256": audit.digest(self.root / "bin/rooms-check.py")},
+        (self.root / "bin/rooms-run").write_text("entry")
+        info = {"rooms": {"out": str(out), "adapter_sha256": audit.digest(self.root / "bin/rooms-check.py"),
+                          "cli": str(self.root / "bin/rooms-run"), "cli_sha256": audit.digest(self.root / "bin/rooms-run")},
                 "verifier": {"cwd": "/lab/verifier"}}
         lab.write_json(out / "summary.json", {"input_patch_sha256": digest, "returned_patch_sha256": digest,
                                               "cli_exit": 0, "command_status": "succeeded", "command_exit": 0})
         (out / "lifecycle.ndjson").write_text('{"event":"collection_done"}\n{"event":"cleanup_done"}\n')
-        receipt = {"head": "h", "kind": "rooms", "verdict": "pass", "dirty": False, "cwd": "/lab/verifier", "at": 1}
+        receipt = {"head": "h", "kind": "rooms", "verdict": "pass", "dirty": False, "cwd": "/lab/verifier/task",
+                   "worktree": "/lab/verifier", "at": 1}
         checks, _ = audit.rooms_evidence(self.root, info, patch_file, [receipt], "h")
         self.assertTrue(all(checks.values()), checks)
+        elsewhere = {**receipt, "cwd": "/lab/author", "worktree": "/lab/author"}
+        self.assertFalse(audit.rooms_evidence(self.root, info, patch_file, [elsewhere], "h")[0]["rooms_receipt"])
+        (self.root / "bin/rooms-run").write_text("edited entry point")
+        self.assertFalse(audit.rooms_evidence(self.root, info, patch_file, [receipt], "h")[0]["rooms_adapter_unchanged"])
+        (self.root / "bin/rooms-run").write_text("entry")
         lab.write_json(out / "summary.json", {"input_patch_sha256": digest, "returned_patch_sha256": "other",
                                               "cli_exit": 0, "command_status": "succeeded", "command_exit": 0})
         (out / "lifecycle.ndjson").write_text('{"event":"collection_done"}\n')

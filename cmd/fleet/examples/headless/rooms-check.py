@@ -81,17 +81,17 @@ def through_lima(args):
     guest = "/tmp/rc" + uuid.uuid4().hex[:8]
     shell = ["limactl", "shell", args.lima, "sudo"]
     started = time.monotonic()
+    transport = {"lima_host": args.lima, "guest_attempt": guest + "/a", "exit": None, "local_patch_sha256": sha(args.patch),
+                 "scope": "includes VM transport; the guest copy, including its staged key, is removed after collection"}
     try:
-        code = run_in_guest(args, shell, guest, output)
+        transport["exit"] = run_in_guest(args, shell, guest, output)
     finally:
         # Never follow a mount Rooms failed to release out of the private directory.
-        removed = subprocess.run([*shell, "rm", "-rf", "--one-file-system", guest]).returncode == 0
-    transport = {"lima_host": args.lima, "guest_attempt": guest + "/a", "exit": code, "guest_removed": removed,
-                 "local_patch_sha256": sha(args.patch), "elapsed_seconds": time.monotonic() - started,
-                 "scope": "includes VM transport; the guest copy, including its staged key, is removed after collection"}
-    (output / "transport.json").write_text(json.dumps(transport, indent=2) + "\n")
+        transport["guest_removed"] = subprocess.run([*shell, "rm", "-rf", "--one-file-system", guest]).returncode == 0
+        transport["elapsed_seconds"] = time.monotonic() - started
+        (output / "transport.json").write_text(json.dumps(transport, indent=2) + "\n")
     print((output / "summary.json").read_text() if (output / "summary.json").exists() else json.dumps(transport, indent=2))
-    return code
+    return transport["exit"]
 
 
 def run_in_guest(args, shell, guest, output):
