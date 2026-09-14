@@ -24,9 +24,9 @@ func TestPacketCountsEachRenderedReviewOnce(t *testing.T) {
 }
 
 func TestPacketDoesNotHideUnrepresentedReview(t *testing.T) {
-	comments := []map[string]any{{"is_bot": true, "body": strings.Repeat("x", reviewContextCap+1)}}
+	comments := []map[string]any{{"is_bot": true, "body": strings.Repeat("x", RequiredEvidenceBudget+1)}}
 	p, err := JudgmentPacket([]state.Artifact{packetArtifact(t, map[string]any{"comments": comments})}, Subject{})
-	if err != nil || p.Complete || !strings.Contains(strings.Join(p.Missing, " "), "required review budget") {
+	if err != nil || p.Complete || !p.EvidenceBudgetExceeded || !strings.Contains(strings.Join(p.Missing, " "), "shared evidence budget") {
 		t.Fatalf("unrepresented review was counted complete: %v %v", p.Missing, err)
 	}
 }

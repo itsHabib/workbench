@@ -120,16 +120,16 @@ func TestEvidenceRepairBounds(t *testing.T) {
 func TestEvidenceRepairAggregateOverflowRecordsNothingPartial(t *testing.T) {
 	e, subject, grant, run, _ := packetCLIFixture(t)
 	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
-	index := func(string, string) ([]string, error) { return []string{"first", "second", "overflow"}, nil }
+	index := func(string, string) ([]string, error) { return []string{"first", "second", "third", "overflow"}, nil }
 	read := func(_, _, path string) (string, string, error) {
-		length := 215 * 1024 // Each complete text file remains below 256 KiB.
+		length := 250 * 1024 // Each complete text file remains below 256 KiB.
 		if path == "overflow" {
 			length = 100 * 1024
 		}
 		return strings.Repeat("x", length), "fixture-blob-" + path, nil
 	}
-	if _, err := supplementEvidence(e, run, grant, []string{"first", "second"}, head, read, index); err != nil {
-		t.Fatalf("430 KiB aggregate was rejected: %v", err)
+	if _, err := supplementEvidence(e, run, grant, []string{"first", "second", "third"}, head, read, index); err != nil {
+		t.Fatalf("750 KiB aggregate was rejected: %v", err)
 	}
 	before, err := e.st.Run(run)
 	if err != nil {
@@ -141,6 +141,76 @@ func TestEvidenceRepairAggregateOverflowRecordsNothingPartial(t *testing.T) {
 	after, err := e.st.Run(run)
 	if err != nil || len(after) != len(before) {
 		t.Fatalf("failed supplement wrote partial evidence: %d -> %d: %v", len(before), len(after), err)
+	}
+}
+
+func TestEvidenceRepairIncludesReviewsInAtomicBudget(t *testing.T) {
+	e, subject, grant, run, _ := packetCLIFixture(t)
+	_, err := e.st.Append(state.KindEvidence, run, nil, map[string]any{
+		"comments": []map[string]any{{"is_bot": true, "body": strings.Repeat("unresolved finding ", 12000)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
+	index := func(string, string) ([]string, error) { return []string{"first", "second", "third"}, nil }
+	read := func(_, _, path string) (string, string, error) {
+		return strings.Repeat("x", 230*1024), "fixture-blob-" + path, nil
+	}
+	before, err := e.st.Run(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = supplementEvidence(e, run, grant, []string{"first", "second", "third"}, head, read, index)
+	if err == nil || !strings.Contains(err.Error(), "evidence_budget_exceeded") {
+		t.Fatalf("source-only admission hid review overflow: %v", err)
+	}
+	after, err := e.st.Run(run)
+	if err != nil || len(after) != len(before) {
+		t.Fatalf("shared-budget rejection appended evidence: %d -> %d: %v", len(before), len(after), err)
+	}
+}
+
+func TestEvidenceRepairConcurrentSharedBudget(t *testing.T) {
+	e, subject, grant, run, _ := packetCLIFixture(t)
+	_, err := e.st.Append(state.KindEvidence, run, nil, map[string]any{
+		"comments": []map[string]any{{"is_bot": true, "body": strings.Repeat("unresolved finding ", 12000)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := func(string, int) (string, error) { return subject.HeadSHA, nil }
+	index := func(string, string) ([]string, error) { return []string{"a1", "a2", "b1", "b2"}, nil }
+	var ready sync.WaitGroup
+	ready.Add(2)
+	read := func(_, _, path string) (string, string, error) {
+		if strings.HasSuffix(path, "1") {
+			ready.Done()
+			ready.Wait()
+		}
+		return strings.Repeat("x", 190*1024), "fixture-blob-" + path, nil
+	}
+	results := make(chan error, 2)
+	for _, paths := range [][]string{{"a1", "a2"}, {"b1", "b2"}} {
+		go func() {
+			_, err := supplementEvidence(e, run, grant, paths, head, read, index)
+			results <- err
+		}()
+	}
+	passed, rejected := 0, 0
+	for i := 0; i < 2; i++ {
+		err := <-results
+		if err == nil {
+			passed++
+			continue
+		}
+		if !strings.Contains(err.Error(), "evidence_budget_exceeded") {
+			t.Fatalf("unexpected concurrent failure: %v", err)
+		}
+		rejected++
+	}
+	if passed != 1 || rejected != 1 {
+		t.Fatalf("shared capacity admitted twice: passed=%d rejected=%d", passed, rejected)
 	}
 }
 

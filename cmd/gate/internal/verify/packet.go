@@ -8,11 +8,11 @@ import (
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 )
 
-// SourceBudget bounds complete supplementary source across one run. Each file
-// still passes the collector's separate 256 KiB text and blob-identity checks.
-const SourceBudget = 512 * 1024
-
-const requiredDiffBudget = 256 * 1024
+// RequiredEvidenceBudget shares the former 512 KiB source, 256 KiB required
+// diff and 64 KiB additional-review allowances. Count rendered bytes, including
+// headers, without increasing their combined capacity. Each source file still
+// passes the collector's separate 256 KiB text and blob-identity checks.
+const RequiredEvidenceBudget = (512 + 256 + 64) * 1024
 
 // SourceEvidence is exact-head content collected by Gate, not an author appendix.
 type SourceEvidence struct {
@@ -31,11 +31,12 @@ type SourceFile struct {
 
 // Packet reports mechanical coverage, not whether the evidence proves a fix.
 type Packet struct {
-	Complete        bool     `json:"complete"`
-	Missing         []string `json:"missing"`
-	Context         string   `json:"context"`
-	RequiredSources []string `json:"required_sources"`
-	SourceHints     []string `json:"source_hints,omitempty"`
+	Complete               bool     `json:"complete"`
+	Missing                []string `json:"missing"`
+	Context                string   `json:"context"`
+	RequiredSources        []string `json:"required_sources"`
+	SourceHints            []string `json:"source_hints,omitempty"`
+	EvidenceBudgetExceeded bool     `json:"evidence_budget_exceeded,omitempty"`
 }
 
 // JudgmentPacket exposes exactly the context checked before provider invocation.
@@ -67,7 +68,11 @@ func JudgmentPacket(arts []state.Artifact, subject Subject) (Packet, error) {
 	b.WriteString(ctx)
 	p.SourceHints = uniquePacketStrings(refs.hints)
 	writeReviewPathMetadata(&b, nil, nil, p.SourceHints)
-	remaining := requiredDiffBudget
+	remaining := RequiredEvidenceBudget
+	budgetMissing := writeRequiredReviews(&b, active, includedReviews, &remaining)
+	budgetMissing = append(budgetMissing, writePacketSources(&b, arts, subject, &remaining)...)
+	p.EvidenceBudgetExceeded = len(budgetMissing) > 0
+	p.Missing = append(p.Missing, budgetMissing...)
 	indexPaths := make(map[string]bool)
 	for _, name := range index {
 		indexPaths[name] = true
@@ -81,13 +86,14 @@ func JudgmentPacket(arts []state.Artifact, subject Subject) (Packet, error) {
 			continue
 		}
 		text := packetFile(files, path)
-		if text == "" || len(text) > remaining {
+		entry := "\n## Required recorded diff (complete file section)\n```\n" + scrub(text) + "```\n"
+		if text == "" || len(entry) > remaining {
 			p.Missing = append(p.Missing, path+": required diff unavailable or exceeds packet budget; collect exact-head source")
 			p.RequiredSources = append(p.RequiredSources, path)
 			continue
 		}
-		b.WriteString("\n## Required recorded diff (complete file section)\n```\n" + scrub(text) + "```\n")
-		remaining -= len(text)
+		b.WriteString(entry)
+		remaining -= len(entry)
 	}
 	for _, ref := range refs.loci {
 		if _, ok := sources[ref.path]; ok {
@@ -101,8 +107,6 @@ func JudgmentPacket(arts []state.Artifact, subject Subject) (Packet, error) {
 			p.RequiredSources = append(p.RequiredSources, ref.path)
 		}
 	}
-	p.Missing = append(p.Missing, writeRequiredReviews(&b, active, includedReviews)...)
-	writePacketSources(&b, arts, subject)
 	p.Context = b.String()
 	p.Missing = uniquePacketStrings(p.Missing)
 	p.RequiredSources = uniquePacketStrings(p.RequiredSources)
@@ -337,34 +341,41 @@ func sameNamePaths(name string, known []string) []string {
 	return uniquePacketStrings(result)
 }
 
-func writePacketSources(b *strings.Builder, arts []state.Artifact, subject Subject) {
+func writePacketSources(b *strings.Builder, arts []state.Artifact, subject Subject, remaining *int) []string {
+	var missing []string
 	for _, a := range arts {
 		var s SourceEvidence
 		if a.Kind != state.KindEvidence || json.Unmarshal(a.Body, &s) != nil || len(s.Sources) == 0 {
 			continue
 		}
 		for _, f := range s.Sources {
-			fmt.Fprintf(b, "\n## Exact-head source %s (%s, blob %s, evidence %s)\n```\n%s\n```\n", scrub(f.Path), subject.HeadSHA, f.Blob, a.ID, scrub(f.Content))
+			entry := fmt.Sprintf("\n## Exact-head source %s (%s, blob %s, evidence %s)\n```\n%s\n```\n", scrub(f.Path), subject.HeadSHA, f.Blob, a.ID, scrub(f.Content))
+			if len(entry) > *remaining {
+				missing = append(missing, fmt.Sprintf("source %s: exceeds shared evidence budget", f.Path))
+				continue
+			}
+			b.WriteString(entry)
+			*remaining -= len(entry)
 		}
 	}
+	return missing
 }
 
-func writeRequiredReviews(b *strings.Builder, active []recordedReview, included map[string]bool) []string {
+func writeRequiredReviews(b *strings.Builder, active []recordedReview, included map[string]bool, remaining *int) []string {
 	var missing []string
-	reviewRemaining := reviewContextCap
 	for _, c := range active {
 		if included[c.key()] {
 			continue
 		}
 		entry := fmt.Sprintf("\n## Required source review (%s/%d; not authority)\n%s\n", c.evidence, c.index, scrub(string(c.raw)))
-		if len(entry) > reviewRemaining {
-			missing = append(missing, fmt.Sprintf("review %s/%d: exceeds required review budget", c.evidence, c.index))
+		if len(entry) > *remaining {
+			missing = append(missing, fmt.Sprintf("review %s/%d: exceeds shared evidence budget", c.evidence, c.index))
 			continue
 		}
 		b.WriteString(entry)
 		// Record secondary-section coverage in the same per-packet identity set.
 		included[c.key()] = true
-		reviewRemaining -= len(entry)
+		*remaining -= len(entry)
 	}
 	return missing
 }

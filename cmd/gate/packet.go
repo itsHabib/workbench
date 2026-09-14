@@ -150,8 +150,8 @@ func supplementEvidence(e env, run, grant string, paths []string, head func(stri
 			return "", err
 		}
 		bytes += len(content)
-		if bytes > verify.SourceBudget {
-			return "", fmt.Errorf("evidence_budget_exceeded: %d KiB per run", verify.SourceBudget/1024)
+		if bytes > verify.RequiredEvidenceBudget {
+			return "", fmt.Errorf("evidence_budget_exceeded: %d KiB shared packet budget", verify.RequiredEvidenceBudget/1024)
 		}
 		body.Sources = append(body.Sources, verify.SourceFile{Path: path, Blob: blob, Content: content})
 	}
@@ -167,7 +167,10 @@ func supplementEvidence(e env, run, grant string, paths []string, head func(stri
 		if e.now().After(grantCap.ExpiresAt) {
 			return errors.New("grant_expired: evidence repair")
 		}
-		return checkEvidenceRepair(audit.All, run, esc, bytes)
+		if err := checkEvidenceRepair(audit.All, run, esc, bytes); err != nil {
+			return err
+		}
+		return checkPacketEvidenceBudget(audit.All, run, body)
 	})
 	return a.ID, err
 }
@@ -196,8 +199,33 @@ func checkEvidenceRepair(arts []state.Artifact, run, esc string, added int) erro
 	if count >= 3 {
 		return errors.New("evidence_repair_limit: three supplements per unjudged run")
 	}
-	if total > verify.SourceBudget {
-		return fmt.Errorf("evidence_budget_exceeded: %d exceeds %d KiB per run", total, verify.SourceBudget/1024)
+	if total > verify.RequiredEvidenceBudget {
+		return fmt.Errorf("evidence_budget_exceeded: %d exceeds %d KiB shared packet budget", total, verify.RequiredEvidenceBudget/1024)
+	}
+	return nil
+}
+
+// Check the same renderer while holding the append lock. Raw source size alone
+// cannot account for required reviews, headers, or a concurrent supplement.
+func checkPacketEvidenceBudget(arts []state.Artifact, run string, body verify.SourceEvidence) error {
+	var candidate []state.Artifact
+	for _, a := range arts {
+		if a.Run == run {
+			candidate = append(candidate, a)
+		}
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	// The placeholder has the same width as the store's generated evidence ID.
+	candidate = append(candidate, state.Artifact{ID: "evd_0000000000000000", Kind: state.KindEvidence, Run: run, Body: raw})
+	packet, err := verify.JudgmentPacket(candidate, body.Subject)
+	if err != nil {
+		return err
+	}
+	if packet.EvidenceBudgetExceeded {
+		return fmt.Errorf("evidence_budget_exceeded: required sources and reviews exceed %d KiB shared packet budget", verify.RequiredEvidenceBudget/1024)
 	}
 	return nil
 }
