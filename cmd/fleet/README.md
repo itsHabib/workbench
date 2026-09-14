@@ -159,7 +159,7 @@ exit code changes; `--all` only adds what it replaced.
 ## Two guards on a Bash command
 
 **The directory guard.** A session that runs `cd <another bound directory>` becomes
-that directory's occupant at its next tool call — the hook resolves identity from cwd —
+that directory's occupant at its next tool call — the hook records a session at its cwd —
 and then leases that directory's branch away from the session that actually lives
 there. It happened twice in one rehearsal evening, and there is no holder-side release
 of a branch lease short of `SessionEnd` or an operator `fleet revoke`. So the PreToolUse
@@ -169,7 +169,9 @@ is not the session's own, naming the seat or role and the ways to do the work wi
 moving: `git -C <dir> …`, or `(cd <dir> && …)` in a subshell, which returns here. A
 session with no role of its own gets the same refusal. Naming a path moves nothing:
 absolute paths as operands, `git -C`, and any `cd` inside the session's own tree stay
-allowed.
+allowed. The session's own tree is the one it was launched in, not wherever its shell
+stands: the harness keeps a `cd` for later calls, and a session that stepped into an
+unbound directory may `cd` back to its launch directory.
 
 **One shape for an accepted cost, one token per measured command.** When the cost gate
 refuses a slow command it asks for one exact form — `FLEET_ALLOW_SLOW=<rule-slug>

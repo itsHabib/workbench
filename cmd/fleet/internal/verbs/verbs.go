@@ -632,10 +632,51 @@ const gitTimeout = 60 * time.Second
 
 func canon(p string) string { return fleet.CanonPath(p) }
 
+// recordedAt reports whether a session record places the session in dir: where its
+// shell last stood, or where it was launched. The launch directory is the session's
+// identity, and the directory guard's own escape for a session whose shell has
+// wandered off is `(cd <its checkout> && fleet …)` — a verb run that way must still
+// find the session its record calls elsewhere.
+func recordedAt(rec fleet.Rec, dir string) bool {
+	want := canon(dir)
+	for _, p := range []string{fleet.S(rec, "cwd"), fleet.S(rec, "launch_dir")} {
+		if p != "" && canon(p) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// recordedWhere is where a record places its session, for a refusal: the directory
+// its shell stood in, and the one it was launched in when that differs.
+func recordedWhere(rec fleet.Rec) string {
+	where, launch := fleet.S(rec, "cwd"), fleet.S(rec, "launch_dir")
+	if launch == "" || canon(launch) == canon(where) {
+		return where
+	}
+	return where + " (launched in " + launch + ")"
+}
+
+// liveSessionsAt is every live session in rows whose record names dir in field.
+func liveSessionsAt(rows []fleet.Rec, field, dir string) []fleet.Rec {
+	want := canon(dir)
+	var live []fleet.Rec
+	for _, r := range rows {
+		if !fleet.B(r, "ended") && fleet.S(r, field) != "" && canon(fleet.S(r, field)) == want && fleet.SessionAlive(r) {
+			live = append(live, r)
+		}
+	}
+	return live
+}
+
 // currentSession is the session this verb acts for: `--session <id8>` when given,
-// else the live session whose record names this cwd, most recent event first. Two
-// live sessions in one directory is a real ambiguity and is refused rather than
-// guessed.
+// else the live session recorded at this cwd, most recent event first. Two live
+// sessions in one directory is a real ambiguity and is refused rather than guessed.
+//
+// A session standing here is the caller before one that was only launched here: two
+// sessions launched in one checkout must not trade identities because the other's
+// shell wandered off and acted more recently. The launch directory is the fallback,
+// so it resolves only where the shell's directory found nobody.
 func currentSession(explicit string) (string, error) {
 	if explicit != "" {
 		sid, err := findSession(explicit)
@@ -648,20 +689,18 @@ func currentSession(explicit string) (string, error) {
 		if !fleet.SessionAlive(rec) {
 			return "", refuse("fleet: session %s is not live; --session names the tab you are running in, not a past one", fleet.Short(sid))
 		}
-		if fleet.S(rec, "cwd") == "" || canon(fleet.S(rec, "cwd")) != canon(cwd()) {
-			return "", refuse("fleet: session %s is recorded at %s, not %s; --session only disambiguates live sessions in this directory", fleet.Short(sid), fleet.S(rec, "cwd"), cwd())
+		if !recordedAt(rec, cwd()) {
+			return "", refuse("fleet: session %s is recorded at %s, not %s; --session only disambiguates live sessions in this directory", fleet.Short(sid), recordedWhere(rec), cwd())
 		}
 		return sid, nil
 	}
-	want := canon(cwd())
-	var live []fleet.Rec
-	for _, r := range sessionRows() {
-		if !fleet.B(r, "ended") && fleet.S(r, "cwd") != "" && canon(fleet.S(r, "cwd")) == want && fleet.SessionAlive(r) {
-			live = append(live, r)
-		}
+	here, rows := cwd(), sessionRows()
+	live := liveSessionsAt(rows, "cwd", here)
+	if len(live) == 0 {
+		live = liveSessionsAt(rows, "launch_dir", here)
 	}
 	if len(live) == 0 {
-		return "", refuse("fleet: no live session is recorded at %s; run this from the session's own tab, or pass --session <id8>", cwd())
+		return "", refuse("fleet: no live session is recorded at %s; run this from the session's own tab, or pass --session <id8>", here)
 	}
 	sortBy(live, func(a, b fleet.Rec) bool { return fleet.F(a, "last_event_at") > fleet.F(b, "last_event_at") })
 	if len(live) > 1 && fleet.F(live[0], "last_event_at")-fleet.F(live[1], "last_event_at") < 2 {
@@ -669,7 +708,7 @@ func currentSession(explicit string) (string, error) {
 		for _, r := range live {
 			ids = append(ids, fleet.Short(fleet.S(r, "session")))
 		}
-		return "", refuse("fleet: %d live sessions at %s (%s); pass --session <id8>", len(live), cwd(), strings.Join(ids, ", "))
+		return "", refuse("fleet: %d live sessions at %s (%s); pass --session <id8>", len(live), here, strings.Join(ids, ", "))
 	}
 	return fleet.S(live[0], "session"), nil
 }

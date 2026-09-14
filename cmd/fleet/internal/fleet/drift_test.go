@@ -32,7 +32,7 @@ func driftFixture(t *testing.T) (parent, one, two, loose string) {
 
 func TestCdIntoAnotherBoundDirectoryIsRefused(t *testing.T) {
 	_, one, two, _ := driftFixture(t)
-	reason := cdDestinations("Bash", "cd "+two+" && git status", one)
+	reason := cdDestinations("Bash", "cd "+two+" && git status", one, one)
 	if reason == "" {
 		t.Fatal("a session in one seat may not cd into another")
 	}
@@ -60,7 +60,7 @@ func TestCdRefusalNamesTheRoleWhenThereIsNoSeatName(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = f.Close()
-	reason := cdDestinations("Bash", "cd "+lead, one)
+	reason := cdDestinations("Bash", "cd "+lead, one, one)
 	if !strings.Contains(reason, "hub:bench") {
 		t.Fatalf("refusal does not name the role:\n%s", reason)
 	}
@@ -68,7 +68,7 @@ func TestCdRefusalNamesTheRoleWhenThereIsNoSeatName(t *testing.T) {
 
 func TestAnUnroledSessionIsRefusedToo(t *testing.T) {
 	_, one, _, loose := driftFixture(t)
-	reason := cdDestinations("Bash", "cd "+one+" && ls", loose)
+	reason := cdDestinations("Bash", "cd "+one+" && ls", loose, loose)
 	if reason == "" || !strings.Contains(reason, "holds no bound directory of its own") {
 		t.Fatalf("an unroled session must be refused a bound directory:\n%s", reason)
 	}
@@ -85,7 +85,7 @@ func TestMovementInsideTheSessionsOwnTreeIsAllowed(t *testing.T) {
 		{"an unbound directory", "cd " + loose + " && ls", one},
 	}
 	for _, c := range cases {
-		if reason := cdDestinations("Bash", c.cmd, c.cwd); reason != "" {
+		if reason := cdDestinations("Bash", c.cmd, c.cwd, c.cwd); reason != "" {
 			t.Fatalf("%s must be allowed: %s", c.name, reason)
 		}
 	}
@@ -102,7 +102,7 @@ func TestNamingAnotherSeatWithoutMovingIsAllowed(t *testing.T) {
 		{"a longer word that merely starts with cd", "cdk deploy " + two},
 	}
 	for _, c := range cases {
-		if reason := cdDestinations("Bash", c.cmd, one); reason != "" {
+		if reason := cdDestinations("Bash", c.cmd, one, one); reason != "" {
 			t.Fatalf("%s must be allowed: %s", c.name, reason)
 		}
 	}
@@ -110,13 +110,13 @@ func TestNamingAnotherSeatWithoutMovingIsAllowed(t *testing.T) {
 
 func TestTheGuardOnlyLooksAtBashAndOnlyAtCd(t *testing.T) {
 	_, one, two, _ := driftFixture(t)
-	if reason := cdDestinations("Read", "cd "+two, one); reason != "" {
+	if reason := cdDestinations("Read", "cd "+two, one, one); reason != "" {
 		t.Fatalf("only Bash moves a session: %s", reason)
 	}
-	if reason := cdDestinations("Bash", "", one); reason != "" {
+	if reason := cdDestinations("Bash", "", one, one); reason != "" {
 		t.Fatalf("an empty command moves nothing: %s", reason)
 	}
-	if reason := cdDestinations("Bash", "pushd "+two, one); reason == "" {
+	if reason := cdDestinations("Bash", "pushd "+two, one, one); reason == "" {
 		t.Fatal("pushd moves the session exactly as cd does")
 	}
 }
@@ -171,11 +171,11 @@ func TestChainedCdIsResolvedAgainstThePrecedingHop(t *testing.T) {
 		}
 	}
 	// And the guard sees the seat the chain actually ends in.
-	if reason := cdDestinations("Bash", "cd "+parent+" && cd "+filepath.Base(two)+" && git commit -m x", one); reason == "" {
+	if reason := cdDestinations("Bash", "cd "+parent+" && cd "+filepath.Base(two)+" && git commit -m x", one, one); reason == "" {
 		t.Fatal("a chained cd into another seat must be refused")
 	}
 	// A chain that stays inside this session's own tree is still allowed.
-	if reason := cdDestinations("Bash", "cd src && cd .. && go test ./...", one); reason != "" {
+	if reason := cdDestinations("Bash", "cd src && cd .. && go test ./...", one, one); reason != "" {
 		t.Fatalf("a chain that ends in its own seat must be allowed: %s", reason)
 	}
 }
@@ -187,12 +187,12 @@ func TestARelativeHopFromAnUnresolvableBaseIsRefused(t *testing.T) {
 	if _, unresolved := CdChain("cd - && cd "+filepath.Base(two), one); !unresolved {
 		t.Fatal("a relative hop after `cd -` cannot be resolved")
 	}
-	reason := cdDestinations("Bash", "cd - && cd "+filepath.Base(two)+" && git commit -m x", one)
+	reason := cdDestinations("Bash", "cd - && cd "+filepath.Base(two)+" && git commit -m x", one, one)
 	if reason == "" || !strings.Contains(reason, "cannot resolve") {
 		t.Fatalf("an unresolvable chain must be refused:\n%s", reason)
 	}
 	// `cd -` on its own names no destination and is left alone, as it always was.
-	if reason := cdDestinations("Bash", "cd - && ls", one); reason != "" {
+	if reason := cdDestinations("Bash", "cd - && ls", one, one); reason != "" {
 		t.Fatalf("a lone `cd -` moves nowhere this guard can name: %s", reason)
 	}
 	// An absolute hop after it is still readable: the base does not matter.
