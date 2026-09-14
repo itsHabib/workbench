@@ -67,22 +67,31 @@ def main():
 
 
 def through_lima(args):
-    """Transport only: stage the patch, run this file in the VM, copy the attempt back."""
+    """Transport only: stage the patch, run this file in the VM, copy the attempt back.
+
+    Rooms reaches the room with $HOME/.ssh/id_rooms. The Lima user's own key is
+    staged into a private HOME, so root's run leaves no state in that user's home.
+    """
     output = args.out.resolve()
     output.mkdir()  # Never reuse a local attempt directory either.
-    guest = "/tmp/rooms-check-" + uuid.uuid4().hex[:12]
+    # Short on purpose: the jailer's API socket lives under HOME and a Unix
+    # socket path must stay within 107 bytes.
+    guest = "/tmp/rc" + uuid.uuid4().hex[:8]
     shell = ["limactl", "shell", args.lima, "sudo"]
     started = time.monotonic()
-    subprocess.run([*shell, "mkdir", guest], check=True)
+    stage = (f"mkdir -p {guest}/h/.ssh && "
+             f"install -m 600 \"$(getent passwd \"$SUDO_USER\" | cut -d: -f6)/.ssh/id_rooms\" {guest}/h/.ssh/id_rooms")
+    subprocess.run([*shell, "sh", "-c", stage], check=True)
     subprocess.run([*shell, "tee", guest + "/input.patch"], input=args.patch.read_bytes(), stdout=subprocess.DEVNULL, check=True)
-    remote = [*shell, "env", "HOME=/tmp/rooms-check-home", "python3", "-", "--rooms", str(args.rooms), "--image", str(args.image),
-              "--toolstore", str(args.toolstore), "--patch", guest + "/input.patch", "--out", guest + "/attempt"]
+    remote = [*shell, "env", "HOME=" + guest + "/h", "python3", "-", "--rooms", str(args.rooms), "--image", str(args.image),
+              "--toolstore", str(args.toolstore), "--patch", guest + "/input.patch", "--out", guest + "/a"]
     code = subprocess.run(remote, input=Path(__file__).read_bytes(), stdout=subprocess.DEVNULL).returncode
-    archive = subprocess.run([*shell, "tar", "-C", guest + "/attempt", "-cf", "-", "."], capture_output=True, check=True).stdout
+    archive = subprocess.run([*shell, "tar", "-C", guest + "/a", "-cf", "-", "."], capture_output=True, check=True).stdout
     with tarfile.open(fileobj=io.BytesIO(archive)) as collected:
         collected.extractall(output, filter="data")
-    subprocess.run([*shell, "rm", "-rf", guest], check=True)
-    transport = {"lima_host": args.lima, "guest_attempt": guest + "/attempt", "exit": code,
+    # Never follow a mount Rooms failed to release out of the private directory.
+    subprocess.run([*shell, "rm", "-rf", "--one-file-system", guest], check=True)
+    transport = {"lima_host": args.lima, "guest_attempt": guest + "/a", "exit": code,
                  "local_patch_sha256": sha(args.patch), "elapsed_seconds": time.monotonic() - started,
                  "scope": "includes VM transport; the guest copy was removed after collection"}
     (output / "transport.json").write_text(json.dumps(transport, indent=2) + "\n")
