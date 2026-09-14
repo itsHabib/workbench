@@ -159,7 +159,7 @@ exit code changes; `--all` only adds what it replaced.
 ## Two guards on a Bash command
 
 **The directory guard.** A session that runs `cd <another bound directory>` becomes
-that directory's occupant at its next tool call — the hook leases the branch at its cwd —
+that directory's occupant at its next tool call — the hook records a session at its cwd —
 and then leases that directory's branch away from the session that actually lives
 there. It happened twice in one rehearsal evening, and there is no holder-side release
 of a branch lease short of `SessionEnd` or an operator `fleet revoke`. So the PreToolUse

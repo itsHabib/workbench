@@ -657,11 +657,11 @@ func recordedWhere(rec fleet.Rec) string {
 	return where + " (launched in " + launch + ")"
 }
 
-// liveSessionsAt is every live session whose record names dir in field.
-func liveSessionsAt(field, dir string) []fleet.Rec {
+// liveSessionsAt is every live session in rows whose record names dir in field.
+func liveSessionsAt(rows []fleet.Rec, field, dir string) []fleet.Rec {
 	want := canon(dir)
 	var live []fleet.Rec
-	for _, r := range sessionRows() {
+	for _, r := range rows {
 		if !fleet.B(r, "ended") && fleet.S(r, field) != "" && canon(fleet.S(r, field)) == want && fleet.SessionAlive(r) {
 			live = append(live, r)
 		}
@@ -690,14 +690,14 @@ func currentSession(explicit string) (string, error) {
 			return "", refuse("fleet: session %s is not live; --session names the tab you are running in, not a past one", fleet.Short(sid))
 		}
 		if !recordedAt(rec, cwd()) {
-			return "", refuse("fleet: session %s is recorded at %s, not %s; --session only disambiguates live sessions in this directory", fleet.Short(sid), recordedWhere(rec), cwd())
+			return "", refuse("fleet: session %s is recorded at %s, not %s; --session only disambiguates live sessions standing or launched in this directory", fleet.Short(sid), recordedWhere(rec), cwd())
 		}
 		return sid, nil
 	}
-	here := cwd()
-	live := liveSessionsAt("cwd", here)
+	here, rows := cwd(), sessionRows()
+	live := liveSessionsAt(rows, "cwd", here)
 	if len(live) == 0 {
-		live = liveSessionsAt("launch_dir", here)
+		live = liveSessionsAt(rows, "launch_dir", here)
 	}
 	if len(live) == 0 {
 		return "", refuse("fleet: no live session is recorded at %s; run this from the session's own tab, or pass --session <id8>", here)

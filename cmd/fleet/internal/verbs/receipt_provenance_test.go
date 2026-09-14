@@ -111,7 +111,7 @@ func TestReceiptFromTheLaunchCheckoutWhileTheShellStandsElsewhere(t *testing.T) 
 	}
 	// Neither launched here nor standing here: not this session's directory.
 	place(logs)
-	for session, why := range map[string]string{sid: "is recorded at", "": "no live session is recorded at"} {
+	for session, why := range map[string]string{sid: "--session only disambiguates", "": "no live session is recorded at"} {
 		err := cmdReceipt(head, "rooms", "fail", "borrowed", session, "", false)
 		if err == nil || !strings.Contains(err.Error(), why) {
 			t.Fatalf("--session %q borrowed a directory the session neither stands in nor was launched in: %v", session, err)
@@ -140,15 +140,14 @@ func TestTheSessionStandingHereOutranksOneOnlyLaunchedHere(t *testing.T) {
 		t.Fatalf("resolved %q (%v), want the session standing here, %s", sid, err, fleet.Short(here))
 	}
 	// The wandered-off session is still named, with where it could run from.
-	_, err := currentSession(away[:8])
-	if err != nil {
-		t.Fatalf("its own launch checkout must accept --session: %v", err)
+	if sid, err := currentSession(away[:8]); err != nil || sid != away {
+		t.Fatalf("its own launch checkout must accept --session: %q %v", sid, err)
 	}
 	rec["cwd"], rec["launch_dir"] = logs, filepath.Dir(repo)
 	if err := fleet.WriteJSON(fleet.Path("sessions", here+".json"), rec); err != nil {
 		t.Fatal(err)
 	}
-	_, err = currentSession(here[:8])
+	_, err := currentSession(here[:8])
 	if err == nil || !strings.Contains(err.Error(), "(launched in "+filepath.Dir(repo)+")") {
 		t.Fatalf("the refusal must name the launch directory too: %v", err)
 	}

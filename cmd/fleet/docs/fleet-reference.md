@@ -507,7 +507,9 @@ the two writes can leave an assignment that wakes its worker with no row. This i
 
 - the caller is a live session recorded at this directory — one whose shell last stood here,
   else one launched here, so `(cd <its checkout> && fleet receipt …)` works from a shell that
-  has wandered off (`cmd/fleet/internal/verbs/verbs.go:635-714`);
+  has wandered off. If another live session stands in that checkout, the bare form resolves
+  to it; add `--session <id8>`, which accepts a session launched there
+  (`cmd/fleet/internal/verbs/verbs.go:635-714`);
 - the tree's `HEAD` starts with the named sha, and `git status --porcelain` is empty
   (`cmd/fleet/internal/verbs/receipts.go:194-213`);
 - the observable is non-empty: it is "what would have read differently had the claim been
