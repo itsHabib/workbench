@@ -14,21 +14,28 @@ the supplied tests include synthetic boundary cases.
 
 ## Run
 
-Requirements: Python 3.11+, Go, Git, an authenticated Codex CLI, and the existing
-trusted Fleet hooks. Preparation installs nothing and does not copy credentials.
-This example is stacked on the sandbox liveness fix in PR #342. Its default
-build therefore includes the fix. `--fleet-source` can select another local
-checkout explicitly; resolved.json records what was built.
+Requirements: Python 3.11+, Go, Git and one authenticated provider for all three
+agents: the Codex CLI with the existing trusted Fleet hooks (the default), or
+Claude Code plus a directory whose `node_modules` holds the Claude Agent SDK
+(`--provider claude --runtime-home DIR`). Preparation installs nothing and does
+not copy credentials. The default build is this checkout, which includes the
+macOS sandbox liveness fix from PR #342. `--fleet-source` can select another
+local checkout explicitly; resolved.json records what was built.
 
 From this repository:
 
 ```sh
 python3 cmd/fleet/examples/headless/lab.py prepare
 # Or: ... prepare --fleet-source /path/to/fixed/workbench --cards /path/to/cards
+# Claude for all three agents, with the verifier running the patch in Rooms:
+# ... prepare --provider claude --model sonnet --runtime-home /path/to/sdk-dir \
+#       --rooms rooms-host /guest/rooms /guest/image.ext4 /guest/python-toolstore
 ```
 
 Preparation prints a new disposable lab directory first. Use it as `LAB` below.
-It builds a private Fleet binary, clones a fixed Workbench base, seeds the task,
+It builds a private Fleet binary, fetches only a fixed Workbench base (the
+source repository's other refs hold this example's committed reference result),
+seeds the task,
 creates the role bindings and author slot through Fleet, and checks provider
 configuration without a model turn. A failed preparation retains its directory
 and diagnostics. `run` uses the existing provider account and consumes its usage.
@@ -85,7 +92,8 @@ python3 cmd/fleet/examples/headless/lab.py update "$LAB"
 the resulting instructions. It refuses a running or uncertain watcher and
 uncollected attempts. It does not restart a session or claim that a conversation
 adopted the change. `control/run-inputs.json` freezes card and run-input hashes
-at launch. Provider choice is fixed to Codex in this bounded example.
+at launch. One provider serves all three agents; `--provider` and `--model`
+choose it at preparation.
 
 ## What the demonstration does
 

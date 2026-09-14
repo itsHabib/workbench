@@ -2,6 +2,9 @@
 
 Use the absolute `fleet_cli` path in resolved.json for Fleet commands. Login
 shells can replace PATH. Do not use an installed Fleet binary by accident.
+Stay in your own checkout: reach other directories with absolute paths, `git -C`
+or a subshell, never a bare `cd`, because Fleet ties your session to the
+directory you work in. Keep temporary files under lab-root/tmp, never /tmp.
 
 Implement the assigned Python report builder in the existing task branch. Read
 RUN.md, resolved.json and the supplied task tests. Keep all effects in the lab;
