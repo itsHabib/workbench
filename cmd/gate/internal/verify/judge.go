@@ -738,29 +738,34 @@ func scrub(s string) string {
 
 // judgeContext renders recorded evidence and verdicts, never ambient context.
 func judgeContext(arts []state.Artifact) (string, error) {
+	ctx, _, err := judgeContextWithReviewCoverage(arts)
+	return ctx, err
+}
+
+func judgeContextWithReviewCoverage(arts []state.Artifact) (string, map[string]bool, error) {
 	loci := findingLoci(arts)
 	var b strings.Builder
 	comments, err := recordedReviewComments(arts)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	writeRecordedReviews(&b, comments)
+	included := writeRecordedReviews(&b, comments)
 	for _, a := range arts {
 		switch a.Kind {
 		case state.KindEscalation:
 			writeEscalationSection(&b, a)
 		case state.KindVerdict:
 			if err := writeVerdictSection(&b, a); err != nil {
-				return "", err
+				return "", nil, err
 			}
 		case state.KindEvidence:
 			writeReviewDiffSection(&b, a, loci, comments)
 		}
 	}
 	if b.Len() == 0 {
-		return "", fmt.Errorf("verify: no artifacts to judge")
+		return "", nil, fmt.Errorf("verify: no artifacts to judge")
 	}
-	return b.String(), nil
+	return b.String(), included, nil
 }
 
 // writeEscalationSection hands the judge the question the run parked with —

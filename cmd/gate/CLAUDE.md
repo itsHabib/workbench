@@ -191,7 +191,7 @@ Constraints that are design decisions, not omissions:
   and collects required source in one call; optional repeated `-path P` values
   select explicit files. Prose examples do not become mandatory files. It appends
   to the existing unjudged run: at most three supplements,
-  32 paths per call and 256 KiB total. Repairs spend no new cycle, never reopen
+  32 paths per call and 512 KiB total (256 KiB per verified text file). Repairs spend no new cycle, never reopen
   a substantive judgment, and refuse changed heads. Inspect every missing item
   together; do not start another run merely to repair packet construction.
 - **The cycle ceiling is a pre-flight, not a post-mortem.** `gate gate` counts

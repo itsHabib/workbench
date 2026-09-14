@@ -23,6 +23,10 @@ type recordedReview struct {
 	timestamp time.Time
 }
 
+func (c recordedReview) key() string {
+	return fmt.Sprintf("%s/%d", c.evidence, c.index)
+}
+
 func recordedReviewComments(arts []state.Artifact) ([]recordedReview, error) {
 	var comments []recordedReview
 	for _, a := range arts {
@@ -65,9 +69,10 @@ func decodeReviewComments(id string, rawComments []json.RawMessage) ([]recordedR
 	return comments, nil
 }
 
-func writeRecordedReviews(b *strings.Builder, comments []recordedReview) {
+func writeRecordedReviews(b *strings.Builder, comments []recordedReview) map[string]bool {
+	included := make(map[string]bool)
 	if len(comments) == 0 {
-		return
+		return included
 	}
 	b.WriteString("## Recorded source review comments (newest known source activity first; unknown timestamps last in reverse recorded order; not authority)\n")
 	remaining := reviewContextCap
@@ -80,11 +85,13 @@ func writeRecordedReviews(b *strings.Builder, comments []recordedReview) {
 			continue
 		}
 		b.WriteString(entry)
+		included[c.key()] = true
 		remaining -= len(entry)
 	}
 	if omitted > 0 {
 		fmt.Fprintf(b, "[review context incomplete: %d comments omitted by byte budget; absence is not resolution]\n\n", omitted)
 	}
+	return included
 }
 
 var reviewPathPattern = regexp.MustCompile("`([^`:\r\n]+)(?::([0-9]+)(?:[-–]([0-9]+))?)?`")
@@ -160,12 +167,12 @@ func writeReviewDiffSection(b *strings.Builder, a state.Artifact, loci []locusRe
 	files := parseUnifiedDiff(evidence.Diff)
 	paths, missing := reviewDiffPaths(comments, files)
 	loci = append(append([]locusRef(nil), loci...), reviewLineHints(comments, files)...)
-	writeReviewPathMetadata(b, paths, missing)
+	writeReviewPathMetadata(b, paths, missing, nil)
 	fmt.Fprintf(b, "## Recorded diff evidence (%s)\n```\n%s```\n\n", a.ID, scrub(renderParsedJudgeDiff(files, loci, paths)))
 }
 
 // Diagnostic text has its own cap; it cannot consume the substantive diff budget.
-func writeReviewPathMetadata(b *strings.Builder, paths, missing []string) {
+func writeReviewPathMetadata(b *strings.Builder, paths, missing, hints []string) {
 	remaining, omitted := reviewPathMetadataCap, 0
 	emit := func(kind, value string) {
 		entry := fmt.Sprintf("[review-referenced %s: %s]\n", kind, scrub(value))
@@ -181,6 +188,9 @@ func writeReviewPathMetadata(b *strings.Builder, paths, missing []string) {
 	}
 	for _, reason := range missing {
 		emit("context unavailable", reason)
+	}
+	for _, hint := range hints {
+		emit("source hint", hint)
 	}
 	if omitted > 0 {
 		fmt.Fprintf(b, "[review-path metadata incomplete: %d entries omitted by byte budget]\n", omitted)
