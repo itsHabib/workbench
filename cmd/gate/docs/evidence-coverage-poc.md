@@ -17,8 +17,9 @@ references still require coverage. Explicit root paths retain their `./` intent,
 and an exact path in the complete index wins over a changed file with the same
 basename. A precise reference using basename fallback, whether one or several
 changed files share that basename, requires that index before coverage is
-claimed. A bare token without a directory or line resolves only among changed
-files, so recording the index never turns it into an unchanged required blob.
+claimed. A bare token without a directory or line requires a changed file only
+when no other file shares its name, so recording the index never turns it into
+an unchanged required blob or strands it on a same-named sibling.
 Ambiguous basenames and unchanged bare tokens remain visible as
 source hints with candidate paths; they do not select every candidate or turn a
 command name into a required executable blob. These diagnostics do not resolve

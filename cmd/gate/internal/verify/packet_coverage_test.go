@@ -140,7 +140,7 @@ func TestPacketBareTokenAmbiguousAcrossChangedFiles(t *testing.T) {
 	if err != nil || !p.Complete || len(p.RequiredSources) != 0 {
 		t.Fatalf("ambiguous bare token invented a requirement: %v %v %v", p.Missing, p.RequiredSources, err)
 	}
-	if !strings.Contains(strings.Join(p.SourceHints, " "), "ambiguous Makefile; candidates [a/Makefile b/Makefile]") {
+	if !strings.Contains(strings.Join(p.SourceHints, " "), "ambiguous Makefile; candidates [a/Makefile b/Makefile Makefile]") {
 		t.Fatalf("ambiguous bare token hint missing: %v", p.SourceHints)
 	}
 }
@@ -163,5 +163,26 @@ func TestPacketPreciseBasenameWithSeveralChangedMatchesNeedsIndex(t *testing.T) 
 	p, err = JudgmentPacket(nested, Subject{})
 	if err != nil || !p.Complete || len(p.RequiredSources) != 0 || !strings.Contains(strings.Join(p.SourceHints, " "), "ambiguous spec.md") {
 		t.Fatalf("indexed ambiguity not reported as a hint: %v %v %v", p.Missing, p.SourceHints, err)
+	}
+}
+
+// A lone changed match is not the only file with that name once the index is
+// known. An oversized sibling lockfile must not become unsatisfiable source
+// because a review mentioned the shared name.
+func TestPacketBareTokenWithSameNamedSiblingIsHint(t *testing.T) {
+	diff := "diff --git a/web/package-lock.json b/web/package-lock.json\n--- a/web/package-lock.json\n+++ b/web/package-lock.json\n@@ -0,0 +1,20000 @@\n" + strings.Repeat("+  \"resolved\": \"https://registry.example/pkg.tgz\"\n", 20000)
+	comments := []map[string]any{{"is_bot": true, "body": "The `package-lock.json` churn looks unrelated."}}
+	arts := []state.Artifact{packetArtifact(t, map[string]any{"diff": diff, "comments": comments})}
+	p, err := JudgmentPacket(arts, Subject{})
+	if err != nil || p.Complete || strings.Join(p.RequiredSources, ",") != "web/package-lock.json" {
+		t.Fatalf("unique changed name should require its diff before the index is known: %v %v %v", p.Missing, p.RequiredSources, err)
+	}
+	arts = append(arts, packetArtifact(t, SourceEvidence{IndexComplete: true, FileIndex: []string{"api/package-lock.json", "web/package-lock.json"}}))
+	p, err = JudgmentPacket(arts, Subject{})
+	if err != nil || !p.Complete || len(p.RequiredSources) != 0 {
+		t.Fatalf("same-named sibling left a bare mention unsatisfiable: %v %v %v", p.Missing, p.RequiredSources, err)
+	}
+	if !strings.Contains(strings.Join(p.SourceHints, " "), "ambiguous package-lock.json; candidates [web/package-lock.json api/package-lock.json]") {
+		t.Fatalf("sibling ambiguity not reported: %v", p.SourceHints)
 	}
 }

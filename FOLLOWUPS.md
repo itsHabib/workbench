@@ -20,10 +20,11 @@ still sees the review body but not a guaranteed file window.
   pattern consume the text between spans, and the following reference is lost.
   Match backtick spans first, then test each span against the path grammar.
 - **P3, a bare mention of an oversized changed file:** a bare token such as
-  `package-lock.json` that uniquely names a changed file requires that file's
-  complete diff section, as on the base. When both the diff section and the
-  file exceed their bounds the packet cannot complete. Consider demoting bare,
-  line-less mentions to hints when their complete coverage is unsatisfiable.
+  `package-lock.json` that names a changed file, with no other same-named file
+  in the repository, requires that file's complete diff section, as on the base.
+  When both the diff section and the file exceed their bounds the packet cannot
+  complete. Consider demoting bare, line-less mentions to hints when their
+  complete coverage is unsatisfiable.
 
 ## fleet visibility: final-review residuals on PR #319
 

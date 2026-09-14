@@ -281,7 +281,7 @@ func (refs *packetReferences) addHint(review string, match, changed, index []str
 	hint := strings.TrimPrefix(match[1], "./")
 	matches := matchingPacketPaths(match[1], changed)
 	if !strings.Contains(match[1], "/") && match[2] == "" {
-		refs.addBareToken(review, hint, matches, index)
+		refs.addBareToken(review, hint, changed, index)
 		return
 	}
 	// Only an exact diff path establishes which file a precise reference names.
@@ -306,21 +306,35 @@ func (refs *packetReferences) addHint(review string, match, changed, index []str
 }
 
 // addBareToken handles a line-less name without a directory. Such a token can
-// name a command, symbol or example, so it resolves only among changed files:
-// an unchanged repository blob never becomes required source because a review
-// mentioned its name, even once the file index is recorded.
+// name a command, symbol or example. It requires a changed file only when that
+// file is the one path in the repository with the name; any other same-named
+// file makes it a hint. An unchanged blob never becomes required source because
+// a review mentioned its name, even once the file index is recorded.
 func (refs *packetReferences) addBareToken(review, hint string, changed, index []string) {
-	if len(changed) == 1 {
-		refs.paths = append(refs.paths, changed[0])
+	inDiff := sameNamePaths(hint, changed)
+	all := sameNamePaths(hint, append(append([]string(nil), changed...), index...))
+	if len(inDiff) == 1 && len(all) == 1 {
+		refs.paths = append(refs.paths, inDiff[0])
 		return
 	}
-	if len(changed) > 1 {
-		refs.hints = append(refs.hints, fmt.Sprintf("review %s: ambiguous %s; candidates %v; no source selected or finding resolved", review, hint, changed))
+	if len(inDiff) > 0 {
+		refs.hints = append(refs.hints, fmt.Sprintf("review %s: ambiguous %s; candidates %v; no source selected or finding resolved", review, hint, all))
 		return
 	}
-	if candidates := matchingPacketPaths(hint, index); len(candidates) > 0 {
-		refs.hints = append(refs.hints, fmt.Sprintf("review %s: %s is an unchanged bare token; candidates %v are not represented as required source", review, hint, candidates))
+	if len(all) > 0 {
+		refs.hints = append(refs.hints, fmt.Sprintf("review %s: %s is an unchanged bare token; candidates %v are not represented as required source", review, hint, all))
 	}
+}
+
+// sameNamePaths lists every known path that is name itself or ends in /name.
+func sameNamePaths(name string, known []string) []string {
+	var result []string
+	for _, path := range known {
+		if path == name || strings.HasSuffix(path, "/"+name) {
+			result = append(result, path)
+		}
+	}
+	return uniquePacketStrings(result)
 }
 
 func writePacketSources(b *strings.Builder, arts []state.Artifact, subject Subject) {
