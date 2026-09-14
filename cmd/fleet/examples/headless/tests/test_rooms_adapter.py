@@ -90,7 +90,7 @@ class RoomsAdapterTest(unittest.TestCase):
                 adapter.main()
             self.assertIn("--one-file-system", calls[-1])
             transport = json.loads((root / "result/transport.json").read_text())
-            self.assertEqual((transport["exit"], transport["guest_removed"]), (None, True))
+            self.assertEqual((transport["exit"], transport["guest_removed"]), (0, True))  # the guest's exit survives
 
 
 if __name__ == "__main__":

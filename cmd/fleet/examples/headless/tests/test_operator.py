@@ -87,10 +87,12 @@ class OperatorTest(unittest.TestCase):
         inherited = {"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "parent", "CLAUDE_CODE_MESSAGING_SOCKET": "/tmp/s",
                      "CLAUDE_CODE_ENTRYPOINT": "claude-desktop", "CLAUDE_CONFIG_DIR": "/config", "CLAUDE_CODE_OAUTH_TOKEN": "token",
                      "CLAUDE_CODE_USE_VERTEX": "1", "CLAUDE_CODE_SKIP_FOUNDRY_AUTH": "1", "CLAUDE_CODE_CLIENT_CERT": "/c",
+                     "CLAUDE_CODE_USE_POWERSHELL_TOOL": "1",
                      "PATH": "/usr/bin", "HOME": "/home/operator"}
         with patch.dict(lab.os.environ, inherited, clear=True):
             env = lab.env_for(self.root)
-        self.assertFalse({"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_ENTRYPOINT"} & set(env))
+        self.assertFalse({"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_ENTRYPOINT",
+                          "CLAUDE_CODE_USE_POWERSHELL_TOOL"} & set(env))
         self.assertEqual((env["CLAUDE_CONFIG_DIR"], env["HOME"], env["FLEET_RUNTIME_HOME"]), ("/config", "/home/operator", "/sdk"))
         self.assertEqual((env["CLAUDE_CODE_OAUTH_TOKEN"], env["CLAUDE_CODE_USE_VERTEX"]), ("token", "1"))
         self.assertEqual((env["CLAUDE_CODE_SKIP_FOUNDRY_AUTH"], env["CLAUDE_CODE_CLIENT_CERT"]), ("1", "/c"))
@@ -139,13 +141,12 @@ class OperatorTest(unittest.TestCase):
         self.assertIn("no role card", refused.stderr)
 
     def test_cancelled_supervisor_must_end_interrupted(self):
-        lab.ended_otherwise([{"attempt": "a", "provider_terminal": True, "provider_state": "interrupted"}], "a", True)
-        lab.ended_otherwise([{"attempt": "b", "provider_terminal": True, "provider_state": "failed"}], "a", True)
-        lab.ended_otherwise([{"attempt": "a", "provider_state": "interrupting"}], "a", False)
+        lab.ended_otherwise([{"attempt": "a", "provider_terminal": True, "provider_state": "interrupted"}], "a")
+        lab.ended_otherwise([{"attempt": "b", "provider_terminal": True, "provider_state": "failed"}], "a")
         with self.assertRaisesRegex(RuntimeError, "not interrupted"):
-            lab.ended_otherwise([{"attempt": "a", "provider_terminal": True, "provider_state": "failed"}], "a", False)
+            lab.ended_otherwise([{"attempt": "a", "provider_terminal": True, "provider_state": "failed"}], "a")
         with self.assertRaisesRegex(RuntimeError, "not interrupted"):  # a bridge runtime error exits unmarked
-            lab.ended_otherwise([{"attempt": "a", "provider_state": "failed"}], "a", True)
+            lab.ended_otherwise([{"attempt": "a", "provider_state": "failed"}], "a")
 
     def test_preservation_reads_the_committed_head_not_the_working_tree(self):
         repo = self.root / "repo"
@@ -184,8 +185,9 @@ class OperatorTest(unittest.TestCase):
                    "worktree": "/lab/verifier", "at": 1}
         checks, _ = audit.rooms_evidence(self.root, info, patch_file, [receipt], "h")
         self.assertTrue(all(checks.values()), checks)
-        elsewhere = {**receipt, "cwd": "/lab/author", "worktree": "/lab/author"}
-        self.assertFalse(audit.rooms_evidence(self.root, info, patch_file, [elsewhere], "h")[0]["rooms_receipt"])
+        for cwd, worktree in (("/lab/author", "/lab/author"), ("/lab/verifier2", "/lab/verifier"), ("/lab/verifier/../author", "/lab/verifier")):
+            elsewhere = {**receipt, "cwd": cwd, "worktree": worktree}
+            self.assertFalse(audit.rooms_evidence(self.root, info, patch_file, [elsewhere], "h")[0]["rooms_receipt"], cwd)
         (self.root / "bin/rooms-run").write_text("edited entry point")
         self.assertFalse(audit.rooms_evidence(self.root, info, patch_file, [receipt], "h")[0]["rooms_adapter_unchanged"])
         (self.root / "bin/rooms-run").write_text("entry")

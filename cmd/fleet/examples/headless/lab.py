@@ -27,8 +27,9 @@ CLAUDE_TOOLS = "Bash,Read,Write,Edit,Glob,Grep"
 CLAUDE_DENY = ["Bash(git push:*)", "Bash(gh:*)", "Bash(curl:*)", "Bash(wget:*)", "Bash(limactl:*)", "WebFetch", "WebSearch"]
 # A launching agent's own session must not reach the lab; its account and
 # provider routing must: every CLAUDE_CODE_USE_*, SKIP_*_AUTH and CLIENT_*.
-CLAUDE_KEEP = re.compile(r"CLAUDE_CONFIG_DIR|CLAUDE_CODE_(USE_\w+|SKIP_\w+_AUTH|CLIENT_\w+|OAUTH_TOKEN|"
-                         r"API_KEY_HELPER_TTL_MS|CUSTOM_OAUTH_URL|CERT_STORE)")
+CLAUDE_KEEP = re.compile(r"CLAUDE_CONFIG_DIR|CLAUDE_CODE_(USE_(BEDROCK|VERTEX|FOUNDRY|MANTLE|GATEWAY|ANTHROPIC_AWS|"
+                         r"ANTHROPIC_GOOGLE_CLOUD)|SKIP_\w+_AUTH|SKIP_AWS_CRED_CACHE|CLIENT_\w+|OAUTH_TOKEN|"
+                         r"OAUTH_REFRESH_TOKEN|OAUTH_CLIENT_ID|API_KEY_HELPER_TTL_MS|CUSTOM_OAUTH_URL|CERT_STORE)")
 
 
 def run(args, cwd, env=None, check=True, timeout=60):
@@ -194,10 +195,11 @@ def toml_value(value):
 
 def prepare(destination, cards, fleet_source, provider="codex", model=None, runtime_home=None, rooms=None):
     root = Path(destination).resolve() if destination else Path(tempfile.mkdtemp(prefix="headless-workbench-")).resolve()
-    if any(c in str(root) for c in "*?[]{}()"):
-        raise RuntimeError("the lab root is used in permission globs; choose a path without *?[]{}()")
+    if any(c in str(root) for c in "*?[]{}()\\"):
+        raise RuntimeError("the lab root is used in permission globs; choose a path without *?[]{}()\\")
     if destination:
         root.mkdir()
+    root = Path(physical(root))  # the letter case Fleet will record receipts under
     print(root, flush=True)
     write_json(root / "lab.json", {"example": "headless-workbench-v1", "root": str(root)})
     for name in ("bin", "state", "org", "lanes", "projection-home", "control", "result", "tmp"):
@@ -422,10 +424,14 @@ def operate(root, resume=False):
                 phase = "cancelled"
                 print("Requested actual provider interruption; original author draft retained.", flush=True)
             if phase == "cancelled":
+                # Exit first: the bridge's last state write precedes its exit, so a
+                # state read after a collected exit is final.
+                exited = Path(interruption["attempt"] + ".exit.json").exists()
                 current = states(root)
                 interrupted = [s for s in current if s.get("attempt") == interruption["attempt"] and s.get("provider_state") == "interrupted" and s.get("provider_terminal")]
-                ended_otherwise(current, interruption["attempt"], Path(interruption["attempt"] + ".exit.json").exists())
-                if interrupted and Path(interruption["attempt"] + ".exit.json").exists():
+                if exited:
+                    ended_otherwise(current, interruption["attempt"])
+                if interrupted and exited:
                     interruption["terminal"] = interrupted
                     interruption["resumed_at"] = time.time()
                     write_json(root / "control/interruption.json", interruption)
@@ -465,20 +471,18 @@ def operate(root, resume=False):
         print(root, flush=True)
 
 
-def ended_otherwise(current, attempt, exited):
-    """A cancelled supervisor that ended any other way is not an interruption.
+def ended_otherwise(current, attempt):
+    """Judge a cancelled supervisor whose bridge has exited: only an interruption counts.
 
     The bridge can exit after a runtime error without marking the turn terminal,
-    so a collected exit without an interrupted terminal state also fails.
+    so any final state other than an interrupted terminal one fails.
     """
     for state in current:
         if state.get("attempt") != attempt:
             continue
-        interrupted = state.get("provider_terminal") and state.get("provider_state") == "interrupted"
-        if interrupted:
+        if state.get("provider_terminal") and state.get("provider_state") == "interrupted":
             return
-        if state.get("provider_terminal") or exited:
-            raise RuntimeError(f"the cancelled supervisor ended {state.get('provider_state')!r}, not interrupted")
+        raise RuntimeError(f"the cancelled supervisor's bridge exited with state {state.get('provider_state')!r}, not interrupted")
 
 
 def fixture_alive(root):

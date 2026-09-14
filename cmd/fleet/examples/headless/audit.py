@@ -98,7 +98,17 @@ def preserved(checkout, head, seed, path):
 def own_checkout(receipt, checkout):
     """Fleet recorded the receipt in this checkout: its worktree, from anywhere inside it."""
     cwd = receipt.get("cwd")
-    return receipt.get("worktree") == str(checkout) and bool(cwd) and Path(cwd).is_relative_to(checkout)
+    return (receipt.get("worktree") == str(checkout) and bool(cwd) and ".." not in Path(cwd).parts
+            and Path(cwd).is_relative_to(checkout))
+
+
+def entry_unchanged(root, rooms):
+    """The frozen adapter and entry point are the ones preparation recorded."""
+    adapter, cli = root / "bin/rooms-check.py", Path(rooms["cli"])
+    if not adapter.exists() or not cli.exists():
+        return False
+    # Labs prepared before the entry point's hash was recorded check the adapter only.
+    return digest(adapter) == rooms["adapter_sha256"] and rooms.get("cli_sha256", digest(cli)) == digest(cli)
 
 
 def rooms_evidence(root, info, patch, receipts, head):
@@ -115,9 +125,7 @@ def rooms_evidence(root, info, patch, receipts, head):
               "rooms_succeeded": summary.get("cli_exit") == 0 and summary.get("command_status") == "succeeded" and summary.get("command_exit") == 0,
               "rooms_collected": "collection_done" in events and "cleanup_done" in events,
               # Labs prepared before the entry point's hash was recorded check the adapter only.
-              "rooms_adapter_unchanged": (digest(root / "bin/rooms-check.py") == info["rooms"]["adapter_sha256"]
-                                          and info["rooms"].get("cli_sha256", digest(Path(info["rooms"]["cli"])))
-                                          == digest(Path(info["rooms"]["cli"])))}
+              "rooms_adapter_unchanged": entry_unchanged(root, info["rooms"])}
     return checks, {"receipt": latest, "summary": summary, "events": events}
 
 
