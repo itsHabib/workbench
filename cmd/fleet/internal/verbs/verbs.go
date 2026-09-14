@@ -85,7 +85,7 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet reassign <branch|#n> --for <role>        move a change's rows to another accountable role (splitting a hub is this plus one roles.map line)
   fleet undispatch <branch|#n> [--as <rel>]      retire a change's rows
   fleet sync [--repo <r>]                        refresh the cache of open changes and the rows other machines declared on them
-  fleet request <branch> --id <request> --worker <session> --for <lead> --brief <text>
+  fleet request <branch> --id <request> --worker <session> --for <lead> --brief <text> [--as <kind>] [--head <full-sha> --requires <kinds>]
                                                  record one retry-safe local assignment; does not launch a worker
   fleet send <address> [--id <id>] --kind <kind> --subject <text> --body <text|-> [--head <sha>] [--session <id8>]
   fleet mail [--for <role>] [--unacked] [--json] [--session <id8>]
