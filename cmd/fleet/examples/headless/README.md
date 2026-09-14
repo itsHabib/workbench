@@ -111,16 +111,26 @@ The new supervisor must recover those from Fleet records and files.
 
 The supervisor retains the original assignment, answers through Fleet with a
 stable message ID and repeats that exact send once. The author implements,
-tests and commits; a separate verifier process fetches that commit into its
-own checkout, tests it and records a receipt. The supervisor exports the patch,
-records an assessment and stops the addresses. The outer artifact audit requires
-the actual patch, unchanged input/tests, the original assignment, observed draft
-continuity by the original author, a different
-supervisor conversation, clean same-head checkouts and independently attributed
-passing receipts. PLAN.md may change when its author documents the answer and
-finished work. This check observes file-change events; it does not prove absence
-of writes outside those events. The outer audit executes no worker tests.
-Failure and missing evidence prevent a passing audit.
+tests and commits. When it reports its head, the supervisor exports the patch
+against the base and orders a separate verifier process. The verifier fetches
+that commit into its own checkout, confirms the patch is byte-identical to its
+own diff, tests it and records a receipt. With `--rooms` it then runs that same
+patch file once in a cold Rooms room and records a separate `rooms` receipt at
+the same head. The supervisor reads both receipts and the Rooms result, records
+an assessment and stops the addresses. Agents wait for peers by ending their
+turn; Fleet wakes them when mail arrives.
+
+The outer artifact audit requires the actual patch, unchanged input/tests, the
+original assignment, observed draft continuity by the original author, a
+different supervisor conversation, clean same-head checkouts, independently
+attributed passing receipts and no observed tool input naming this example's
+committed reference result. With `--rooms` it also requires the `rooms` receipt,
+a returned patch identical to the exported one, a succeeded command and
+lifecycle collection and cleanup. PLAN.md may change when its author documents
+the answer and finished work. Draft continuity reads Codex file-change events
+(timestamped) or Claude Write/Edit tool calls (placed at their attempt's launch
+time); it does not prove absence of writes outside those events. The outer audit
+executes no worker tests. Failure and missing evidence prevent a passing audit.
 
 Inspect `result/worker.patch`, `result/ASSESSMENT.md` and `result/audit.json`.
 Actual provider state, traces and collected exits are under
@@ -129,35 +139,116 @@ An assessment file alone is not completion.
 
 ## Boundaries and direction
 
-The three agents are local processes with separate Git checkouts. They use
-process-local Codex workspace-write policy with the lab as writable root,
-network disabled, approval never, and MCP/plugins/desktop controls disabled.
-They use the absolute private Fleet CLI because login shells can replace PATH.
-Existing trusted host hooks and authentication remain in use. This is not
+The three agents are local processes with separate Git checkouts. They use the
+absolute private Fleet CLI because login shells can replace PATH. This is not
 whole-process-tree isolation; agents share the lab and its local state.
 
-Rooms is a separate optional execution backend: apply the same frozen patch
-against the same base in the existing local Rooms host, run the same tests and
-collect its result. That verifies the patch in Rooms. It does not put the
-supervisor, author or verifier model inside a VM. Coordination to prepare that
-backend occurs outside the demonstrated headless path.
+- **Codex**: process-local workspace-write policy with the lab as writable root,
+  network disabled, approval never, and MCP/plugins/memories/desktop controls
+  disabled. Existing trusted host hooks and authentication remain in use.
+- **Claude**: the Agent SDK starts the installed CLI through a lab wrapper that
+  loads only project and local settings (no user hooks or memory files), an
+  empty strict MCP configuration and the tools Bash, Read, Write, Edit, Glob and
+  Grep. Auto memory is off. Fleet's projected hooks run from the private binary.
+  Each checkout's local settings allow those tools, confine the file tools to the
+  lab root and deny push, `gh`, `curl`, `wget`, `limactl` and web tools under
+  `dontAsk`, which refuses anything else without prompting. There is no OS
+  sandbox: Bash can read and write outside the lab and reach the network. The
+  first complete Claude run observed exactly that (temporary files under /tmp),
+  so treat the Claude topology as trusted-local, not contained.
+
+Rooms is the optional execution backend. With `--rooms` the verifier runs the
+exported patch through `LAB/bin/rooms-run PATCH OUT`, which applies it to the same
+base in a cold room, runs the same tests and collects the result. That verifies
+the patch in Rooms. It does not put the supervisor, author or verifier model
+inside a VM. Starting the Rooms host and installing its once-per-host network
+substrate (`scripts/setup-tap.sh --host` in the Rooms repository) happen outside
+the demonstrated headless path.
 
 This requires Rooms with PR #121's toolstore support. On an already prepared
-Linux Rooms host, copy the frozen patch there and run:
+Linux Rooms host, or from macOS through the local Lima Rooms host, run:
 
 ```sh
 python3 rooms-check.py --rooms /path/to/rooms --image /path/to/image.ext4 \
   --toolstore /path/to/python-toolstore --patch /path/to/worker.patch \
-  --out /path/to/new-attempt-directory
+  --out /path/to/new-attempt-directory [--lima rooms-host]
 ```
 
 This thin foreground adapter records input hashes, the exact invocation, CLI
 exit and returned patch hash. Inspect `out/result.json` for command outcome and
-`lifecycle.ndjson` for collection/cleanup. It does not start the host, install
-tools, create a VM image, run a model or treat missing cleanup evidence as success.
-The measured cold run used this same Rooms invocation through the owner's
-host-specific probe; this portable adapter is a convenience, not a second
-measured backend run.
+`lifecycle.ndjson` for collection/cleanup. With `--lima` the same file runs
+inside the VM as root with a private HOME holding the Lima user's `id_rooms` key,
+the attempt directory is copied back, the guest copy is removed without crossing
+mounts, and `transport.json` adds the transport time. It does not start the host,
+install tools, create a VM image, run a model or treat missing cleanup evidence
+as success.
+
+## Measured runs
+
+These runs were on one macOS host, with the local Lima Rooms host for the patch
+execution. The evidence is under
+`/Users/mh/Documents/Codex/2026-09-14/headless-workbench-claude/` (RESULTS.md,
+lab archives, per-attempt measurements).
+
+| Run | Provider | Outcome | Wall | Supervisor sessions | Rooms (in room / with transport) |
+|---|---|---|---|---|---|
+| Codex, 2026-09-13 | Codex app-server | patch `83da8be4` verified; Rooms ran separately outside the headless path | bound expired; one continuation | 3 | 18.29 s cold baseline (owner's probe) |
+| Claude 1 | claude-sonnet-5 | fixture failed: Claude Code refuses a standalone `sleep`; the driver stopped instead of waiting | — | 1 | — |
+| Claude 2 | claude-sonnet-5 | audit pass at `b288e388`, three receipts; see deviations below | 1,099 s | 2 | 14.53 s / 15.28 s |
+| Claude 3 | claude-sonnet-5 | audit pass at `07ed940c`, 26/26 checks, three receipts, assessment reads Rooms directly | 784 s | 4 (interrupted + 3 mail wakes) | 17.30 s / 20.19 s |
+
+Every Rooms run returned a byte-identical patch, reported `succeeded`, and
+recorded `collection_done` and `cleanup_done`. In run 2 the recovered supervisor
+polled `fleet status` in shell loops for 16 minutes instead of yielding. The
+verifier also `cd`'d out of its checkout, and Fleet's guard then refused its
+return, 5 times. It finished through a worktree under /tmp. Run 3's cards
+removed all three. Provider-reported notional cost was $6.21 for run 2 and $3.41
+for run 3.
+
+## Next milestone: agents in rooms, peer mail across rooms
+
+The Claude runs above put a real Workbench patch through supervisor,
+author, verifier and a cold Rooms execution with no desktop task tools. They
+also show what stands between this and a fully headless peer-to-peer fleet:
+
+- **Agents run on the host; only the patch runs in a room.** A cold room applied
+  and tested the exact patch in about 15 seconds, while the three model agents
+  ran as host processes. The Claude agents had no OS sandbox and wrote under
+  /tmp. Moving an agent into a room needs:
+  - a room that holds a provider turn for minutes rather than a 120-second
+    command;
+  - provider credentials injected per room and scoped, instead of the host's
+    login;
+  - egress limited to the provider API and the repository;
+  - the room's result patch returned as the agent's work product. Rooms already
+    returns a byte-identical patch.
+- **Fleet identity is a host directory and a host PID.** Delivery launches the
+  bridge as a host process. Liveness reads host PIDs (the #342 sysctl fix), and
+  the PreToolUse guard ties a session to its launch directory. A verifier that
+  `cd`'d inside the lab lost its own checkout and could not record a receipt
+  until it worked around the guard. In a room, identity has to be the room and
+  attempt, and liveness has to come from the room lifecycle
+  (`vmm_started` … `cleanup_done`), not `kill`/`sysctl` on the host.
+- **Mail and wakes need a host-side watcher.** Mail, receipts and handoffs live
+  in one host `FLEET_STATE` directory, and only the host `fleet watch` turns mail
+  into a launch. Peer mail across rooms without a host supervisor needs:
+  - a mail and receipt store that in-room sessions can reach, over a narrow
+    endpoint or a synced directory;
+  - wake delivery that starts a room;
+  - per-room session identity for acknowledgements and stable message IDs.
+  The mail-and-wake contract itself held: the author woke on its assignment, a
+  fresh supervisor woke on pending mail after the interruption and recovered from
+  records alone, and the verifier woke on its order.
+- **Waiting must be cheap and explicit.** Unprompted, the recovered Claude
+  supervisor held its turn for 16 minutes, polling `fleet status` until peers
+  finished. When every turn occupies a room, that is a room held idle. The cards
+  now require yielding. A first-class "end turn until mail" signal would make
+  that the default rather than a prompt rule.
+
+Concretely, the next step is one agent in one room. Run the verifier inside a
+Rooms room with an injected scoped credential. Give it a Fleet mail/receipt
+endpoint it can reach from the guest. Keep the host watcher only as the waker,
+then remove it once the in-room session can wake peers itself.
 
 Keep role cards as editable purpose/responsibility/context, slots as capacity
 bindings, and assignments as work. Fleet owns launch/observe/mail/checkpoint/
