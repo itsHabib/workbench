@@ -167,12 +167,12 @@ func writeReviewDiffSection(b *strings.Builder, a state.Artifact, loci []locusRe
 	files := parseUnifiedDiff(evidence.Diff)
 	paths, missing := reviewDiffPaths(comments, files)
 	loci = append(append([]locusRef(nil), loci...), reviewLineHints(comments, files)...)
-	writeReviewPathMetadata(b, paths, missing)
+	writeReviewPathMetadata(b, paths, missing, nil)
 	fmt.Fprintf(b, "## Recorded diff evidence (%s)\n```\n%s```\n\n", a.ID, scrub(renderParsedJudgeDiff(files, loci, paths)))
 }
 
 // Diagnostic text has its own cap; it cannot consume the substantive diff budget.
-func writeReviewPathMetadata(b *strings.Builder, paths, missing []string) {
+func writeReviewPathMetadata(b *strings.Builder, paths, missing, hints []string) {
 	remaining, omitted := reviewPathMetadataCap, 0
 	emit := func(kind, value string) {
 		entry := fmt.Sprintf("[review-referenced %s: %s]\n", kind, scrub(value))
@@ -188,6 +188,9 @@ func writeReviewPathMetadata(b *strings.Builder, paths, missing []string) {
 	}
 	for _, reason := range missing {
 		emit("context unavailable", reason)
+	}
+	for _, hint := range hints {
+		emit("source hint", hint)
 	}
 	if omitted > 0 {
 		fmt.Fprintf(b, "[review-path metadata incomplete: %d entries omitted by byte budget]\n", omitted)

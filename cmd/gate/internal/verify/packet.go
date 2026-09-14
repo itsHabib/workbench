@@ -66,7 +66,7 @@ func JudgmentPacket(arts []state.Artifact, subject Subject) (Packet, error) {
 	var b strings.Builder
 	b.WriteString(ctx)
 	p.SourceHints = uniquePacketStrings(refs.hints)
-	writeReviewPathMetadata(&b, nil, p.SourceHints)
+	writeReviewPathMetadata(&b, nil, nil, p.SourceHints)
 	remaining := requiredDiffBudget
 	indexPaths := make(map[string]bool)
 	for _, name := range index {
@@ -220,14 +220,19 @@ func packetRequirements(arts []state.Artifact, comments []recordedReview, index 
 // An exact path wins. Otherwise callers must distinguish a unique basename
 // from an ambiguous hint; the latter cannot require every candidate file.
 func matchingPacketPaths(hint string, known []string) []string {
+	exactOnly := strings.Contains(hint, "/")
+	hint = strings.TrimPrefix(hint, "./")
 	for _, name := range known {
 		if name == hint {
 			return []string{name}
 		}
 	}
+	if exactOnly {
+		return nil
+	}
 	var result []string
 	for _, name := range known {
-		if name == hint || (!strings.Contains(hint, "/") && strings.HasSuffix(name, "/"+hint)) {
+		if strings.HasSuffix(name, "/"+hint) {
 			result = append(result, name)
 		}
 	}
@@ -274,7 +279,7 @@ func (refs *packetReferences) addComment(c recordedReview, changed, index []stri
 
 func (refs *packetReferences) addHint(review string, match, changed, index []string) {
 	hint := strings.TrimPrefix(match[1], "./")
-	matches := matchingPacketPaths(hint, changed)
+	matches := matchingPacketPaths(match[1], changed)
 	if len(matches) == 0 {
 		// A bare token outside the diff can name a command, symbol or example.
 		// Even a matching repository blob does not make it required source.
@@ -284,9 +289,14 @@ func (refs *packetReferences) addHint(review string, match, changed, index []str
 			}
 			return
 		}
-		refs.needsIndex = true
-		matches = matchingPacketPaths(hint, index)
 	}
+	// A basename selected from the diff does not establish which file a precise
+	// reference names. Resolve against the complete index before claiming coverage.
+	if len(matches) == 0 || len(matches) == 1 && match[2] != "" && matches[0] != hint {
+		refs.needsIndex = true
+	}
+	known := append(append([]string(nil), changed...), index...)
+	matches = matchingPacketPaths(match[1], known)
 	if len(matches) > 1 {
 		refs.hints = append(refs.hints, fmt.Sprintf("review %s: ambiguous %s; candidates %v; no source selected or finding resolved", review, hint, matches))
 		return
@@ -325,6 +335,7 @@ func writeRequiredReviews(b *strings.Builder, active []recordedReview, included 
 			continue
 		}
 		b.WriteString(entry)
+		// Record secondary-section coverage in the same per-packet identity set.
 		included[c.key()] = true
 		reviewRemaining -= len(entry)
 	}

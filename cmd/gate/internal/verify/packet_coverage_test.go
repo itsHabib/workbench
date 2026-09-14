@@ -78,3 +78,35 @@ func TestPacketExactPathDoesNotSelectSameBasenameElsewhere(t *testing.T) {
 		t.Fatalf("exact path expanded to unrelated basenames: %v %v", p.RequiredSources, err)
 	}
 }
+
+func TestPacketRootReferenceWinsOverChangedBasename(t *testing.T) {
+	diff := "diff --git a/a/spec.md b/a/spec.md\n--- a/a/spec.md\n+++ b/a/spec.md\n@@ -50 +50 @@\n-old\n+new\n"
+	for _, reference := range []string{"./spec.md:50", "spec.md:50"} {
+		t.Run(reference, func(t *testing.T) {
+			comments := []map[string]any{{"is_bot": true, "body": "P1: inspect `" + reference + "`."}}
+			arts := []state.Artifact{packetArtifact(t, map[string]any{"diff": diff, "comments": comments})}
+			p, err := JudgmentPacket(arts, Subject{})
+			if err != nil || p.Complete || !strings.Contains(strings.Join(p.Missing, " "), "file index unavailable") {
+				t.Fatalf("changed basename claimed complete coverage without an index: %v %v", p.Missing, err)
+			}
+			arts = append(arts, packetArtifact(t, SourceEvidence{IndexComplete: true, FileIndex: []string{"spec.md", "a/spec.md"}}))
+			p, err = JudgmentPacket(arts, Subject{})
+			if err != nil || p.Complete || strings.Join(p.RequiredSources, ",") != "spec.md" {
+				t.Fatalf("nested diff substituted for root source: %v %v", p.RequiredSources, err)
+			}
+		})
+	}
+}
+
+func TestPacketChecksAmbiguityAcrossDiffAndIndex(t *testing.T) {
+	diff := "diff --git a/a/spec.md b/a/spec.md\n--- a/a/spec.md\n+++ b/a/spec.md\n@@ -50 +50 @@\n-old\n+new\n"
+	comments := []map[string]any{{"is_bot": true, "body": "Inspect `spec.md:50`."}}
+	arts := []state.Artifact{packetArtifact(t, map[string]any{"diff": diff, "comments": comments}), packetArtifact(t, SourceEvidence{IndexComplete: true, FileIndex: []string{"a/spec.md", "b/spec.md"}})}
+	p, err := JudgmentPacket(arts, Subject{})
+	if err != nil || !p.Complete || len(p.RequiredSources) != 0 || !strings.Contains(strings.Join(p.SourceHints, " "), "ambiguous spec.md") {
+		t.Fatalf("diff preference hid known ambiguity: %v %v %v", p.RequiredSources, p.SourceHints, err)
+	}
+	if !strings.Contains(p.Context, "[review-referenced source hint:") {
+		t.Fatal("hint was mislabeled as required context unavailable")
+	}
+}

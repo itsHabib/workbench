@@ -13,8 +13,10 @@ remain present; a newer clean review or a SHA written in prose cannot erase an
 unresolved finding.
 
 Structured anchors, verifier finding locations, and unambiguous file/line
-references still require coverage. An exact path wins over other files with the
-same basename. Ambiguous basenames and unchanged bare tokens remain visible as
+references still require coverage. Explicit root paths retain their `./` intent,
+and an exact path in the complete index wins over a changed file with the same
+basename. A precise reference using basename fallback requires that index before
+coverage is claimed. Ambiguous basenames and unchanged bare tokens remain visible as
 source hints with candidate paths; they do not select every candidate or turn a
 command name into a required executable blob. These diagnostics do not resolve
 findings. Packet completeness reports mechanical coverage, not a favorable
@@ -43,7 +45,7 @@ synthetic data.
 | RoxIQ #246, `84fabb918628c6a954e5a1d75fdafebb760a0465` | Prose inference selected unrelated same-basename files and exceeded the total source budget. | Ten required files add 293,761 bytes to 12,846 already recorded: 306,607 total. Ambiguous candidates remain named as hints. Complete after one local supplement. |
 | RoxIQ #252, `5e55a555d36f09ab7d90ee813e74c0af81dce04d` | A bare command mention required an unchanged 9,500,802-byte binary that the text collector correctly refuses. | Existing 200,050 bytes of source suffice. The command remains a hint and its review stays visible. Complete without additional source. |
 
-Final context sizes were 613,300, 421,330, and 331,995 bytes respectively. Context
+Final context sizes were 613,292, 421,162, and 332,827 bytes respectively. Context
 includes reviews and recorded diffs as well as supplemental source, so it is not
 the source-budget measurement. These replays establish mechanical completeness;
 they do not establish a provider's judgment, merge readiness, or live recovery.
