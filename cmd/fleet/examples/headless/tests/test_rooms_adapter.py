@@ -72,6 +72,26 @@ class RoomsAdapterTest(unittest.TestCase):
             transport = json.loads((root / "result/transport.json").read_text())
             self.assertEqual((transport["exit"], transport["guest_removed"]), (0, True))
 
+    def test_lima_transport_records_and_cleans_up_when_collection_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "worker.patch").write_bytes(b"diff\n")
+            calls = []
+
+            def fake(argv, **options):
+                calls.append(argv)
+                if "tar" in argv:
+                    raise subprocess.CalledProcessError(2, argv)
+                return subprocess.CompletedProcess(argv, 0)
+
+            argv = ["rooms-check.py", "--lima", "rooms-host", "--rooms", "/g/rooms", "--image", "/g/image",
+                    "--toolstore", "/g/store", "--patch", str(root / "worker.patch"), "--out", str(root / "result")]
+            with patch.object(sys, "argv", argv), patch.object(adapter.subprocess, "run", side_effect=fake), self.assertRaises(subprocess.CalledProcessError):
+                adapter.main()
+            self.assertIn("--one-file-system", calls[-1])
+            transport = json.loads((root / "result/transport.json").read_text())
+            self.assertEqual((transport["exit"], transport["guest_removed"]), (None, True))
+
 
 if __name__ == "__main__":
     unittest.main()

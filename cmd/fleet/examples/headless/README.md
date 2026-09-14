@@ -157,8 +157,9 @@ whole-process-tree isolation; agents share the lab and its local state.
   loads only project and local settings (no user hooks or memory files), an
   empty strict MCP configuration and the tools Bash, Read, Write, Edit, Glob and
   Grep, and appends the role card. Auto memory is off. Fleet's projected hooks
-  run from the private binary. Each checkout's local settings run under
-  `dontAsk`, which refuses anything not allowed without prompting. They allow
+  run from the private binary. Every agent runs under `dontAsk`, set by
+  deliver.json and by each checkout's local settings, which refuses anything not
+  allowed without prompting. The settings allow
   Bash, and file tools only by path, `Edit(//LAB/**)` and `Read(//LAB/**)`: a
   probe wrote inside the lab and was refused outside it. They also deny push,
   `gh`, `curl`, `wget`, `limactl` and web tools, but those are command-prefix
@@ -207,14 +208,21 @@ archives and per-attempt measurements. PR #344 names where.
 | Claude 1 | claude-sonnet-5 | fixture failed: Claude Code refuses a standalone `sleep`; the driver stopped instead of waiting | — | 1 | — |
 | Claude 2 | claude-sonnet-5 | audit pass at `b288e388`, three receipts; see deviations below | 1,099 s | 2 | 14.53 s / 15.28 s |
 | Claude 3 | claude-sonnet-5 | audit pass at `07ed940c`, 26/26 checks, three receipts, assessment reads Rooms directly | 784 s | 4 (interrupted + 3 mail wakes) | 17.30 s / 20.19 s |
+| Claude 4 | claude-sonnet-5 | final code (path rules, card at launch): three receipts at `d3bf57b1`; the driver's audit failed only because it required receipts from the checkout root, and the verifier's came from a task subdirectory. The corrected rule passes 28/28 on the retained evidence | 628 s | 5 (interrupted + 4 mail wakes) | 14.72 s / 15.73 s |
 
 Every Rooms run returned a byte-identical patch, reported `succeeded`, and
 recorded `collection_done` and `cleanup_done`. In run 2 the recovered supervisor
 polled `fleet status` in shell loops for 16 minutes instead of yielding. The
 verifier also `cd`'d out of its checkout, and Fleet's guard then refused its
 return, 5 times. It finished through a worktree under /tmp. Run 3's cards
-removed all three. Provider-reported notional cost was $6.21 for run 2 and $3.41
-for run 3.
+removed all three. Provider-reported notional cost was $6.21 for run 2, $3.41
+for run 3 and $3.84 for run 4. Run 4 exercised the final permission rules and
+card delivery. The live author process carried the card flag after the SDK's
+arguments, and no agent polled, touched /tmp or hit the cd guard.
+
+Receipts are now accepted from anywhere inside the recording agent's own
+checkout (Fleet's `worktree` field), rather than only from its root. The
+corrected audit also passes runs 2, 3 and the earlier Codex lab.
 
 ## Next milestone: agents in rooms, peer mail across rooms
 
@@ -223,7 +231,7 @@ author, verifier and a cold Rooms execution with no desktop task tools. They
 also show what stands between this and a fully headless peer-to-peer fleet:
 
 - **Agents run on the host; only the patch runs in a room.** A cold room applied
-  and tested the exact patch in 14.5–18.8 seconds, while the three model agents
+  and tested the exact patch in 14.5–18.3 seconds, while the three model agents
   ran as host processes. The Claude agents had no OS sandbox and wrote under
   /tmp. Moving an agent into a room needs:
   - a room that holds a provider turn for minutes rather than a 120-second

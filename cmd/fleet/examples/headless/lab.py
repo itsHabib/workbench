@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -24,9 +25,10 @@ PROVIDERS = ("codex", "claude")
 # only, not a boundary. The README says so.
 CLAUDE_TOOLS = "Bash,Read,Write,Edit,Glob,Grep"
 CLAUDE_DENY = ["Bash(git push:*)", "Bash(gh:*)", "Bash(curl:*)", "Bash(wget:*)", "Bash(limactl:*)", "WebFetch", "WebSearch"]
-# A launching agent's own session must not reach the lab; its account must.
-CLAUDE_KEEP = {"CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
-               "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_SKIP_BEDROCK_AUTH", "CLAUDE_CODE_SKIP_VERTEX_AUTH"}
+# A launching agent's own session must not reach the lab; its account and
+# provider routing must: every CLAUDE_CODE_USE_*, SKIP_*_AUTH and CLIENT_*.
+CLAUDE_KEEP = re.compile(r"CLAUDE_CONFIG_DIR|CLAUDE_CODE_(USE_\w+|SKIP_\w+_AUTH|CLIENT_\w+|OAUTH_TOKEN|"
+                         r"API_KEY_HELPER_TTL_MS|CUSTOM_OAUTH_URL|CERT_STORE)")
 
 
 def run(args, cwd, env=None, check=True, timeout=60):
@@ -46,7 +48,7 @@ def sha(path):
 
 def parent_session(name):
     """A launching agent's own session variables never reach the lab's agents."""
-    return name == "CLAUDECODE" or (name.startswith("CLAUDE_") and name not in CLAUDE_KEEP)
+    return name == "CLAUDECODE" or (name.startswith("CLAUDE_") and not CLAUDE_KEEP.fullmatch(name))
 
 def claude_allow(root):
     """Bash plus file tools whose paths stay inside the lab (Read rules cover Glob/Grep)."""
@@ -117,11 +119,12 @@ def claude_wrapper(root, directories, runtime_home):
     # Fleet's CLAUDE.local.md imports the card from outside the checkout, which
     # Claude skips without a per-project approval. Each launch appends the
     # checkout's current card instead, so an edited card reaches the next launch.
-    cards = {str(d): str(root / "lanes" / kind / "card.md") for d, kind in zip(directories, ROLES)}
+    cards = {physical(d): str(root / "lanes" / kind / "card.md") for d, kind in zip(directories, ROLES)}
     wrapper = root / "bin/claude"
     wrapper.write_text("#!/usr/bin/env python3\nimport os,sys\nos.environ['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '1'\n" +
                        "card = " + repr(cards) + ".get(os.getcwd())\n" +
-                       "extra = ['--append-system-prompt-file', card] if card and '--version' not in sys.argv else []\n" +
+                       "if not card and '--version' not in sys.argv:\n    sys.exit('no role card for ' + os.getcwd())\n" +
+                       "extra = ['--append-system-prompt-file', card] if card else []\n" +
                        "os.execv(" + repr(real) + ", [" + repr(real) + ", *sys.argv[1:], *" + repr(args) + ", *extra])\n")
     wrapper.chmod(0o700)
     for directory in directories:
@@ -132,6 +135,16 @@ def claude_wrapper(root, directories, runtime_home):
             "scope": "process-local CLI arguments and checkout-local settings; user settings, MCP and memory excluded; normal auth retained"}
 
 
+def physical(directory):
+    """The path getcwd reports inside directory: resolve() keeps a caller's letter case."""
+    before = os.getcwd()
+    os.chdir(directory)
+    try:
+        return os.getcwd()
+    finally:
+        os.chdir(before)
+
+
 def claude_settings(checkout, root):
     """Add the lab's Claude tool policy beside the hooks and denies Fleet projected."""
     path = checkout / ".claude/settings.local.json"
@@ -140,6 +153,7 @@ def claude_settings(checkout, root):
     permissions["allow"] = sorted(set(permissions.get("allow") or []) | set(claude_allow(root)))
     permissions["deny"] = sorted(set(permissions.get("deny") or []) | set(CLAUDE_DENY))
     permissions["additionalDirectories"] = [str(root)]
+    permissions["defaultMode"] = "dontAsk"  # deliver.json passes the same mode to the SDK
     settings["autoMemoryEnabled"] = False
     write_json(path, settings)
 
@@ -158,7 +172,7 @@ def rooms_backend(root, host, binary, image, toolstore):
                    ", '--patch', sys.argv[1], '--out', sys.argv[2]])\n")
     cli.chmod(0o700)
     return {"cli": str(cli), "out": str(root / "result/rooms"), "host": host, "binary": binary, "image": image,
-            "toolstore": toolstore, "adapter_sha256": sha(adapter),
+            "toolstore": toolstore, "adapter_sha256": sha(adapter), "cli_sha256": sha(cli),
             "scope": "executes only the frozen patch and supplied tests in a cold room; agents stay on the host"}
 
 
@@ -180,6 +194,8 @@ def toml_value(value):
 
 def prepare(destination, cards, fleet_source, provider="codex", model=None, runtime_home=None, rooms=None):
     root = Path(destination).resolve() if destination else Path(tempfile.mkdtemp(prefix="headless-workbench-")).resolve()
+    if any(c in str(root) for c in "*?[]{}()"):
+        raise RuntimeError("the lab root is used in permission globs; choose a path without *?[]{}()")
     if destination:
         root.mkdir()
     print(root, flush=True)
@@ -408,7 +424,7 @@ def operate(root, resume=False):
             if phase == "cancelled":
                 current = states(root)
                 interrupted = [s for s in current if s.get("attempt") == interruption["attempt"] and s.get("provider_state") == "interrupted" and s.get("provider_terminal")]
-                ended_otherwise(current, interruption["attempt"])
+                ended_otherwise(current, interruption["attempt"], Path(interruption["attempt"] + ".exit.json").exists())
                 if interrupted and Path(interruption["attempt"] + ".exit.json").exists():
                     interruption["terminal"] = interrupted
                     interruption["resumed_at"] = time.time()
@@ -449,10 +465,19 @@ def operate(root, resume=False):
         print(root, flush=True)
 
 
-def ended_otherwise(current, attempt):
-    """A cancelled supervisor that ended any other way is not an interruption."""
+def ended_otherwise(current, attempt, exited):
+    """A cancelled supervisor that ended any other way is not an interruption.
+
+    The bridge can exit after a runtime error without marking the turn terminal,
+    so a collected exit without an interrupted terminal state also fails.
+    """
     for state in current:
-        if state.get("attempt") == attempt and state.get("provider_terminal") and state.get("provider_state") != "interrupted":
+        if state.get("attempt") != attempt:
+            continue
+        interrupted = state.get("provider_terminal") and state.get("provider_state") == "interrupted"
+        if interrupted:
+            return
+        if state.get("provider_terminal") or exited:
             raise RuntimeError(f"the cancelled supervisor ended {state.get('provider_state')!r}, not interrupted")
 
 

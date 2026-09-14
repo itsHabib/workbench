@@ -87,6 +87,20 @@ def reference_reads(root, info):
                    for text in tool_inputs(event) if any(source in text for source in sources)})
 
 
+def preserved(checkout, head, seed, path):
+    """The committed result, which the verifier and Rooms test, keeps the seed's bytes."""
+    try:
+        return git(checkout, "show", head + ":" + path) == git(checkout, "show", seed + ":" + path)
+    except subprocess.CalledProcessError:
+        return False  # deleted or never seeded
+
+
+def own_checkout(receipt, checkout):
+    """Fleet recorded the receipt in this checkout: its worktree, from anywhere inside it."""
+    cwd = receipt.get("cwd")
+    return receipt.get("worktree") == str(checkout) and bool(cwd) and Path(cwd).is_relative_to(checkout)
+
+
 def rooms_evidence(root, info, patch, receipts, head):
     """Rooms applied the identical patch, succeeded, collected and cleaned up."""
     out = Path(info["rooms"]["out"])
@@ -96,11 +110,14 @@ def rooms_evidence(root, info, patch, receipts, head):
     matching = [r for r in receipts if r.get("head") == head and r.get("kind") == "rooms"]
     latest = max(matching, key=lambda r: r["at"], default={})
     checks = {"rooms_receipt": (latest.get("verdict") == "pass" and latest.get("dirty") is False
-                                and latest.get("cwd") == info["verifier"]["cwd"]),
+                                and own_checkout(latest, info["verifier"]["cwd"])),
               "rooms_identical_patch": (summary.get("input_patch_sha256") == summary.get("returned_patch_sha256") == digest(patch)),
               "rooms_succeeded": summary.get("cli_exit") == 0 and summary.get("command_status") == "succeeded" and summary.get("command_exit") == 0,
               "rooms_collected": "collection_done" in events and "cleanup_done" in events,
-              "rooms_adapter_unchanged": digest(root / "bin/rooms-check.py") == info["rooms"]["adapter_sha256"]}
+              # Labs prepared before the entry point's hash was recorded check the adapter only.
+              "rooms_adapter_unchanged": (digest(root / "bin/rooms-check.py") == info["rooms"]["adapter_sha256"]
+                                          and info["rooms"].get("cli_sha256", digest(Path(info["rooms"]["cli"])))
+                                          == digest(Path(info["rooms"]["cli"])))}
     return checks, {"receipt": latest, "summary": summary, "events": events}
 
 
@@ -118,9 +135,7 @@ def audit(root):
     checks["patch_matches_result"] = patch.read_bytes() == git(author, "diff", info["base"], head)
     task = author / info["task_path"]
     for name in ("input.json", "test_report.py", "INPUT.md"):
-        # The committed result is what the verifier and Rooms test, not the working tree.
-        path = info["task_path"] + "/" + name
-        checks["preserved_" + name] = git(author, "show", head + ":" + path) == git(author, "show", info["seed_head"] + ":" + path)
+        checks["preserved_" + name] = preserved(author, head, info["seed_head"], info["task_path"] + "/" + name)
     interruption = read(root / "control/interruption.json")
     draft = task / "PLAN.md"
     # Final PLAN.md may legitimately document the answer and completed tests.
@@ -134,7 +149,7 @@ def audit(root):
         latest = max(matching, key=lambda r: r["at"], default={})
         evidence[kind] = latest
         checks[kind + "_receipt"] = (latest.get("verdict") == "pass" and latest.get("dirty") is False
-                                         and latest.get("cwd") == str(cwd) and latest.get("worktree") == str(cwd))
+                                         and own_checkout(latest, cwd))
     checks["independent_sessions"] = bool(evidence["verify"].get("session")) and evidence["verify"].get("session") != evidence["implementation"].get("session")
     checks["observed_draft_continuity"] = draft_continuity(root, draft, interruption, evidence["implementation"].get("session"))
     attempts = [read(p) for p in (root / "state/watch/delivery").glob("*.meta.json")]
