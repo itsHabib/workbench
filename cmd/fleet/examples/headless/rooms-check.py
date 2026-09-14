@@ -84,7 +84,7 @@ def through_lima(args):
     transport = {"lima_host": args.lima, "guest_attempt": guest + "/a", "exit": None, "local_patch_sha256": sha(args.patch),
                  "scope": "includes VM transport; the guest copy, including its staged key, is removed after collection"}
     try:
-        transport["exit"] = run_in_guest(args, shell, guest, output)
+        run_in_guest(args, shell, guest, output, transport)
     finally:
         # Never follow a mount Rooms failed to release out of the private directory.
         transport["guest_removed"] = subprocess.run([*shell, "rm", "-rf", "--one-file-system", guest]).returncode == 0
@@ -94,7 +94,7 @@ def through_lima(args):
     return transport["exit"]
 
 
-def run_in_guest(args, shell, guest, output):
+def run_in_guest(args, shell, guest, output, transport):
     """Stage the key and patch, run this file as root, and copy the attempt back."""
     stage = (f"mkdir -m 700 {guest} && mkdir -p {guest}/h/.ssh && "
              f"install -m 600 \"$(getent passwd \"$SUDO_USER\" | cut -d: -f6)/.ssh/id_rooms\" {guest}/h/.ssh/id_rooms")
@@ -102,11 +102,10 @@ def run_in_guest(args, shell, guest, output):
     subprocess.run([*shell, "tee", guest + "/input.patch"], input=args.patch.read_bytes(), stdout=subprocess.DEVNULL, check=True)
     remote = [*shell, "env", "HOME=" + guest + "/h", "python3", "-", "--rooms", str(args.rooms), "--image", str(args.image),
               "--toolstore", str(args.toolstore), "--patch", guest + "/input.patch", "--out", guest + "/a"]
-    code = subprocess.run(remote, input=Path(__file__).read_bytes(), stdout=subprocess.DEVNULL).returncode
+    transport["exit"] = subprocess.run(remote, input=Path(__file__).read_bytes(), stdout=subprocess.DEVNULL).returncode
     archive = subprocess.run([*shell, "tar", "-C", guest + "/a", "-cf", "-", "."], capture_output=True, check=True).stdout
     with tarfile.open(fileobj=io.BytesIO(archive)) as collected:
         collected.extractall(output, filter="data")
-    return code
 
 
 if __name__ == "__main__":

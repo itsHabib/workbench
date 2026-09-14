@@ -98,7 +98,8 @@ choose it at preparation.
 Claude does not load Fleet's `CLAUDE.local.md` import of a card outside the
 checkout without a per-project approval. With `--provider claude` the lab's
 `claude` wrapper therefore appends the checkout's current `LAB/lanes/<kind>/card.md`
-to the system prompt at every launch (`--append-system-prompt-file`). An edited
+to the system prompt at every launch (`--append-system-prompt-file`) and refuses
+to launch from a directory that has no card. An edited
 card reaches the next launch without `update`, which projects only the Codex
 instructions. `cards` reports both.
 
