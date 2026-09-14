@@ -19,15 +19,18 @@ BASE = "92a706a7982a527ade967e43b68afd4bc1e5d667"
 TASK = "cmd/fleet/examples/headless/task"
 ROLES = ("supervisor", "author", "verifier")
 PROVIDERS = ("codex", "claude")
-# Claude runs without an OS sandbox here. Its tool surface, file-tool root and
-# permission rules bound it; Bash itself is unconfined. The README says so.
+# Claude runs without an OS sandbox here. File tools are confined to the lab by
+# path rules under dontAsk; Bash is unconfined and its denies are prefix rules
+# only, not a boundary. The README says so.
 CLAUDE_TOOLS = "Bash,Read,Write,Edit,Glob,Grep"
-CLAUDE_ALLOW = ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
 CLAUDE_DENY = ["Bash(git push:*)", "Bash(gh:*)", "Bash(curl:*)", "Bash(wget:*)", "Bash(limactl:*)", "WebFetch", "WebSearch"]
+# A launching agent's own session must not reach the lab; its account must.
+CLAUDE_KEEP = {"CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+               "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_SKIP_BEDROCK_AUTH", "CLAUDE_CODE_SKIP_VERTEX_AUTH"}
 
 
-def run(args, cwd, env=None, check=True):
-    p = subprocess.run([str(a) for a in args], cwd=cwd, env=env, text=True, capture_output=True, timeout=60)
+def run(args, cwd, env=None, check=True, timeout=60):
+    p = subprocess.run([str(a) for a in args], cwd=cwd, env=env, text=True, capture_output=True, timeout=timeout)
     if check and p.returncode:
         raise RuntimeError(f"{args[0:3]}: {p.returncode}: {p.stderr or p.stdout}")
     return p
@@ -43,7 +46,11 @@ def sha(path):
 
 def parent_session(name):
     """A launching agent's own session variables never reach the lab's agents."""
-    return name == "CLAUDECODE" or (name.startswith("CLAUDE_") and name != "CLAUDE_CONFIG_DIR")
+    return name == "CLAUDECODE" or (name.startswith("CLAUDE_") and name not in CLAUDE_KEEP)
+
+def claude_allow(root):
+    """Bash plus file tools whose paths stay inside the lab (Read rules cover Glob/Grep)."""
+    return ["Bash", f"Edit(/{root}/**)", f"Read(/{root}/**)"]
 
 
 def env_for(root):
@@ -107,15 +114,21 @@ def claude_wrapper(root, directories, runtime_home):
     write_json(root / "mcp.json", {"mcpServers": {}})
     # Appended after the SDK's own arguments, so these settings sources win.
     args = ["--setting-sources", "project,local", "--strict-mcp-config", "--mcp-config", str(root / "mcp.json"), "--tools", CLAUDE_TOOLS]
+    # Fleet's CLAUDE.local.md imports the card from outside the checkout, which
+    # Claude skips without a per-project approval. Each launch appends the
+    # checkout's current card instead, so an edited card reaches the next launch.
+    cards = {str(d): str(root / "lanes" / kind / "card.md") for d, kind in zip(directories, ROLES)}
     wrapper = root / "bin/claude"
     wrapper.write_text("#!/usr/bin/env python3\nimport os,sys\nos.environ['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '1'\n" +
-                       "os.execv(" + repr(real) + ", [" + repr(real) + ", *sys.argv[1:], *" + repr(args) + "])\n")
+                       "card = " + repr(cards) + ".get(os.getcwd())\n" +
+                       "extra = ['--append-system-prompt-file', card] if card and '--version' not in sys.argv else []\n" +
+                       "os.execv(" + repr(real) + ", [" + repr(real) + ", *sys.argv[1:], *" + repr(args) + ", *extra])\n")
     wrapper.chmod(0o700)
     for directory in directories:
         claude_settings(directory, root)
-    return {"name": "claude", "real_cli": real, "runtime_home": str(runtime), "arguments": args,
-            "wrapper_sha256": sha(wrapper), "allow": CLAUDE_ALLOW, "deny": CLAUDE_DENY, "file_tool_root": str(root),
-            "auto_memory": "disabled", "os_sandbox": "none; Bash is not confined to the lab",
+    return {"name": "claude", "real_cli": real, "runtime_home": str(runtime), "arguments": args, "cards": cards,
+            "wrapper_sha256": sha(wrapper), "allow": claude_allow(root), "deny": CLAUDE_DENY, "file_tool_root": str(root),
+            "auto_memory": "disabled", "os_sandbox": "none; Bash is not confined to the lab and its denies are prefix rules",
             "scope": "process-local CLI arguments and checkout-local settings; user settings, MCP and memory excluded; normal auth retained"}
 
 
@@ -124,7 +137,7 @@ def claude_settings(checkout, root):
     path = checkout / ".claude/settings.local.json"
     settings = json.loads(path.read_text())
     permissions = settings.setdefault("permissions", {})
-    permissions["allow"] = sorted(set(permissions.get("allow") or []) | set(CLAUDE_ALLOW))
+    permissions["allow"] = sorted(set(permissions.get("allow") or []) | set(claude_allow(root)))
     permissions["deny"] = sorted(set(permissions.get("deny") or []) | set(CLAUDE_DENY))
     permissions["additionalDirectories"] = [str(root)]
     settings["autoMemoryEnabled"] = False
@@ -174,12 +187,12 @@ def prepare(destination, cards, fleet_source, provider="codex", model=None, runt
     for name in ("bin", "state", "org", "lanes", "projection-home", "control", "result", "tmp"):
         (root / name).mkdir()
     build_source = Path(fleet_source).resolve() if fleet_source else REPO
-    run(["go", "build", "-o", root / "bin/fleet", "./cmd/fleet"], build_source)
+    run(["go", "build", "-o", root / "bin/fleet", "./cmd/fleet"], build_source, timeout=900)  # a cold module cache is slow
     repo, lead, verifier = (root / n for n in ("workbench", "workbench-lead", "workbench-verifier"))
     # Only BASE's history enters the lab: the source repository's other refs
     # include this example's committed reference result.
     run(["git", "init", "--quiet", repo], root)
-    git(repo, "fetch", "--quiet", "--no-tags", REPO, BASE)
+    run(["git", "fetch", "--quiet", "--no-tags", REPO, BASE], repo, timeout=600)
     git(repo, "checkout", "--quiet", "--detach", BASE)
     git(repo, "config", "user.name", "Headless Workbench lab")
     git(repo, "config", "user.email", "lab@example.invalid")
@@ -202,7 +215,6 @@ def prepare(destination, cards, fleet_source, provider="codex", model=None, runt
     sources = Path(cards).resolve() if cards else HERE / "cards"
     for kind in ROLES:
         card = sources / (kind + ".md")
-        kind = card.stem
         lane = root / "lanes" / kind
         lane.mkdir()
         shutil.copy2(card, lane / "card.md")
@@ -311,6 +323,7 @@ def card_projection(root, apply=False):
                           "imported_from": info.get("card_source"), "initial_sha256": info.get("initial_card_hashes", {}).get(kind),
                           "role": role, "slot": slot or None, "address": target["address"],
                           "cwd": checkout, "provider": info.get("provider", {}).get("name", "codex"), "projection_matches": before == expected,
+                          "claude_launch": "appends this card at each launch" if info.get("provider", {}).get("cards") else None,
                           "running_session_uptake": "not established; no restart or new turn requested"}))
         print("".join(difflib.unified_diff(before.splitlines(True), expected.splitlines(True),
                                          fromfile=str(config), tofile=str(source))), end="")
@@ -395,6 +408,7 @@ def operate(root, resume=False):
             if phase == "cancelled":
                 current = states(root)
                 interrupted = [s for s in current if s.get("attempt") == interruption["attempt"] and s.get("provider_state") == "interrupted" and s.get("provider_terminal")]
+                ended_otherwise(current, interruption["attempt"])
                 if interrupted and Path(interruption["attempt"] + ".exit.json").exists():
                     interruption["terminal"] = interrupted
                     interruption["resumed_at"] = time.time()
@@ -433,6 +447,13 @@ def operate(root, resume=False):
             finally:
                 log.close()
         print(root, flush=True)
+
+
+def ended_otherwise(current, attempt):
+    """A cancelled supervisor that ended any other way is not an interruption."""
+    for state in current:
+        if state.get("attempt") == attempt and state.get("provider_terminal") and state.get("provider_state") != "interrupted":
+            raise RuntimeError(f"the cancelled supervisor ended {state.get('provider_state')!r}, not interrupted")
 
 
 def fixture_alive(root):
