@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -24,8 +25,29 @@ func TestSandboxedProcessLiveness(t *testing.T) {
 	}
 	cmd := exec.Command(sandbox, "-p", "(version 1)(allow default)(deny signal)", exe, "-test.run=^TestSandboxedProcessLiveness$")
 	cmd.Env = append(os.Environ(), "FLEET_PID_PROBE="+strconv.Itoa(os.Getpid()))
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == 71 && strings.Contains(string(out), "sandbox_apply") {
+		t.Skip("already inside a sandbox; macOS refuses a nested sandbox-exec profile")
+	}
+	if err != nil {
 		t.Fatalf("sandbox probe: %v\n%s", err, out)
+	}
+}
+
+// Another user's live process answers EPERM without any sandbox. It keeps the
+// documented cross-user rule: only this user's denied process reads as alive.
+func TestProcessLivenessRejectsOtherUser(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root may signal every process")
+	}
+	if err := syscall.Kill(1, 0); !errors.Is(err, syscall.EPERM) {
+		t.Skipf("launchd signal probe returned %v, not EPERM", err)
+	}
+	if PidAlive(1) {
+		t.Fatal("another user's process read as this user's live session")
+	}
+	if PidGone(1) {
+		t.Fatal("a live process was proven absent")
 	}
 }
 

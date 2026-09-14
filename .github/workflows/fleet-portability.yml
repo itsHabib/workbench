@@ -39,9 +39,9 @@ jobs:
         run: go test ./cmd/fleet/internal/verbs -run 'TestPool|TestWriteDenies|TestAssignReports|TestUndeclaredUsesHolderAssignment' -count=1
       - name: Watcher tests (Windows includes process flags, not visual proof)
         run: go test ./cmd/fleet/internal/watch -count=1
-      - name: Directory guard on native paths (backslash operands, drive-relative refusal)
+      - name: Directory guard on native paths (backslash operands, drive-relative refusal) and process liveness
         if: ${{ !cancelled() }}
-        run: go test ./cmd/fleet/internal/fleet -run 'Cd|Drift|Guard|Hop|Unroled|Backslash|DriveRelative' -count=1
+        run: go test ./cmd/fleet/internal/fleet -run 'Cd|Drift|Guard|Hop|Unroled|Backslash|DriveRelative|Liveness' -count=1
       - name: Public install through the real installer (Git Bash on Windows)
         if: ${{ !cancelled() }}
         shell: bash
