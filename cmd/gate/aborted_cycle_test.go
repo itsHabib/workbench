@@ -178,6 +178,13 @@ func mustCycleCount(t *testing.T, e env, subject verify.Subject) int {
 // portable form of the stub: a shell script would tie the abort test to a
 // POSIX shell, and the evidence package already stubs gh this way.
 func TestMain(m *testing.M) {
+	if os.Getenv("GO_WANT_DISCOVERY_FIXTURE") == "1" && (strings.HasPrefix(filepath.Base(os.Args[0]), "gh") || strings.HasPrefix(filepath.Base(os.Args[0]), "floor") || strings.HasPrefix(filepath.Base(os.Args[0]), "git")) {
+		os.Exit(runDiscoveryFixture())
+	}
+	if os.Getenv("GO_WANT_DISCOVERY_COMMAND") == "1" {
+		main()
+		return
+	}
 	if os.Getenv("GO_WANT_GH_RESET_HELPER_PROCESS") == "1" {
 		os.Exit(runResetAfterView())
 	}

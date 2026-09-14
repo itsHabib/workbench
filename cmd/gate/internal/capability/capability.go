@@ -142,7 +142,18 @@ func Check(st *state.Store, keyPath, grantID, repo, action string, now func() ti
 // authorization id remains HMAC-covered provenance but need not be supplied by
 // the evaluator, which starts from the signed grant artifact itself.
 func CheckSubject(st *state.Store, keyPath, grantID, repo, action, head string, pr int, now func() time.Time) (Grant, error) {
-	g, err := check(st, keyPath, grantID, repo, action)
+	a, err := st.Get(grantID)
+	if err != nil {
+		return Grant{}, err
+	}
+	return CheckArtifactSubject(a, keyPath, repo, action, head, pr, now)
+}
+
+// CheckArtifactSubject applies the same capability checks to an artifact from
+// an audited snapshot. Discovery can inspect every grant without rescanning the
+// ledger per candidate. It neither creates keys nor grants authority to a caller.
+func CheckArtifactSubject(a state.Artifact, keyPath, repo, action, head string, pr int, now func() time.Time) (Grant, error) {
+	g, err := checkArtifact(a, keyPath, repo, action)
 	if err != nil {
 		return Grant{}, err
 	}
@@ -177,6 +188,10 @@ func check(st *state.Store, keyPath, grantID, repo, action string) (Grant, error
 	if err != nil {
 		return Grant{}, err
 	}
+	return checkArtifact(a, keyPath, repo, action)
+}
+
+func checkArtifact(a state.Artifact, keyPath, repo, action string) (Grant, error) {
 	var g Grant
 	if err := json.Unmarshal(a.Body, &g); err != nil {
 		return Grant{}, fmt.Errorf("capability: parse grant: %w", err)
@@ -282,6 +297,13 @@ var ErrKeyMissing = errors.New("grant_key_missing")
 // cryptographic HMAC secret. In particular, an unset workflow secret decoded
 // into an empty file must never arm minting.
 var ErrKeyInvalid = errors.New("grant_key_invalid")
+
+// CheckKey verifies that existing signing material can be read. Discovery uses
+// it even for an empty inventory, so lost custody never becomes a mint prompt.
+func CheckKey(path string) error {
+	_, err := loadKey(path)
+	return err
+}
 
 // loadKey reads the signing key; it never creates one.
 func loadKey(path string) ([]byte, error) {

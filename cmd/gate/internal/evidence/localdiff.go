@@ -29,14 +29,11 @@ func tooLarge(err error) bool {
 
 // fallbackDiff routes an oversized PR to localDiff, pinned to the head the
 // run's view evidence recorded.
-func fallbackDiff(pr PRRef, view json.RawMessage) (diffResult, error) {
-	var v struct {
-		HeadRefOid string `json:"headRefOid"`
+func fallbackDiff(pr PRRef, head string) (diffResult, error) {
+	if !reSHA.MatchString(head) {
+		return diffResult{}, fmt.Errorf("evidence: a full head SHA is required to pin the local diff")
 	}
-	if err := json.Unmarshal(view, &v); err != nil || v.HeadRefOid == "" {
-		return diffResult{}, fmt.Errorf("evidence: view evidence carries no headRefOid to pin the local diff")
-	}
-	return localDiff(pr, v.HeadRefOid)
+	return localDiff(pr, head)
 }
 
 // diffResult is a computed diff plus the two commits it spans, so the caller
