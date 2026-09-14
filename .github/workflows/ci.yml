@@ -75,6 +75,12 @@ jobs:
           python3 cmd/fleet/e2e/jobs.py /tmp/fleet-jobs /tmp/fleet-jobs-receipt.json
           python3 cmd/fleet/e2e/job_workers.py /tmp/fleet-jobs /tmp/fleet-job-workers-receipt.json
           python3 -m unittest discover -s experiments/agent-work-loop -p 'test_*.py'
+      - name: Headless example offline regressions
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 -m unittest discover -s cmd/fleet/examples/headless/tests -v
+          python3 -m unittest discover -s cmd/fleet/examples/headless/task -p 'test_*.py' -v
       - name: go build
         run: go build ./...
       # The tracelens corpus gate: a detector regression against the labeled
