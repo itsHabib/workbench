@@ -186,3 +186,21 @@ func TestPacketBareTokenWithSameNamedSiblingIsHint(t *testing.T) {
 		t.Fatalf("sibling ambiguity not reported: %v", p.SourceHints)
 	}
 }
+
+// A bare name that only one repository path carries stays a requirement once
+// the index is known; only a same-named sibling demotes it to a hint.
+func TestPacketBareTokenUniqueChangedNameStaysRequired(t *testing.T) {
+	diff := "diff --git a/web/package-lock.json b/web/package-lock.json\n--- a/web/package-lock.json\n+++ b/web/package-lock.json\n@@ -1 +1 @@\n-old\n+new\n"
+	comments := []map[string]any{{"is_bot": true, "body": "The `package-lock.json` churn looks unrelated."}}
+	arts := []state.Artifact{
+		packetArtifact(t, map[string]any{"diff": diff, "comments": comments}),
+		packetArtifact(t, SourceEvidence{IndexComplete: true, FileIndex: []string{"web/package-lock.json", "go.mod"}}),
+	}
+	p, err := JudgmentPacket(arts, Subject{})
+	if err != nil || !p.Complete || len(p.SourceHints) != 0 {
+		t.Fatalf("unique changed name lost its requirement: %v %v %v", p.Missing, p.SourceHints, err)
+	}
+	if !strings.Contains(p.Context, "## Required recorded diff (complete file section)\n```\ndiff --git a/web/package-lock.json") {
+		t.Fatal("unique changed name is not rendered as a required complete diff section")
+	}
+}

@@ -283,7 +283,7 @@ func checkPacketEvidenceBudget(arts []state.Artifact, run string, body verify.So
 		return err
 	}
 	if before.Complete {
-		return fmt.Errorf("evidence_budget_exceeded: supplement would displace required evidence from a complete packet: %s", strings.Join(packet.Missing, "; "))
+		return fmt.Errorf("evidence_budget_exceeded: supplement would displace required evidence from a packet its file index already completes; collect without -path or choose smaller companions: %s", strings.Join(packet.Missing, "; "))
 	}
 	return nil
 }
