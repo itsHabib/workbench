@@ -237,16 +237,28 @@ def exits_collected(root):
     return True
 
 
-def operate(root):
-    # Each prepared lab has one bounded run; retain failures rather than overwrite them.
-    log = (root / "watcher.log").open("x")
+def operate(root, resume=False):
     info = json.loads((root / "resolved.json").read_text())
-    write_json(root / "control/run-inputs.json", {"at": time.time(), "runner_sha256": sha(Path(__file__)),
+    if resume:
+        status = json.loads(fleet(root, "watch", "status", "--json").stdout)
+        if status["watcher"] not in ("stopped", "never_seen") or not exits_collected(root) or any(not s.get("provider_terminal") for s in states(root)):
+            raise RuntimeError("resume requires a stopped watcher and collected terminal attempts")
+        archive = root / "control/before-resume"
+        archive.mkdir()  # This bounded example permits one continuation; retain the first run.
+        for path in (root / "status.json", root / "control/cleanup.json", root / "control/run-error.json"):
+            if path.exists():
+                shutil.copy2(path, archive / path.name)
+        for kind in ROLES:
+            fleet(root, "resume", "address:" + info[kind]["address"])
+        (root / "control/stop-requested").unlink(missing_ok=True)
+    log = (root / ("watcher-resume.log" if resume else "watcher.log")).open("x")
+    prefix = "resume" if resume else "run"
+    write_json(root / ("control/" + prefix + "-inputs.json"), {"at": time.time(), "runner_sha256": sha(Path(__file__)),
                "cards": {kind: sha(Path(info[kind]["card"])) for kind in ROLES},
                "delivery_sha256": sha(root / "state/deliver.json"), "brief_sha256": sha(root / "RUN.md")})
     watcher = subprocess.Popen([root / "bin/fleet", "watch", "--interval", "1s"], cwd=root / "workbench-lead", env=env_for(root), stdout=log, stderr=subprocess.STDOUT)
     write_json(root / "control/watcher.json", {"pid": watcher.pid, "started_at": time.time()})
-    phase, started, interruption = "inflight", time.time(), None
+    phase, started, interruption = ("resumed" if resume else "inflight"), time.time(), None
     try:
         while time.time() - started < 1200:
             if (root / "control/stop-requested").exists():
@@ -287,18 +299,25 @@ def operate(root):
         else:
             raise RuntimeError("bounded run timed out; inspect retained evidence")
     except Exception as error:
-        write_json(root / "control/run-error.json", {"at": time.time(), "error": str(error)})
+        write_json(root / ("control/" + prefix + "-error.json"), {"at": time.time(), "error": str(error)})
         raise
     finally:
-        stop(root)
-        if watcher.poll() is None:
-            watcher.send_signal(signal.SIGINT)
         try:
-            watcher.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            watcher.terminate()
-            watcher.wait(timeout=5)
-        log.close()
+            stop(root)
+        except Exception as error:
+            write_json(root / "control/collection-error.json", {"at": time.time(), "error": str(error)})
+            raise
+        finally:
+            try:
+                if watcher.poll() is None:
+                    watcher.send_signal(signal.SIGINT)
+                try:
+                    watcher.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    watcher.terminate()
+                    watcher.wait(timeout=5)
+            finally:
+                log.close()
         print(root, flush=True)
 
 
@@ -326,7 +345,7 @@ def stop(root, requested=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("prepare", "run", "status", "stop", "cards", "update"))
+    parser.add_argument("action", choices=("prepare", "run", "resume", "status", "stop", "cards", "update"))
     parser.add_argument("root", nargs="?")
     parser.add_argument("--cards", help="source directory containing supervisor.md, author.md and verifier.md")
     parser.add_argument("--fleet-source", help="local Fleet source checkout to build; defaults to this repository")
@@ -340,8 +359,8 @@ def main():
     if args.action in ("cards", "update"):
         card_projection(root, apply=args.action == "update")
         return
-    if args.action == "run":
-        operate(root)
+    if args.action in ("run", "resume"):
+        operate(root, resume=args.action == "resume")
         return
     if args.action == "stop":
         stop(root, requested=True)
