@@ -3,6 +3,7 @@ package source
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // The fixtures below are the real shape of gate's log: a grant artifact holding
@@ -151,6 +152,72 @@ func TestLedgerSkipsUndecodableLines(t *testing.T) {
 	}
 	if _, known := lg.cycles("itsHabib/workbench", 242, "run_x"); !known {
 		t.Error("an index with no outcomes still knows the count is zero")
+	}
+}
+
+// TestStrictLedgerFailsOnCorruptLine pins the digest's posture, which is
+// Read's and not the tolerant join's: a corrupt complete line fails the build
+// loudly, because a skipped grant or terminal would render as "nothing parked"
+// or "no live grant" — the quiet wrong answer about the operator's authority.
+func TestStrictLedgerFailsOnCorruptLine(t *testing.T) {
+	if _, err := strictLedger([]byte("{not json\n" + grantT1 + "\n")); err == nil {
+		t.Fatal("a corrupt line must fail the authority read")
+	}
+	if _, err := strictLedger([]byte(grantT1 + "\n{torn")); err != nil {
+		t.Fatalf("a torn final line is an in-progress write, not corruption: %v", err)
+	}
+}
+
+// TestLastCeilingsIsOnePriorGrant pins that a proposed re-mint is a tuple the
+// operator actually signed. (T3, 1 cycle) and (T1, 9 cycles) must never
+// compose into (T3, 9) — a grant nobody minted, presented as a safe re-mint.
+func TestLastCeilingsIsOnePriorGrant(t *testing.T) {
+	narrowWide := `{"id":"grt_a","kind":"grant","run":"run_mint","time":"2026-08-21T20:00:00Z","body":{"repo":"itsHabib/workbench","action":"merge","max_tier":"T3","max_cycles":1,"expires_at":"2026-08-22T13:30:49Z"}}`
+	lowLong := `{"id":"grt_b","kind":"grant","run":"run_mint","time":"2026-08-21T21:00:00Z","body":{"repo":"itsHabib/workbench","action":"merge","max_tier":"T1","max_cycles":9,"expires_at":"2026-08-22T13:30:49Z"}}`
+	lg := buildLedger([]byte(narrowWide + "\n" + lowLong + "\n"))
+	tier, cycles := lg.lastCeilingsFor("itsHabib/workbench")
+	if tier != "T1" || cycles != 9 {
+		t.Fatalf("ceilings = (%s, %d), want the most recent grant's own (T1, 9)", tier, cycles)
+	}
+	lg = buildLedger([]byte(lowLong + "\n" + narrowWide + "\n"))
+	if tier, cycles = lg.lastCeilingsFor("itsHabib/workbench"); tier != "T3" || cycles != 1 {
+		t.Fatalf("ceilings = (%s, %d), want the most recent grant's own (T3, 1)", tier, cycles)
+	}
+}
+
+// TestNonMergeGrantsAreNotAuthority: a grant minted for another action neither
+// covers parked merge work nor lends its ceilings to a proposed merge grant.
+func TestNonMergeGrantsAreNotAuthority(t *testing.T) {
+	lapsedMerge := `{"id":"grt_lapsed","kind":"grant","run":"run_mint","time":"2026-08-21T20:00:00Z","body":{"repo":"itsHabib/workbench","action":"merge","max_tier":"T1","max_cycles":3,"expires_at":"2026-08-22T13:30:49Z"}}`
+	deploy := `{"id":"grt_deploy","kind":"grant","run":"run_mint","time":"2026-08-21T22:00:00Z","body":{"repo":"itsHabib/workbench","action":"deploy","max_tier":"T3","max_cycles":9,"expires_at":"2126-08-22T13:30:49Z"}}`
+	park := `{"id":"esc_p","kind":"escalation","run":"run_242","time":"2026-08-21T21:00:01Z","parents":["vrd_reduced","grt_lapsed"],"body":{"outcome":"parked_for_judgment","verdict":"vrd_reduced","grant":"grt_lapsed","question":"your call","repo":"itsHabib/workbench","number":242}}`
+	lg := buildLedger([]byte(lapsedMerge + "\n" + deploy + "\n" + vrdT3 + "\n" + park + "\n"))
+	if _, ok := lg.grants["grt_deploy"]; ok {
+		t.Fatal("a non-merge grant must not be indexed as merge authority")
+	}
+	if tier, cycles := lg.lastCeilingsFor("itsHabib/workbench"); tier != "T1" || cycles != 3 {
+		t.Fatalf("ceilings = (%s, %d), want the merge grant's (T1, 3)", tier, cycles)
+	}
+	rows := lg.authority(time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC))
+	if len(rows) != 1 || rows[0].Live || rows[0].Parked != 1 {
+		t.Fatalf("a lapsed merge grant plus a live deploy grant must read as parked with no live grant: %+v", rows)
+	}
+}
+
+// TestAlreadyMergedActionRetiresThePark: gate's already_merged action carries
+// its subject in its body and is parented to view evidence, not a verdict. It
+// must still supersede the older park, or the digest keeps counting — and
+// paging for — a PR that is already merged.
+func TestAlreadyMergedActionRetiresThePark(t *testing.T) {
+	merged := `{"id":"act_merged","kind":"action","run":"run_243","time":"2026-08-21T22:00:00Z","parents":["view_1"],"body":{"outcome":"already_merged","repo":"itsHabib/workbench","number":242,"merge_commit":"abc"}}`
+	park := `{"id":"esc_p","kind":"escalation","run":"run_242","time":"2026-08-21T21:00:01Z","parents":["vrd_reduced","grt_ceiling"],"body":{"outcome":"parked_for_judgment","verdict":"vrd_reduced","grant":"grt_ceiling","question":"your call","repo":"itsHabib/workbench","number":242}}`
+	lg := buildLedger([]byte(grantT1 + "\n" + vrdT3 + "\n" + park + "\n"))
+	if n := lg.parkedByRepo()["itsHabib/workbench"]; n != 1 {
+		t.Fatalf("test premise: parked = %d before already_merged, want 1", n)
+	}
+	lg = buildLedger([]byte(grantT1 + "\n" + vrdT3 + "\n" + park + "\n" + merged + "\n"))
+	if n := lg.parkedByRepo()["itsHabib/workbench"]; n != 0 {
+		t.Fatalf("parked = %d after already_merged, want 0", n)
 	}
 }
 
