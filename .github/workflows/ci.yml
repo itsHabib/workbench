@@ -19,6 +19,18 @@ concurrency:
 # Per-tool path-filtered jobs are a documented follow-up (FOLLOWUPS.md), owed
 # only once the tool count or test time makes module-wide retest wasteful.
 jobs:
+  room-colony:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m unittest discover -s experiments/room-colony -v
+
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 15

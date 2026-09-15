@@ -1,0 +1,12 @@
+[
+  {
+    "action": "keep",
+    "reason": "owned process still running",
+    "role": "author"
+  },
+  {
+    "action": "keep",
+    "reason": "owned process still running",
+    "role": "verifier"
+  }
+]

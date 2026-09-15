@@ -1,0 +1,12 @@
+{
+  "resources": [
+    "/home/mh.guest/rooms-readiness-src/target/release/rooms",
+    "/home/mh.guest/rooms/readiness-observation/agent.ext4",
+    "/home/mh.guest/rooms/toolchain-lab/python/toolstore.sqfs"
+  ],
+  "sha256": [
+    "ad708957fb074d119889dd95f12fb889c8aa794428d41c4d373647571f61c350",
+    "e5de11ec3ece01514955a7828c158522dd68c2975bbff57b94e854bcd95f0d7b",
+    "85074bedee9b2c34014488b422c0869c01571dbb121da5191b2e719863e760d3"
+  ]
+}

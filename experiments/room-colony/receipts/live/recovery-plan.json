@@ -1,0 +1,13 @@
+[
+  {
+    "action": "start",
+    "attempt": 2,
+    "reason": "no live worker or completion",
+    "role": "author"
+  },
+  {
+    "action": "keep",
+    "reason": "owned process still running",
+    "role": "verifier"
+  }
+]
