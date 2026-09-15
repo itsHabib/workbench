@@ -33,6 +33,13 @@
 /triage-floor
 /workbench-mcp
 
+# Runnable language-bakeoff packages can also produce root binaries when built
+# by import path without an explicit output location.
+/baseline
+/scratchpipe
+/textpipe
+/wb
+
 # Nested-module build output: cmd/gate/docs/features/ci-classify/eval/build is
 # its own module, so `go build` there writes beside its go.mod, not at the root.
 /cmd/gate/docs/features/ci-classify/eval/build/s2build
