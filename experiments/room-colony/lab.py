@@ -229,6 +229,39 @@ def audit(root):
     return result
 
 
+def stop(root):
+    with (root / "apply.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        stop_collected(root)
+
+
+def stop_collected(root):
+    # Rooms owns teardown. Do not terminate a wrapper while it is collecting.
+    processes = list((root / "attempts").glob("*/process.json"))
+    if any(alive(read(p)["pid"], str(p.parent)) for p in processes):
+        raise ValueError("workers still running; wait for their bounded Rooms lifecycle before stopping broker")
+    require_collected(root)
+    broker = read(root / "broker.json")
+    if alive(broker["pid"], str(root)):
+        os.kill(broker["pid"], signal.SIGTERM)
+    desired = read(root / "desired.json")
+    peer = ["limactl", "shell", desired["lima"], "sudo"]
+    remote = desired["guest_root"]
+    cleanup_proxy = """import os, pathlib, signal, sys
+r = pathlib.Path(sys.argv[1]); f = r / 'proxy.pid'
+if f.exists():
+ p = int(f.read_text()); cmd = pathlib.Path('/proc') / str(p) / 'cmdline'
+ if cmd.exists() and str(r / 'proxy.py').encode() in cmd.read_bytes().split(b'\\0'):
+  os.kill(p, signal.SIGTERM)
+"""
+    subprocess.run([*peer, "python3", "-c", cleanup_proxy, remote], check=True)
+    inventory = subprocess.check_output([*peer, "env", "HOME=" + desired["guest_root"] + "/h", desired["rooms"], "ls", "--json"])
+    (root / "final-rooms.json").write_bytes(inventory)
+    if json.loads(inventory).get("rooms"):
+        raise ValueError("Rooms inventory is not empty; preserve guest state")
+    subprocess.run([*peer, "rm", "-rf", "--one-file-system", desired["guest_root"]], check=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("verb", choices=["init", "plan", "apply", "attempt", "audit", "stop"])
@@ -254,30 +287,7 @@ def main():
         print(json.dumps(result, indent=2))
         return 0 if result["passed"] else 1
     elif args.verb == "stop":
-        # Rooms owns teardown. Do not terminate a wrapper while it is collecting.
-        processes = list((args.root / "attempts").glob("*/process.json"))
-        if any(alive(read(p)["pid"], str(p.parent)) for p in processes):
-            raise ValueError("workers still running; wait for their bounded Rooms lifecycle before stopping broker")
-        require_collected(args.root)
-        broker = read(args.root / "broker.json")
-        if alive(broker["pid"], str(args.root)):
-            os.kill(broker["pid"], signal.SIGTERM)
-        desired = read(args.root / "desired.json")
-        peer = ["limactl", "shell", desired["lima"], "sudo"]
-        remote = desired["guest_root"]
-        cleanup_proxy = """import os, pathlib, signal, sys
-r = pathlib.Path(sys.argv[1]); f = r / 'proxy.pid'
-if f.exists():
- p = int(f.read_text()); cmd = pathlib.Path('/proc') / str(p) / 'cmdline'
- if cmd.exists() and str(r / 'proxy.py').encode() in cmd.read_bytes().split(b'\\0'):
-  os.kill(p, signal.SIGTERM)
-"""
-        subprocess.run([*peer, "python3", "-c", cleanup_proxy, remote], check=True)
-        inventory = subprocess.check_output([*peer, "env", "HOME=" + desired["guest_root"] + "/h", desired["rooms"], "ls", "--json"])
-        (args.root / "final-rooms.json").write_bytes(inventory)
-        if json.loads(inventory).get("rooms"):
-            raise ValueError("Rooms inventory is not empty; preserve guest state")
-        subprocess.run([*peer, "rm", "-rf", "--one-file-system", desired["guest_root"]], check=True)
+        stop(args.root)
     return 0
 
 

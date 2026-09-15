@@ -1,4 +1,5 @@
 import json
+import fcntl
 from pathlib import Path
 import tempfile
 import subprocess
@@ -8,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from broker import Handler, Store, ThreadingHTTPServer, write
-from lab import audit, plan, require_collected, source_hash, verify_backend
+from lab import audit, plan, require_collected, source_hash, stop, verify_backend
 from workload import BASELINE, assess, digest, distance, maps
 from worker import Mail, author, verifier
 
@@ -77,6 +78,21 @@ class StateTests(unittest.TestCase):
         (self.root / "attempts/author-1").mkdir()
         with patch("lab.alive", return_value=True):
             self.assertEqual(plan(self.root)[0]["action"], "blocked")
+
+    def test_stop_waits_for_apply_lock(self):
+        entered = threading.Event()
+        with (self.root / "apply.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            with patch("lab.stop_collected", side_effect=lambda _: entered.set()):
+                thread = threading.Thread(target=stop, args=(self.root,))
+                thread.start()
+                try:
+                    self.assertFalse(entered.wait(.1))
+                finally:
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+                    thread.join(timeout=3)
+                self.assertTrue(entered.is_set())
+                self.assertFalse(thread.is_alive())
 
     def test_cleanup_preserves_uncollected_attempt(self):
         (self.root / "attempts/author-1").mkdir()

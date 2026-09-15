@@ -27,7 +27,10 @@ is checked separately with the same saved proposals in fresh Rooms; this avoids
 claiming cached inference is a new model run. The [final replay](receipts/final-replay/)
 passed all 13 audit checks with three new guest boots; completion apply started
 no workers. Its held-out distance was 12384 across 27 valid cases.
-All 15 offline tests pass, including real process interruption and HTTP handoff.
+All 16 offline tests pass, including real process interruption and HTTP handoff.
+A follow-up review caught concurrent `stop`/`apply`; the subsequent shared-lock
+fix has a real contention regression test. The published Room replay precedes
+that lock-only fix; it is not presented as an exact final-head live run.
 
 ## The useful connections
 
