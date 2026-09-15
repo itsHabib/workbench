@@ -1,0 +1,9 @@
+{
+  "cli_exit": 0,
+  "elapsed_seconds": 10.093978671000002,
+  "returned_patch_sha256": "b3fbe81ebec6c0714a0fa0f68032cea98663b3d20ca94e4cc9dbf953ad647132",
+  "input_patch_sha256": "b3fbe81ebec6c0714a0fa0f68032cea98663b3d20ca94e4cc9dbf953ad647132",
+  "scope": "command, collection and cleanup must be read separately from result.json and lifecycle.ndjson",
+  "command_status": "succeeded",
+  "command_exit": 0
+}

@@ -1,0 +1,10 @@
+diff --git a/cmd/fleet/examples/headless/task/test_negative.py b/cmd/fleet/examples/headless/task/test_negative.py
+new file mode 100644
+--- /dev/null
++++ b/cmd/fleet/examples/headless/task/test_negative.py
+@@ -0,0 +1,5 @@
++import unittest
++
++class DeliberateFailure(unittest.TestCase):
++    def test_negative_control(self):
++        self.fail("intentional cloud negative control")

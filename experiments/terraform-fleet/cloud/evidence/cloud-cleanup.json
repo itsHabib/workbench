@@ -1,0 +1,76 @@
+{
+  "at": 1789449155.0340889,
+  "project": "rooms-lab-20260914",
+  "zone": "us-east1-b",
+  "instances": {
+    "argv": [
+      "gcloud",
+      "compute",
+      "instances",
+      "list",
+      "--project=rooms-lab-20260914",
+      "--filter=name=tf-fleet-rooms-0915",
+      "--format=json(name,id,status,creationTimestamp,machineType,scheduling,serviceAccounts)"
+    ],
+    "exit": 0,
+    "stdout": "[]\n",
+    "stderr": "WARNING: The following filter keys were not present in any resource : name\n"
+  },
+  "disks": {
+    "argv": [
+      "gcloud",
+      "compute",
+      "disks",
+      "list",
+      "--project=rooms-lab-20260914",
+      "--filter=name=tf-fleet-rooms-0915",
+      "--format=json(name,id,sizeGb,status)"
+    ],
+    "exit": 0,
+    "stdout": "[]\n",
+    "stderr": "WARNING: The following filter keys were not present in any resource : name\n"
+  },
+  "networks": {
+    "argv": [
+      "gcloud",
+      "compute",
+      "networks",
+      "list",
+      "--project=rooms-lab-20260914",
+      "--filter=name=tf-fleet-rooms-0915",
+      "--format=json(name,id)"
+    ],
+    "exit": 0,
+    "stdout": "[]\n",
+    "stderr": ""
+  },
+  "subnets": {
+    "argv": [
+      "gcloud",
+      "compute",
+      "networks",
+      "subnets",
+      "list",
+      "--project=rooms-lab-20260914",
+      "--filter=name=tf-fleet-rooms-0915",
+      "--format=json(name,id)"
+    ],
+    "exit": 0,
+    "stdout": "[]\n",
+    "stderr": ""
+  },
+  "firewalls": {
+    "argv": [
+      "gcloud",
+      "compute",
+      "firewall-rules",
+      "list",
+      "--project=rooms-lab-20260914",
+      "--filter=name=tf-fleet-rooms-0915-ssh",
+      "--format=json(name,id,sourceRanges)"
+    ],
+    "exit": 0,
+    "stdout": "[]\n",
+    "stderr": ""
+  }
+}

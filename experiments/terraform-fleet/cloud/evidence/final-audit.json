@@ -1,0 +1,136 @@
+{
+  "status": "pass",
+  "head": "ef0c1c8478b80a51207db3cef2f40bb064b1cd04",
+  "patch_sha256": "397936b9021ae8dc0f705b664da3dc339cb477464982727424b4b9d768e5b6b3",
+  "checks": {
+    "new_result": true,
+    "verifier_same_head": true,
+    "patch_matches_result": true,
+    "preserved_input.json": true,
+    "preserved_test_report.py": true,
+    "preserved_INPUT.md": true,
+    "assignment_retained": true,
+    "implementation_receipt": true,
+    "verify_receipt": true,
+    "independent_sessions": true,
+    "observed_draft_continuity": true,
+    "terminal_b6db035ebadaee2d6e76ef86ee4fca64ac43513e4b6b0df307f63a1c3b091625-4309-1789448589860819000": true,
+    "terminal_b6db035ebadaee2d6e76ef86ee4fca64ac43513e4b6b0df307f63a1c3b091625-4309-1789448135803749000": true,
+    "implementation_provider_observed": true,
+    "terminal_b82bccbe3fc5011c9956d982853d41fe44bf78603ef3520eb7704590a9ae1f9f-4309-1789447762415430000": true,
+    "verify_provider_observed": true,
+    "terminal_dbd042e2c8493053a1d66375624ac67f0518e4c1a071608f03121644327d07f8-4309-1789448266680158000": true,
+    "terminal_b82bccbe3fc5011c9956d982853d41fe44bf78603ef3520eb7704590a9ae1f9f-4309-1789447895817082000": true,
+    "terminal_b6db035ebadaee2d6e76ef86ee4fca64ac43513e4b6b0df307f63a1c3b091625-4309-1789447731597770000": true,
+    "terminal_b6db035ebadaee2d6e76ef86ee4fca64ac43513e4b6b0df307f63a1c3b091625-4309-1789447849535581000": true,
+    "fresh_supervisor": true,
+    "no_observed_reference_reads": true,
+    "rooms_receipt": true,
+    "rooms_identical_patch": true,
+    "rooms_succeeded": true,
+    "rooms_collected": true,
+    "rooms_adapter_unchanged": true
+  },
+  "receipts": {
+    "implementation": {
+      "at": 1789448110.517309,
+      "card": null,
+      "cwd": "/Users/mh/dev/.codex-investigations/fleet-terraform-gcp-v2/workbench-author-1",
+      "dirty": false,
+      "head": "ef0c1c8478b80a51207db3cef2f40bb064b1cd04",
+      "kind": "implementation",
+      "lane": {
+        "cadence": null,
+        "kind": "author",
+        "produces": null,
+        "requires": [],
+        "watch": false
+      },
+      "observable": "Clean task/readout head; 10 Python unittest cases pass, including supplied acceptance, full pre-write validation, status-label preservation, idempotent output, and conflict refusal; frozen report.json generated from input.json.",
+      "repo": "workbench-9981bafd",
+      "role": "author:workbench",
+      "session": "01a0a365-f265-7e62-a7da-7bf51bc32edd",
+      "sha": "ef0c1c8478b80a51207db3cef2f40bb064b1cd04",
+      "slot": "workbench-author-1",
+      "verdict": "pass",
+      "worktree": "/Users/mh/dev/.codex-investigations/fleet-terraform-gcp-v2/workbench-author-1"
+    },
+    "verify": {
+      "at": 1789448492.195679,
+      "card": null,
+      "cwd": "/Users/mh/dev/.codex-investigations/fleet-terraform-gcp-v2/workbench-verifier",
+      "dirty": false,
+      "head": "ef0c1c8478b80a51207db3cef2f40bb064b1cd04",
+      "kind": "verify",
+      "lane": {
+        "cadence": null,
+        "kind": "verifier",
+        "produces": null,
+        "requires": [],
+        "watch": false
+      },
+      "observable": "Detached clean head; frozen patch SHA-256 397936b9021ae8dc0f705b664da3dc339cb477464982727424b4b9d768e5b6b3 was byte-identical to base-to-head diff; supplied unittest 10/10 passed; independent static comparison covered 3 PRs, 3 exact heads, 18 checks; SUCCESS/SKIPPED/NEUTRAL/IN_PROGRESS/UNKNOWN and empty rollup semantics passed; identical retry preserved bytes+mtime; conflict returned 1 preserving bytes+mtime.",
+      "repo": "verifier-admin.git-64fdc3a9",
+      "role": "verifier:headless",
+      "session": "01a0a36d-a55e-7981-b3c7-8293538f1403",
+      "sha": "ef0c1c8478b80a51207db3cef2f40bb064b1cd04",
+      "slot": null,
+      "verdict": "pass",
+      "worktree": "/Users/mh/dev/.codex-investigations/fleet-terraform-gcp-v2/workbench-verifier"
+    }
+  },
+  "rooms": {
+    "receipt": {
+      "at": 1789448551.671042,
+      "card": null,
+      "cwd": "/Users/mh/dev/.codex-investigations/fleet-terraform-gcp-v2/workbench-verifier",
+      "dirty": false,
+      "head": "ef0c1c8478b80a51207db3cef2f40bb064b1cd04",
+      "kind": "rooms",
+      "lane": {
+        "cadence": null,
+        "kind": "verifier",
+        "produces": null,
+        "requires": [],
+        "watch": false
+      },
+      "observable": "Single cold Rooms run exited 0; out/result.json status=succeeded exit_code=0; Room unittest 10/10 passed; returned result.patch SHA-256 397936b9021ae8dc0f705b664da3dc339cb477464982727424b4b9d768e5b6b3 equals supplied patch; lifecycle contains collection_done and cleanup_done.",
+      "repo": "verifier-admin.git-64fdc3a9",
+      "role": "verifier:headless",
+      "session": "01a0a36d-a55e-7981-b3c7-8293538f1403",
+      "sha": "ef0c1c8478b80a51207db3cef2f40bb064b1cd04",
+      "slot": null,
+      "verdict": "pass",
+      "worktree": "/Users/mh/dev/.codex-investigations/fleet-terraform-gcp-v2/workbench-verifier"
+    },
+    "summary": {
+      "cli_exit": 0,
+      "elapsed_seconds": 10.138909164999859,
+      "returned_patch_sha256": "397936b9021ae8dc0f705b664da3dc339cb477464982727424b4b9d768e5b6b3",
+      "input_patch_sha256": "397936b9021ae8dc0f705b664da3dc339cb477464982727424b4b9d768e5b6b3",
+      "scope": "command, collection and cleanup must be read separately from result.json and lifecycle.ndjson",
+      "command_status": "succeeded",
+      "command_exit": 0
+    },
+    "events": [
+      "slot_allocated",
+      "toolstore_attached",
+      "vmm_started",
+      "guest_ready",
+      "ssh_ready",
+      "workload_started",
+      "workload_exited",
+      "collection_started",
+      "collection_done",
+      "cleanup_done"
+    ]
+  },
+  "supervisor_sessions": [
+    "01a0a372-9294-7e80-bea7-b409185939a8",
+    "01a0a36b-a64c-7b02-b77c-0867b14b51ee",
+    "01a0a365-7b72-7d71-b632-ab6f6cc77d21",
+    "01a0a367-4808-7980-bebd-10fcdfed8574"
+  ],
+  "observed_reference_reads": [],
+  "scope": "artifact audit only; no worker code is executed; test and semantic judgment belong to the independent verifier; no merge or isolation authority"
+}

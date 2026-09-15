@@ -1,0 +1,136 @@
+{
+  "status": "fail",
+  "head": "6af29c7b4dfa054bfb9c61e2da7e278a57055887",
+  "patch_sha256": "d4ea44902a78edadd5fa2e11ebd09f4e025e78e6e8eee02791c2ec5cdab0968f",
+  "checks": {
+    "new_result": true,
+    "verifier_same_head": true,
+    "patch_matches_result": true,
+    "preserved_input.json": true,
+    "preserved_test_report.py": true,
+    "preserved_INPUT.md": true,
+    "assignment_retained": true,
+    "implementation_receipt": true,
+    "verify_receipt": true,
+    "independent_sessions": true,
+    "observed_draft_continuity": true,
+    "implementation_provider_observed": true,
+    "terminal_4eab703f42d43446f200fdddfe7037558bc57330cbf0952d2256f07d756af422-88412-1789446932450510000": true,
+    "terminal_1f82e89c5bda4518acf594e346d0c49d25b1795327b555f7113fe4330ab8b865-88412-1789447492765492000": true,
+    "terminal_1f82e89c5bda4518acf594e346d0c49d25b1795327b555f7113fe4330ab8b865-88412-1789446865905203000": true,
+    "terminal_4eab703f42d43446f200fdddfe7037558bc57330cbf0952d2256f07d756af422-88412-1789446766032449000": true,
+    "terminal_1f82e89c5bda4518acf594e346d0c49d25b1795327b555f7113fe4330ab8b865-88412-1789447114036450000": true,
+    "terminal_1f82e89c5bda4518acf594e346d0c49d25b1795327b555f7113fe4330ab8b865-88412-1789446736157561000": true,
+    "verify_provider_observed": true,
+    "terminal_28d1e2c6ae442b5b68ccad0c55dfeba56013db7d794f5fdc8a71fc35dd38f063-88412-1789447223614369000": true,
+    "fresh_supervisor": true,
+    "no_observed_reference_reads": true,
+    "rooms_receipt": true,
+    "rooms_identical_patch": true,
+    "rooms_succeeded": true,
+    "rooms_collected": true,
+    "rooms_adapter_unchanged": false
+  },
+  "receipts": {
+    "implementation": {
+      "at": 1789447088.9032772,
+      "card": null,
+      "cwd": "/Users/mh/dev/.codex-investigations/fleet-terraform-gcp/workbench-author-1",
+      "dirty": false,
+      "head": "6af29c7b4dfa054bfb9c61e2da7e278a57055887",
+      "kind": "implementation",
+      "lane": {
+        "cadence": null,
+        "kind": "author",
+        "produces": null,
+        "requires": [],
+        "watch": false
+      },
+      "observable": "Clean task/readout head; supplied Python unittest suite passed 8/8. Frozen report independently matches 3 PR heads and 18 check labels/outcomes; SKIPPED remains distinct and empty checks map aggregate to unknown.",
+      "repo": "workbench-2f785d69",
+      "role": "author:workbench",
+      "session": "01a0a356-c032-7f52-baf4-b8ba3167f4a6",
+      "sha": "6af29c7b4dfa054bfb9c61e2da7e278a57055887",
+      "slot": "workbench-author-1",
+      "verdict": "pass",
+      "worktree": "/Users/mh/dev/.codex-investigations/fleet-terraform-gcp/workbench-author-1"
+    },
+    "verify": {
+      "at": 1789447399.8973958,
+      "card": null,
+      "cwd": "/Users/mh/dev/.codex-investigations/fleet-terraform-gcp/workbench-verifier",
+      "dirty": false,
+      "head": "6af29c7b4dfa054bfb9c61e2da7e278a57055887",
+      "kind": "verify",
+      "lane": {
+        "cadence": null,
+        "kind": "verifier",
+        "produces": null,
+        "requires": [],
+        "watch": false
+      },
+      "observable": "Exact detached clean head; BASE..HEAD diff byte-identical to worker.patch sha256 d4ea44902a78edadd5fa2e11ebd09f4e025e78e6e8eee02791c2ec5cdab0968f; supplied unittest 8/8 passed; frozen report literal-compared across 3 PRs, exact heads and all 18 checks; independent probes preserved SUCCESS/SKIPPED/NEUTRAL/IN_PROGRESS/UNKNOWN/PENDING and null for empty checks; identical retry and conflicting-output preservation passed. Frozen local observations only; no claim of current GitHub status or merge authority.",
+      "repo": "verifier-admin.git-46695203",
+      "role": "verifier:headless",
+      "session": "01a0a35d-b9a6-72c0-a23d-24bd337ad49e",
+      "sha": "6af29c7b4dfa054bfb9c61e2da7e278a57055887",
+      "slot": null,
+      "verdict": "pass",
+      "worktree": "/Users/mh/dev/.codex-investigations/fleet-terraform-gcp/workbench-verifier"
+    }
+  },
+  "rooms": {
+    "receipt": {
+      "at": 1789447456.811837,
+      "card": null,
+      "cwd": "/Users/mh/dev/.codex-investigations/fleet-terraform-gcp/workbench-verifier",
+      "dirty": false,
+      "head": "6af29c7b4dfa054bfb9c61e2da7e278a57055887",
+      "kind": "rooms",
+      "lane": {
+        "cadence": null,
+        "kind": "verifier",
+        "produces": null,
+        "requires": [],
+        "watch": false
+      },
+      "observable": "Single cold Rooms run exited 0; out/result.json status=succeeded exit_code=0; room unittest 8/8 passed; returned result.patch sha256 d4ea44902a78edadd5fa2e11ebd09f4e025e78e6e8eee02791c2ec5cdab0968f equals supplied patch; lifecycle.ndjson records collection_done seq 9 and cleanup_done seq 10. Rooms demonstrates patch-and-tests execution only, not agent runtime location.",
+      "repo": "verifier-admin.git-46695203",
+      "role": "verifier:headless",
+      "session": "01a0a35d-b9a6-72c0-a23d-24bd337ad49e",
+      "sha": "6af29c7b4dfa054bfb9c61e2da7e278a57055887",
+      "slot": null,
+      "verdict": "pass",
+      "worktree": "/Users/mh/dev/.codex-investigations/fleet-terraform-gcp/workbench-verifier"
+    },
+    "summary": {
+      "cli_exit": 0,
+      "elapsed_seconds": 10.23987365000005,
+      "returned_patch_sha256": "d4ea44902a78edadd5fa2e11ebd09f4e025e78e6e8eee02791c2ec5cdab0968f",
+      "input_patch_sha256": "d4ea44902a78edadd5fa2e11ebd09f4e025e78e6e8eee02791c2ec5cdab0968f",
+      "scope": "command, collection and cleanup must be read separately from result.json and lifecycle.ndjson",
+      "command_status": "succeeded",
+      "command_exit": 0
+    },
+    "events": [
+      "slot_allocated",
+      "toolstore_attached",
+      "vmm_started",
+      "guest_ready",
+      "ssh_ready",
+      "workload_started",
+      "workload_exited",
+      "collection_started",
+      "collection_done",
+      "cleanup_done"
+    ]
+  },
+  "supervisor_sessions": [
+    "01a0a361-d648-7fe2-a38a-768f35cb79a1",
+    "01a0a358-459a-7911-87f3-5088de24ca3a",
+    "01a0a35c-0ef7-7ae1-9cf6-e56470e66152",
+    "01a0a356-4b62-7201-9398-2fd730c02228"
+  ],
+  "observed_reference_reads": [],
+  "scope": "artifact audit only; no worker code is executed; test and semantic judgment belong to the independent verifier; no merge or isolation authority"
+}

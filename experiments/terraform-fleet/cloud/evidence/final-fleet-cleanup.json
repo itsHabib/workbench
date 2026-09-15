@@ -1,0 +1,68 @@
+{
+  "at": 1789448805.329494,
+  "commands": [
+    {
+      "args": [
+        "stop",
+        "address:supervisor:headless",
+        "bounded local run ended"
+      ],
+      "exit": 0,
+      "stdout": "stop flag set on address:cdef96cd9e01d2960e414b63ac58501732555d4f86fccc3d07340fb44af5e7eb\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "watch",
+        "cancel",
+        "supervisor:headless"
+      ],
+      "exit": 1,
+      "stdout": "",
+      "stderr": "no running attempt for supervisor:headless\n"
+    },
+    {
+      "args": [
+        "stop",
+        "address:workbench-author-1",
+        "bounded local run ended"
+      ],
+      "exit": 0,
+      "stdout": "stop flag set on address:cac79cefa7cd79982bafc8c20bb5d4bc2750cb7e45c00d66be9797b4d2d7de50\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "watch",
+        "cancel",
+        "workbench-author-1"
+      ],
+      "exit": 1,
+      "stdout": "",
+      "stderr": "no running attempt for workbench-author-1\n"
+    },
+    {
+      "args": [
+        "stop",
+        "address:verifier:headless",
+        "bounded local run ended"
+      ],
+      "exit": 0,
+      "stdout": "stop flag set on address:e2eebd9c80948c839622d4d50ed5a61bdfff5798fee1e4db9d5d6705c24c67d8\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "watch",
+        "cancel",
+        "verifier:headless"
+      ],
+      "exit": 1,
+      "stdout": "",
+      "stderr": "no running attempt for verifier:headless\n"
+    }
+  ],
+  "bridge_exits_collected": true,
+  "provider_terminal": true,
+  "descendant_quiescence": "not proven"
+}
