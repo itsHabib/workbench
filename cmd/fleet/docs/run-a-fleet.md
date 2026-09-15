@@ -68,6 +68,8 @@ An idle tick with nothing new to record does not need another copy of the same c
 `fleet handoff` writes and replaces a checkpoint; it has no `--show` or `--list` read flag.
 Unknown options and surplus arguments are refused before replacing the checkpoint. Use
 `fleet inspect <address>` to read it. Put `--` before literal text beginning with `-`.
+For a full role checkpoint, read `role_handoff_record`; `role_handoff` is only
+the short startup/display excerpt. Inspect reports damaged records explicitly.
 Read the context injected at SessionStart or inspect the JSON under `$FLEET_STATE/handoff/`
 (worker branches) and `$FLEET_STATE/role-handoff/` (leads).
 
