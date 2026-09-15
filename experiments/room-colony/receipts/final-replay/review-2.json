@@ -1,0 +1,66 @@
+{
+  "baseline_distance": 13640,
+  "candidate_distance": 4290,
+  "cases": [
+    {
+      "baseline": 0,
+      "candidate": 0,
+      "points": 0
+    },
+    {
+      "baseline": 0,
+      "candidate": 0,
+      "points": 1
+    },
+    {
+      "baseline": 12,
+      "candidate": 12,
+      "points": 3
+    },
+    {
+      "baseline": 1544,
+      "candidate": 456,
+      "points": 22
+    },
+    {
+      "baseline": 1470,
+      "candidate": 530,
+      "points": 23
+    },
+    {
+      "baseline": 1594,
+      "candidate": 474,
+      "points": 24
+    },
+    {
+      "baseline": 1700,
+      "candidate": 560,
+      "points": 25
+    },
+    {
+      "baseline": 1850,
+      "candidate": 526,
+      "points": 26
+    },
+    {
+      "baseline": 1660,
+      "candidate": 574,
+      "points": 27
+    },
+    {
+      "baseline": 1934,
+      "candidate": 570,
+      "points": 28
+    },
+    {
+      "baseline": 1876,
+      "candidate": 588,
+      "points": 29
+    }
+  ],
+  "qualified": true,
+  "ratio": 0.31451612903225806,
+  "sha256": "485c8b04d074cbe7825abeede6a9587f248e971b0389029ac62b034b719311d5",
+  "split": "development",
+  "valid": true
+}

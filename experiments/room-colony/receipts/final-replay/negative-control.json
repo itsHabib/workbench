@@ -1,0 +1,13 @@
+{
+  "cases": [
+    {
+      "baseline": 0,
+      "candidate": 0,
+      "points": 0
+    }
+  ],
+  "error": "route must visit every index exactly once",
+  "sha256": "88c8b22af9b49b8ac3d9242ca7cce0ab22c31caffd44141da592d03ce7bf87e5",
+  "split": "development",
+  "valid": false
+}
