@@ -1,0 +1,24 @@
+# Deliberately wrong, to show the checker's errors (see invalid.errors.txt).
+
+keep command shout {
+  stdin  notes.path
+  argv   "tr" "a-z" "A-Z"
+  stdout "notes.upper.txt"
+}
+
+keep file notes {
+  path "../notes.txt"
+  txt  "the quick brown fox\n"
+}
+
+run command count {
+  stdin  "notes.upper.txt"
+  argv   "wc" "-w"
+  stdout "notes.upper.txt"
+}
+
+run command ghost {
+  stdin  shoot.stdout
+  argv   "cat"
+  stdout "ghost.txt"
+}

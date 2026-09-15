@@ -1,0 +1,63 @@
+{
+  "workflow": "textpipe",
+  "params": {
+    "text": "the quick brown fox\njumps over the lazy dog\n"
+  },
+  "nodes": [
+    {
+      "address": "file.input",
+      "kind": "file",
+      "class": "resource",
+      "owns": "input.txt",
+      "spec": {
+        "path": "input.txt",
+        "content": "the quick brown fox\njumps over the lazy dog\n"
+      }
+    },
+    {
+      "address": "transform.upper",
+      "kind": "transform",
+      "class": "task",
+      "owns": "upper.txt",
+      "deps": [
+        "file.input"
+      ],
+      "spec": {
+        "command": [
+          "tr",
+          "[:lower:]",
+          "[:upper:]"
+        ],
+        "stdin": {
+          "$ref": "file.input",
+          "path": "input.txt"
+        },
+        "output": {
+          "path": "upper.txt"
+        }
+      }
+    },
+    {
+      "address": "transform.wordcount",
+      "kind": "transform",
+      "class": "task",
+      "owns": "wordcount.txt",
+      "deps": [
+        "file.input"
+      ],
+      "spec": {
+        "command": [
+          "awk",
+          "{ n += NF } END { print n + 0 }"
+        ],
+        "stdin": {
+          "$ref": "file.input",
+          "path": "input.txt"
+        },
+        "output": {
+          "path": "wordcount.txt"
+        }
+      }
+    }
+  ]
+}

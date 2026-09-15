@@ -1,0 +1,10 @@
+Plan for textpipe (intent sha256:542429d22db9, evidence through #10)
+
+  =   file.input           unchanged   input.txt
+  =   transform.upper      up to date  upper.txt (run #8)
+  >   transform.wordcount  run         wordcount.txt
+        why: input file.input changed since run #5 (sha256:1448d86390be -> sha256:25a134e873f3)
+        why: latest attempt: run #10 failed: transform.wordcount: injected failure (WB_FAULT)
+
+Plan: 1 to change (1 run), 2 unchanged.
+Saved plan to plans/5.json

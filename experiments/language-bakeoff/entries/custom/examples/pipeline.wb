@@ -1,0 +1,24 @@
+# The common workload: one input artifact and two transformations of it.
+#
+#   keep  a persistent resource wb converges on every apply and owns
+#   run   one-shot work wb replays only when its inputs change
+#
+# A reference such as notes.path is a dependency edge: wb settles notes
+# first, and a change to notes makes the work that reads it stale.
+
+keep file notes {
+  path "notes.txt"
+  text "the quick brown fox jumps over the lazy dog\n"
+}
+
+run command shout {
+  stdin  notes.path
+  argv   "tr" "a-z" "A-Z"
+  stdout "notes.upper.txt"
+}
+
+run command count {
+  stdin  notes.path
+  argv   "awk" "{ words += NF } END { print words }"
+  stdout "notes.count.txt"
+}

@@ -1,0 +1,293 @@
+
+## 1. Initial plan and apply in a freshly created directory
+
+# source -> normalized intent: references resolved, dependency order, ownership
+$ wb check pipeline.wb
+pipeline.wb: ok, 1 kept resource(s), 2 piece(s) of work
+$ wb intent pipeline.wb
+{
+  "source": "pipeline.wb",
+  "decls": [
+    {
+      "id": "notes",
+      "lifecycle": "keep",
+      "kind": "file",
+      "line": 9,
+      "attrs": {
+        "path": ["notes.txt"],
+        "text": ["the quick brown fox jumps over the lazy dog\n"]
+      },
+      "owns": ["notes.txt"]
+    },
+    {
+      "id": "shout",
+      "lifecycle": "run",
+      "kind": "command",
+      "line": 14,
+      "attrs": {
+        "argv": ["tr", "a-z", "A-Z"],
+        "stdin": ["notes.txt"],
+        "stdout": ["notes.upper.txt"]
+      },
+      "refs": {
+        "stdin": "notes.path"
+      },
+      "owns": ["notes.upper.txt"],
+      "needs": ["notes"]
+    },
+    {
+      "id": "count",
+      "lifecycle": "run",
+      "kind": "command",
+      "line": 20,
+      "attrs": {
+        "argv": ["awk", "{ words += NF } END { print words }"],
+        "stdin": ["notes.txt"],
+        "stdout": ["notes.count.txt"]
+      },
+      "refs": {
+        "stdin": "notes.path"
+      },
+      "owns": ["notes.count.txt"],
+      "needs": ["notes"]
+    }
+  ]
+}
+# keep = a resource wb converges; run = work wb replays only when stale
+$ wb plan -dir ws -out plan.json pipeline.wb
+plan for pipeline.wb:
+  + keep file    notes  create notes.txt (44 bytes)
+  > run  command shout  run, writes notes.upper.txt
+                        * it never completed
+  > run  command count  run, writes notes.count.txt
+                        * it never completed
+plan: 1 to create, 2 to run, 0 unchanged
+saved plan to plan.json
+$ wb apply -dir ws -plan plan.json
+apply:
+  notes  created  notes.txt  (journal #1)
+  shout  ran      notes.upper.txt 72316559b351  (journal #2-#3)
+  count  ran      notes.count.txt 2e6d31a5983a  (journal #4-#5)
+applied: 1 created, 2 ran
+$ cat ws/notes.upper.txt ws/notes.count.txt
+THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG
+9
+
+## 2. Unchanged re-apply
+
+# nothing is rewritten and no command runs: every receipt still matches
+$ wb apply -dir ws pipeline.wb
+plan for pipeline.wb:
+  = keep file    notes  notes.txt matches (44 bytes)
+  = run  command shout  current, keeps notes.upper.txt
+                        * definition, inputs and output match receipt #3
+  = run  command count  current, keeps notes.count.txt
+                        * definition, inputs and output match receipt #5
+plan: no changes: 3 unchanged
+apply:
+  notes  unchanged
+  shout  skipped    definition, inputs and output match receipt #3
+  count  skipped    definition, inputs and output match receipt #5
+applied: 1 unchanged, 2 skipped
+
+## 3. Input change and the resulting downstream plan
+
+$ sed "s/brown fox/red fox/" pipeline.wb > next.wb && mv next.wb pipeline.wb
+$ wb plan -dir ws -out plan.json pipeline.wb
+plan for pipeline.wb:
+  ~ keep file    notes  update notes.txt (44 -> 42 bytes)
+                        * the source changed since wb wrote notes.txt at #1
+                        | -the quick brown fox jumps over the lazy dog
+                        | +the quick red fox jumps over the lazy dog
+  > run  command shout  run, writes notes.upper.txt
+                        * input notes changed (1153a4080f1f -> 1154f8e2b17b)
+  > run  command count  run, writes notes.count.txt
+                        * input notes changed (1153a4080f1f -> 1154f8e2b17b)
+plan: 1 to update, 2 to run, 0 unchanged
+saved plan to plan.json
+$ wb apply -dir ws -plan plan.json
+apply:
+  notes  updated  notes.txt  (journal #6)
+  shout  ran      notes.upper.txt e12a9e55c82e  (journal #7-#8)
+  count  ran      notes.count.txt 2e6d31a5983a  (journal #9-#10)
+applied: 1 updated, 2 ran
+
+## 4. External modification between plan and apply
+
+$ sed "s/red fox/grey fox/" pipeline.wb > next.wb && mv next.wb pipeline.wb
+$ wb plan -dir ws -out plan.json pipeline.wb
+plan for pipeline.wb:
+  ~ keep file    notes  update notes.txt (42 -> 43 bytes)
+                        * the source changed since wb wrote notes.txt at #6
+                        | -the quick red fox jumps over the lazy dog
+                        | +the quick grey fox jumps over the lazy dog
+  > run  command shout  run, writes notes.upper.txt
+                        * input notes changed (1154f8e2b17b -> 19349088cdd3)
+  > run  command count  run, writes notes.count.txt
+                        * input notes changed (1154f8e2b17b -> 19349088cdd3)
+plan: 1 to update, 2 to run, 0 unchanged
+saved plan to plan.json
+$ echo "edited by hand" > ws/notes.txt
+# the saved plan was reviewed against different facts, so apply refuses it
+$ wb apply -dir ws -plan plan.json
+wb: refused: the plan is stale, so nothing was changed:
+  notes: notes.txt was 1154f8e2b17b at plan time, now df97460881f2
+run wb plan again to review the workspace as it is now
+(exit 3)
+$ cat ws/notes.txt
+edited by hand
+# re-planning shows the hand edit and that applying overwrites it
+$ wb plan -dir ws -out plan.json pipeline.wb
+plan for pipeline.wb:
+  ~ keep file    notes  update notes.txt (15 -> 43 bytes)
+                        * notes.txt changed outside wb after #6; applying overwrites that edit
+                        | -edited by hand
+                        | +the quick grey fox jumps over the lazy dog
+  > run  command shout  run, writes notes.upper.txt
+                        * input notes changed (1154f8e2b17b -> 19349088cdd3)
+  > run  command count  run, writes notes.count.txt
+                        * input notes changed (1154f8e2b17b -> 19349088cdd3)
+plan: 1 to update, 2 to run, 0 unchanged
+saved plan to plan.json
+$ wb apply -dir ws -plan plan.json
+apply:
+  notes  updated  notes.txt  (journal #11)
+  shout  ran      notes.upper.txt 74266cf41453  (journal #12-#13)
+  count  ran      notes.count.txt 2e6d31a5983a  (journal #14-#15)
+applied: 1 updated, 2 ran
+
+## 5. Injected partial failure, then retry
+
+# shim/awk fails; shout (tr) is unaffected, count (awk) fails
+$ sed "s/grey fox/black cat/" pipeline.wb > next.wb && mv next.wb pipeline.wb
+$ PATH="$PWD/shim:$PATH" wb apply -dir ws pipeline.wb
+plan for pipeline.wb:
+  ~ keep file    notes  update notes.txt (43 -> 44 bytes)
+                        * the source changed since wb wrote notes.txt at #11
+                        | -the quick grey fox jumps over the lazy dog
+                        | +the quick black cat jumps over the lazy dog
+  > run  command shout  run, writes notes.upper.txt
+                        * input notes changed (19349088cdd3 -> a31958a250b6)
+  > run  command count  run, writes notes.count.txt
+                        * input notes changed (19349088cdd3 -> a31958a250b6)
+plan: 1 to update, 2 to run, 0 unchanged
+apply:
+  notes  updated  notes.txt  (journal #16)
+  shout  ran      notes.upper.txt 413263b78ec4  (journal #17-#18)
+  count  failed   awk: exit status 1: awk: injected failure  (journal #19-#20)
+applied: 1 updated, 1 ran, 1 failed
+wb: apply stopped: count: awk: exit status 1: awk: injected failure
+completed effects stay and are recorded in .wb/journal.jsonl; run wb apply again to retry (completed work is skipped)
+(exit 1)
+# retry with the real awk: completed work is skipped, failed work reruns
+$ wb apply -dir ws pipeline.wb
+plan for pipeline.wb:
+  = keep file    notes  notes.txt matches (44 bytes)
+  = run  command shout  current, keeps notes.upper.txt
+                        * definition, inputs and output match receipt #18
+  > run  command count  run, writes notes.count.txt
+                        * input notes changed (19349088cdd3 -> a31958a250b6)
+                        * attempt #19 failed: awk: exit status 1: awk: injected failure
+plan: 1 to run, 2 unchanged
+apply:
+  notes  unchanged
+  shout  skipped    definition, inputs and output match receipt #18
+  count  ran        notes.count.txt 2e6d31a5983a  (journal #21-#22)
+applied: 1 unchanged, 1 skipped, 1 ran
+
+## 6. A third adapter: keep dir, a disposable scratch directory
+
+# the extension is adapters/dir/dir.go plus one registry entry in cmd/wb/main.go
+# internal/lang and internal/plan are unchanged; the new kind is simply registered:
+$ wb kinds
+run command
+  attributes: argv (list, required), stdin (path), cwd (path), stdout (owned path, required)
+  exports: stdout
+keep dir
+  attributes: path (owned path, required)
+  exports: path
+keep file
+  attributes: path (owned path, required), text (text, required)
+  exports: path
+$ cat examples/scratch.wb >> pipeline.wb
+$ wb plan -dir ws -out plan.json pipeline.wb
+plan for pipeline.wb:
+  = keep file    notes    notes.txt matches (44 bytes)
+  = run  command shout    current, keeps notes.upper.txt
+                          * definition, inputs and output match receipt #18
+  = run  command count    current, keeps notes.count.txt
+                          * definition, inputs and output match receipt #22
+  + keep dir     scratch  create directory scratch/
+  > run  command words    run, writes words.txt
+                          * it never completed
+plan: 1 to create, 1 to run, 3 unchanged
+saved plan to plan.json
+$ wb apply -dir ws -plan plan.json
+apply:
+  notes    unchanged
+  shout    skipped    definition, inputs and output match receipt #18
+  count    skipped    definition, inputs and output match receipt #22
+  scratch  created    scratch  (journal #23)
+  words    ran        words.txt 53e84d28a3a3  (journal #24-#25)
+applied: 1 unchanged, 2 skipped, 1 created, 1 ran
+$ cat ws/words.txt
+black
+cat
+dog
+jumps
+lazy
+over
+quick
+the
+# disposable: delete it and wb recreates it without redoing the work that used it
+$ rm -r ws/scratch
+$ wb apply -dir ws pipeline.wb
+plan for pipeline.wb:
+  = keep file    notes    notes.txt matches (44 bytes)
+  = run  command shout    current, keeps notes.upper.txt
+                          * definition, inputs and output match receipt #18
+  = run  command count    current, keeps notes.count.txt
+                          * definition, inputs and output match receipt #22
+  + keep dir     scratch  create directory scratch/
+                          * scratch was removed outside wb after #23
+  = run  command words    current, keeps words.txt
+                          * definition, inputs and output match receipt #25
+plan: 1 to create, 4 unchanged
+apply:
+  notes    unchanged
+  shout    skipped    definition, inputs and output match receipt #18
+  count    skipped    definition, inputs and output match receipt #22
+  scratch  created    scratch  (journal #26)
+  words    skipped    definition, inputs and output match receipt #25
+applied: 1 unchanged, 3 skipped, 1 created
+
+## Retained evidence
+
+# the journal is what a fresh caller reads to recover; planning never writes it
+$ wb evidence -dir ws
+#1   converge notes    create notes.txt -> 1153a4080f1f
+#2   start    shout    inputs notes=1153a4080f1f
+#3   finish   shout    attempt #2 -> notes.upper.txt 72316559b351
+#4   start    count    inputs notes=1153a4080f1f
+#5   finish   count    attempt #4 -> notes.count.txt 2e6d31a5983a
+#6   converge notes    update notes.txt -> 1154f8e2b17b
+#7   start    shout    inputs notes=1154f8e2b17b
+#8   finish   shout    attempt #7 -> notes.upper.txt e12a9e55c82e
+#9   start    count    inputs notes=1154f8e2b17b
+#10  finish   count    attempt #9 -> notes.count.txt 2e6d31a5983a
+#11  converge notes    update notes.txt -> 19349088cdd3
+#12  start    shout    inputs notes=19349088cdd3
+#13  finish   shout    attempt #12 -> notes.upper.txt 74266cf41453
+#14  start    count    inputs notes=19349088cdd3
+#15  finish   count    attempt #14 -> notes.count.txt 2e6d31a5983a
+#16  converge notes    update notes.txt -> a31958a250b6
+#17  start    shout    inputs notes=a31958a250b6
+#18  finish   shout    attempt #17 -> notes.upper.txt 413263b78ec4
+#19  start    count    inputs notes=a31958a250b6
+#20  fail     count    attempt #19: awk: exit status 1: awk: injected failure
+#21  start    count    inputs notes=a31958a250b6
+#22  finish   count    attempt #21 -> notes.count.txt 2e6d31a5983a
+#23  converge scratch  create scratch -> dir
+#24  start    words    inputs notes=a31958a250b6 scratch=dir
+#25  finish   words    attempt #24 -> words.txt 53e84d28a3a3
+#26  converge scratch  create scratch -> dir

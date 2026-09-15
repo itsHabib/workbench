@@ -1,0 +1,10 @@
+plan for pipeline.wb:
+  ~ keep file    notes  update notes.txt (44 -> 42 bytes)
+                        * the source changed since wb wrote notes.txt at #1
+                        | -the quick brown fox jumps over the lazy dog
+                        | +the quick red fox jumps over the lazy dog
+  > run  command shout  run, writes notes.upper.txt
+                        * input notes changed (1153a4080f1f -> 1154f8e2b17b)
+  > run  command count  run, writes notes.count.txt
+                        * input notes changed (1153a4080f1f -> 1154f8e2b17b)
+plan: 1 to update, 2 to run, 0 unchanged

@@ -1,0 +1,114 @@
+{
+  "version": 2,
+  "intent": {
+    "workflow": "textpipe",
+    "params": {
+      "text": "the quick brown fox\njumps over the lazy dog\n"
+    },
+    "nodes": [
+      {
+        "address": "file.input",
+        "kind": "file",
+        "class": "resource",
+        "owns": "input.txt",
+        "spec": {
+          "path": "input.txt",
+          "content": "the quick brown fox\njumps over the lazy dog\n"
+        }
+      },
+      {
+        "address": "transform.upper",
+        "kind": "transform",
+        "class": "task",
+        "owns": "upper.txt",
+        "deps": [
+          "file.input"
+        ],
+        "spec": {
+          "command": [
+            "tr",
+            "[:lower:]",
+            "[:upper:]"
+          ],
+          "stdin": {
+            "$ref": "file.input",
+            "path": "input.txt"
+          },
+          "output": {
+            "path": "upper.txt"
+          }
+        }
+      },
+      {
+        "address": "transform.wordcount",
+        "kind": "transform",
+        "class": "task",
+        "owns": "wordcount.txt",
+        "deps": [
+          "file.input"
+        ],
+        "spec": {
+          "command": [
+            "awk",
+            "{ n += NF } END { print n + 0 }"
+          ],
+          "stdin": {
+            "$ref": "file.input",
+            "path": "input.txt"
+          },
+          "output": {
+            "path": "wordcount.txt"
+          }
+        }
+      }
+    ]
+  },
+  "intent_digest": "sha256:a341b95910c8a1bb42b8e7324674c0c66d2fb8c9878dce6576d3056d9dbb7c58",
+  "evidence_head": 0,
+  "steps": [
+    {
+      "address": "file.input",
+      "class": "resource",
+      "op": "create",
+      "owns": "input.txt",
+      "before": {
+        "exists": false
+      },
+      "after": {
+        "exists": true,
+        "digest": "sha256:1448d86390bea26d7d5e9f85e35b7b51fe2eb215ad7eed2f0ea87712bffbb57f",
+        "text": "the quick brown fox\njumps over the lazy dog\n"
+      }
+    },
+    {
+      "address": "transform.upper",
+      "class": "task",
+      "op": "run",
+      "owns": "upper.txt",
+      "before": {
+        "exists": false
+      },
+      "reasons": [
+        "never run"
+      ],
+      "inputs": {
+        "file.input": "sha256:1448d86390bea26d7d5e9f85e35b7b51fe2eb215ad7eed2f0ea87712bffbb57f"
+      }
+    },
+    {
+      "address": "transform.wordcount",
+      "class": "task",
+      "op": "run",
+      "owns": "wordcount.txt",
+      "before": {
+        "exists": false
+      },
+      "reasons": [
+        "never run"
+      ],
+      "inputs": {
+        "file.input": "sha256:1448d86390bea26d7d5e9f85e35b7b51fe2eb215ad7eed2f0ea87712bffbb57f"
+      }
+    }
+  ]
+}

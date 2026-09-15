@@ -1,0 +1,7 @@
+plan for pipeline.wb:
+  + keep file    notes  create notes.txt (44 bytes)
+  > run  command shout  run, writes notes.upper.txt
+                        * it never completed
+  > run  command count  run, writes notes.count.txt
+                        * it never completed
+plan: 1 to create, 2 to run, 0 unchanged

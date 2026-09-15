@@ -1,0 +1,3 @@
+Refusing to apply: the plan is stale. The workspace changed after it was planned:
+  file.input: input.txt was sha256:1448d86390be when planned, is now sha256:df97460881f2
+No effects were performed. Run plan again to review the current changes.

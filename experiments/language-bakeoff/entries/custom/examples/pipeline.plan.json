@@ -1,0 +1,103 @@
+{
+  "format": 1,
+  "source": "pipeline.wb",
+  "text": "# The common workload: one input artifact and two transformations of it.\n#\n#   keep  a persistent resource wb converges on every apply and owns\n#   run   one-shot work wb replays only when its inputs change\n#\n# A reference such as notes.path is a dependency edge: wb settles notes\n# first, and a change to notes makes the work that reads it stale.\n\nkeep file notes {\n  path \"notes.txt\"\n  text \"the quick brown fox jumps over the lazy dog\\n\"\n}\n\nrun command shout {\n  stdin  notes.path\n  argv   \"tr\" \"a-z\" \"A-Z\"\n  stdout \"notes.upper.txt\"\n}\n\nrun command count {\n  stdin  notes.path\n  argv   \"awk\" \"{ words += NF } END { print words }\"\n  stdout \"notes.count.txt\"\n}\n",
+  "decls": [
+    {
+      "id": "notes",
+      "lifecycle": "keep",
+      "kind": "file",
+      "line": 9,
+      "attrs": {
+        "path": ["notes.txt"],
+        "text": ["the quick brown fox jumps over the lazy dog\n"]
+      },
+      "owns": ["notes.txt"]
+    },
+    {
+      "id": "shout",
+      "lifecycle": "run",
+      "kind": "command",
+      "line": 14,
+      "attrs": {
+        "argv": ["tr", "a-z", "A-Z"],
+        "stdin": ["notes.txt"],
+        "stdout": ["notes.upper.txt"]
+      },
+      "refs": {
+        "stdin": "notes.path"
+      },
+      "owns": ["notes.upper.txt"],
+      "needs": ["notes"]
+    },
+    {
+      "id": "count",
+      "lifecycle": "run",
+      "kind": "command",
+      "line": 20,
+      "attrs": {
+        "argv": ["awk", "{ words += NF } END { print words }"],
+        "stdin": ["notes.txt"],
+        "stdout": ["notes.count.txt"]
+      },
+      "refs": {
+        "stdin": "notes.path"
+      },
+      "owns": ["notes.count.txt"],
+      "needs": ["notes"]
+    }
+  ],
+  "changes": [
+    {
+      "id": "notes",
+      "lifecycle": "keep",
+      "kind": "file",
+      "action": "create",
+      "summary": "create notes.txt (44 bytes)",
+      "version": "sha256:1153a4080f1fcb04425aa0b841c2b14606fe6df25d9076d2a1face2d5af57129"
+    },
+    {
+      "id": "shout",
+      "lifecycle": "run",
+      "kind": "command",
+      "action": "run",
+      "summary": "run, writes notes.upper.txt",
+      "reasons": ["it never completed"]
+    },
+    {
+      "id": "count",
+      "lifecycle": "run",
+      "kind": "command",
+      "action": "run",
+      "summary": "run, writes notes.count.txt",
+      "reasons": ["it never completed"]
+    }
+  ],
+  "checks": [
+    {
+      "id": "notes",
+      "subject": "notes.txt",
+      "value": "absent"
+    },
+    {
+      "id": "shout",
+      "subject": "notes.upper.txt",
+      "value": "absent"
+    },
+    {
+      "id": "shout",
+      "subject": ".wb/journal.jsonl",
+      "value": "none"
+    },
+    {
+      "id": "count",
+      "subject": "notes.count.txt",
+      "value": "absent"
+    },
+    {
+      "id": "count",
+      "subject": ".wb/journal.jsonl",
+      "value": "none"
+    }
+  ]
+}

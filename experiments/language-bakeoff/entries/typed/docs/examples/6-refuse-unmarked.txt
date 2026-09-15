@@ -1,0 +1,1 @@
+error: scratchdir.work: work exists without the .wb-scratchdir ownership marker and is not empty; refusing to adopt or delete it (move it away or choose another path)

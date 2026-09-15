@@ -1,0 +1,14 @@
+Plan for scratchpipe (intent sha256:4ac27927a5da, evidence through #8)
+
+  =   file.input           unchanged   input.txt
+  =   transform.upper      up to date  upper.txt (run #3)
+  =   transform.wordcount  up to date  wordcount.txt (run #5)
+  -/+ scratchdir.work      replace     work
+        generation 1 -> generation 2
+        (deletes everything inside work/)
+  >   transform.report     run         work/report.txt
+        why: dependency scratchdir.work will be replaced
+        why: input scratchdir.work changed since run #8 (sha256:6b86b273ff34 -> sha256:d4735e3a265e)
+
+Plan: 2 to change (1 replace, 1 run), 3 unchanged.
+Saved plan to plans/6b.json

@@ -1,0 +1,12 @@
+Plan for textpipe (intent sha256:a341b95910c8, evidence through #0)
+
+  +   file.input           create      input.txt
+        + the quick brown fox
+        + jumps over the lazy dog
+  >   transform.upper      run         upper.txt
+        why: never run
+  >   transform.wordcount  run         wordcount.txt
+        why: never run
+
+Plan: 3 to change (1 create, 2 run), 0 unchanged.
+Saved plan to plans/1.json

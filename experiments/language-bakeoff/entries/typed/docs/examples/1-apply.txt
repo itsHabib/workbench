@@ -1,0 +1,6 @@
+Apply:
+  +   file.input           created     input.txt is now sha256:1448d86390be (evidence #1)
+  >   transform.upper      ran         upper.txt is now sha256:77db2b619977 (evidence #3)
+  >   transform.wordcount  ran         wordcount.txt is now sha256:2e6d31a5983a (evidence #5)
+Apply complete: 3 done.
+Observed after apply: converged; a new plan proposes no changes.

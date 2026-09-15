@@ -1,0 +1,20 @@
+Plan for textpipe (intent sha256:542429d22db9, evidence through #5)
+
+  ~   file.input           update      input.txt
+        - the quick brown fox
+        - jumps over the lazy dog
+        + retry me please
+        + now
+  >   transform.upper      run         upper.txt
+        why: input file.input changed since run #3 (sha256:1448d86390be -> sha256:25a134e873f3)
+  >   transform.wordcount  run         wordcount.txt
+        why: input file.input changed since run #5 (sha256:1448d86390be -> sha256:25a134e873f3)
+
+Plan: 3 to change (1 update, 2 run), 0 unchanged.
+
+Apply:
+  ~   file.input           updated     input.txt is now sha256:25a134e873f3 (evidence #6)
+  >   transform.upper      ran         upper.txt is now sha256:c1053a7a7e59 (evidence #8)
+  >   transform.wordcount  FAILED      transform.wordcount: injected failure (WB_FAULT) (evidence #10)
+Apply incomplete: 2 done, 1 failed, 0 skipped. Completed effects are kept; nothing was rolled back.
+Observed after apply: 1 still pending (transform.wordcount). Plan again to review; apply again to retry.

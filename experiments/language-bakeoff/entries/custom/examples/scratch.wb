@@ -1,0 +1,16 @@
+# Case 6: a third, materially different kind, added without touching the
+# parser or planner. "dir" is a disposable scratch directory: wb makes sure
+# it exists and never manages or deletes what is inside. The words command
+# runs inside it (its temporary file lands there); scratch.path is the
+# reference that orders the two.
+
+keep dir scratch {
+  path "scratch"
+}
+
+run command words {
+  cwd    scratch.path
+  stdin  notes.path
+  argv   "sh" "-c" "tr ' ' '\n' > all.tmp && LC_ALL=C sort -u all.tmp"
+  stdout "words.txt"
+}

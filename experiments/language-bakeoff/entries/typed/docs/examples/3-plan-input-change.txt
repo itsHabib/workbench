@@ -1,0 +1,13 @@
+Plan for textpipe (intent sha256:3ae27ab52377, evidence through #5)
+
+  ~   file.input           update      input.txt
+          the quick brown fox
+          jumps over the lazy dog
+        + then naps
+  >   transform.upper      run         upper.txt
+        why: input file.input changed since run #3 (sha256:1448d86390be -> sha256:0c38f6731729)
+  >   transform.wordcount  run         wordcount.txt
+        why: input file.input changed since run #5 (sha256:1448d86390be -> sha256:0c38f6731729)
+
+Plan: 3 to change (1 update, 2 run), 0 unchanged.
+Saved plan to plans/3.json

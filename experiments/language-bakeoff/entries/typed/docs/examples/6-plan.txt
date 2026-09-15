@@ -1,0 +1,17 @@
+Plan for scratchpipe (intent sha256:5884e7ee302a, evidence through #0)
+
+  +   file.input           create      input.txt
+        + the quick brown fox
+        + jumps over the lazy dog
+  >   transform.upper      run         upper.txt
+        why: never run
+  >   transform.wordcount  run         wordcount.txt
+        why: never run
+  +   scratchdir.work      create      work
+        + generation 1
+  >   transform.report     run         work/report.txt
+        why: dependency transform.upper runs first; its output is known only after apply
+        why: never run
+
+Plan: 5 to change (2 create, 3 run), 0 unchanged.
+Saved plan to plans/6.json

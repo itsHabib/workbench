@@ -1,0 +1,11 @@
+Plan for textpipe (intent sha256:a341b95910c8, evidence through #5)
+
+  =   file.input           unchanged   input.txt
+  =   transform.upper      up to date  upper.txt (run #3)
+  =   transform.wordcount  up to date  wordcount.txt (run #5)
+
+No changes. All 3 nodes match the intent.
+
+Apply:
+  nothing to do
+Observed after apply: converged; a new plan proposes no changes.

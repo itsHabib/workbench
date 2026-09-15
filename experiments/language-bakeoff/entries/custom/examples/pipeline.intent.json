@@ -1,0 +1,48 @@
+{
+  "source": "pipeline.wb",
+  "decls": [
+    {
+      "id": "notes",
+      "lifecycle": "keep",
+      "kind": "file",
+      "line": 9,
+      "attrs": {
+        "path": ["notes.txt"],
+        "text": ["the quick brown fox jumps over the lazy dog\n"]
+      },
+      "owns": ["notes.txt"]
+    },
+    {
+      "id": "shout",
+      "lifecycle": "run",
+      "kind": "command",
+      "line": 14,
+      "attrs": {
+        "argv": ["tr", "a-z", "A-Z"],
+        "stdin": ["notes.txt"],
+        "stdout": ["notes.upper.txt"]
+      },
+      "refs": {
+        "stdin": "notes.path"
+      },
+      "owns": ["notes.upper.txt"],
+      "needs": ["notes"]
+    },
+    {
+      "id": "count",
+      "lifecycle": "run",
+      "kind": "command",
+      "line": 20,
+      "attrs": {
+        "argv": ["awk", "{ words += NF } END { print words }"],
+        "stdin": ["notes.txt"],
+        "stdout": ["notes.count.txt"]
+      },
+      "refs": {
+        "stdin": "notes.path"
+      },
+      "owns": ["notes.count.txt"],
+      "needs": ["notes"]
+    }
+  ]
+}

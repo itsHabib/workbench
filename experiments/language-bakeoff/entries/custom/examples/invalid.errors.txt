@@ -1,0 +1,8 @@
+invalid.wb:3:1: command is one-shot work that wb replays when stale: write "run command shout"
+invalid.wb:9:11: file notes is missing required attribute text
+invalid.wb:10:8: path "../notes.txt" must stay inside the workspace: relative, without ..
+invalid.wb:11:3: file has no attribute "txt" (attributes: path, text)
+invalid.wb:15:10: "notes.upper.txt" belongs to shout; reference shout.stdout instead so wb settles shout first and tracks it as an input
+invalid.wb:17:10: count claims "notes.upper.txt", which overlaps "notes.upper.txt" owned by shout (line 6)
+invalid.wb:21:10: ghost refers to shoot.stdout, but nothing is named shoot
+wb: invalid.wb: 7 error(s)

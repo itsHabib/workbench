@@ -1,0 +1,10 @@
+Plan for textpipe (intent sha256:a341b95910c8, evidence through #2)
+
+  =   file.input           unchanged   input.txt
+  >   transform.upper      run         upper.txt
+        why: no successful run yet; run #2 started but never recorded a result (interrupted)
+  >   transform.wordcount  run         wordcount.txt
+        why: never run
+
+Plan: 2 to change (2 run), 1 unchanged.
+Saved plan to plans/after-crash.json

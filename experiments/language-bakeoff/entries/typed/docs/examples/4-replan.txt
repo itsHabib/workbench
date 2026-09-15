@@ -1,0 +1,12 @@
+Plan for textpipe (intent sha256:cd1dde6a0e93, evidence through #5)
+
+  ~   file.input           update      input.txt
+        - edited by hand
+        + hello typed workbench
+  >   transform.upper      run         upper.txt
+        why: input file.input changed since run #3 (sha256:1448d86390be -> sha256:2ba2d42da51c)
+  >   transform.wordcount  run         wordcount.txt
+        why: input file.input changed since run #5 (sha256:1448d86390be -> sha256:2ba2d42da51c)
+
+Plan: 3 to change (1 update, 2 run), 0 unchanged.
+Saved plan to plans/4b.json
