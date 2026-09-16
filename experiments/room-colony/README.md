@@ -1,6 +1,6 @@
 # Room colony: improve a program, lose its author, finish the work
 
-**[Results and lessons](RESULTS.md)** · [Run receipts](receipts/)
+**[Results and lessons](RESULTS.md)** · [Host-loss recovery + Passage](HOST-RECOVERY.md) · [Run receipts](receipts/)
 
 Two workers live in separate Firecracker Rooms. The author asks a model for a
 better delivery-route planner. The verifier compiles and tests it, returning a
@@ -31,7 +31,8 @@ lab plan/apply: observe processes and completion; start missing workers
 
 The verifier is deterministic software in another VM, **not a second LLM
 reviewer**. The author is a fixed two-round loop around real model calls, not a
-general coding assistant. Neither requires desktop task tools. The host relay
+general coding assistant. Neither requires desktop task tools. This first Mac-hosted mode is described below;
+[host.py](host.py) adds a Linux-owned replay and host-power-loss experiment. The host relay
 does not select, score, or promote candidates. Inference still depends on the
 Mac; this is not an independently operating cloud fleet.
 

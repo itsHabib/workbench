@@ -1,0 +1,20 @@
+{
+  "binary_sha256": "e2ab2a0398048209d18b1eecf3a6a54f15f84181eddb23134aa61f9ad54c3984",
+  "changed_source": {
+    "name": "Room colony qualification and recovery",
+    "phase": "complete",
+    "problems": [
+      "reopen verification: accepted inputs changed"
+    ],
+    "ready": false,
+    "revision": 4
+  },
+  "complete": {
+    "name": "Room colony qualification and recovery",
+    "phase": "complete",
+    "problems": [],
+    "ready": true,
+    "revision": 4
+  },
+  "judgment": "deterministic adapter over retained evidence; no merge or deployment"
+}

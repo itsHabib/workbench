@@ -1,0 +1,16 @@
+{
+  "boot": "65fce4a0-98fa-4d25-96e0-b7acf55ab532",
+  "broker_alive": true,
+  "candidate_one_sha256": "d8e3f0ce4f6ebac89f3a5f11432c5647559f1ae7c9b4118ceaf79693dea28f83",
+  "plan": [
+    {
+      "action": "start",
+      "attempt": 2,
+      "role": "author"
+    },
+    {
+      "action": "keep",
+      "role": "verifier"
+    }
+  ]
+}

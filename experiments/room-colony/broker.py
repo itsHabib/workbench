@@ -12,6 +12,14 @@ import threading
 from workload import digest
 
 
+def sync_directory(path):
+    directory = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
 def write(path, value):
     tmp = path.with_suffix(".tmp")
     with tmp.open("w") as stream:
@@ -19,6 +27,7 @@ def write(path, value):
         stream.flush()
         os.fsync(stream.fileno())
     os.replace(tmp, path)
+    sync_directory(path.parent)
 
 
 class Store:

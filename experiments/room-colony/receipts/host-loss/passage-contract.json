@@ -1,0 +1,30 @@
+{
+  "name": "Room colony qualification and recovery",
+  "phases": [
+    {
+      "brief": "Accept the exact generated source on held-out maps.",
+      "git": false,
+      "inputs": [
+        "candidate.py",
+        "qualification.json"
+      ],
+      "name": "verification",
+      "requires": [
+        "qualified"
+      ]
+    },
+    {
+      "brief": "Accept completion after loss of the Linux host kernel.",
+      "git": false,
+      "inputs": [
+        "candidate.py",
+        "qualification.json",
+        "host-audit.json"
+      ],
+      "name": "recovery",
+      "requires": [
+        "host-recovered"
+      ]
+    }
+  ]
+}

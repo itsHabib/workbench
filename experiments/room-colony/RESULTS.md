@@ -4,6 +4,9 @@
 author process.** The first live trial completed with two real model calls,
 three distinct guest boots, and valid routes on all 27 qualification cases.
 
+**Follow-up:** [Linux host-loss recovery and actual Passage handoffs](HOST-RECOVERY.md).
+The measurements below describe the original Mac-hosted model trial.
+
 ## Measured result
 
 | Measurement | Live trial |
@@ -74,7 +77,12 @@ inference and the mailbox. The verifier is deterministic code, not another model
 Generated code is cooperative and shares the verifier guest's trust boundary;
 this is not hostile-code isolation or independent cryptographic attestation.
 
-## Next experiment
+## Follow-up progression
+
+The [host recovery follow-up](HOST-RECOVERY.md) moves the broker/state to Linux,
+force-stops that host VM, resumes from its retained disk and feeds actual results
+into Passage. It uses saved model proposals; fresh remote inference and native
+Fleet integration remain unbuilt.
 
 Replace the specimen's transport and process observation with Fleet mail and its
 provider lifecycle. Move broker/state to the Linux host, interrupt that host, and
