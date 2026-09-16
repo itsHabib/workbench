@@ -1,0 +1,10 @@
+[
+  {
+    "action": "keep",
+    "role": "author"
+  },
+  {
+    "action": "keep",
+    "role": "verifier"
+  }
+]

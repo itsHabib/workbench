@@ -1,0 +1,10 @@
+[
+  {
+    "action": "complete",
+    "role": "author"
+  },
+  {
+    "action": "complete",
+    "role": "verifier"
+  }
+]

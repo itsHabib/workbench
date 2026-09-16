@@ -1,0 +1,233 @@
+{
+  "attempts": [
+    {
+      "attempt": "author-1",
+      "events": [
+        "slot_allocated",
+        "toolstore_attached",
+        "vmm_started",
+        "guest_ready",
+        "ssh_ready",
+        "workload_started",
+        "workload_exited",
+        "collection_started",
+        "collection_done",
+        "cleanup_done"
+      ],
+      "terminal": {
+        "collection_exit": 0,
+        "elapsed_seconds": 69.20984337502159,
+        "exit": 137
+      }
+    },
+    {
+      "attempt": "author-2",
+      "events": [
+        "slot_allocated",
+        "toolstore_attached",
+        "vmm_started",
+        "guest_ready",
+        "ssh_ready",
+        "workload_started",
+        "workload_exited",
+        "collection_started",
+        "collection_done",
+        "cleanup_done"
+      ],
+      "terminal": {
+        "collection_exit": 0,
+        "elapsed_seconds": 116.25747170799877,
+        "exit": 0
+      }
+    },
+    {
+      "attempt": "verifier-1",
+      "events": [
+        "slot_allocated",
+        "toolstore_attached",
+        "vmm_started",
+        "guest_ready",
+        "ssh_ready",
+        "workload_started",
+        "workload_exited",
+        "collection_started",
+        "collection_done",
+        "cleanup_done"
+      ],
+      "terminal": {
+        "collection_exit": 0,
+        "elapsed_seconds": 195.87562304199673,
+        "exit": 0
+      }
+    }
+  ],
+  "checks": {
+    "author_killed": true,
+    "author_replaced": true,
+    "collected_and_cleaned": true,
+    "distinct_guest_boots": true,
+    "interruption_recorded": true,
+    "negative_control_rejected": true,
+    "promoted_improvement": true,
+    "qualification_bound": true,
+    "qualification_receipt_valid": true,
+    "roles_complete": true,
+    "source_digest_valid": true,
+    "two_model_calls": true,
+    "two_model_requests": true
+  },
+  "current_source_matches": false,
+  "guest_boot_ids": [
+    "3b80c163-fbb1-49e9-a0f0-3305955f7715",
+    "9aee4678-48db-486f-9a56-16c8a6c9022d",
+    "a1df0ba1-5820-4a6d-8135-4e4962711e5e"
+  ],
+  "passed": true,
+  "qualification": {
+    "baseline_distance": 38390,
+    "candidate_distance": 12384,
+    "cases": [
+      {
+        "baseline": 0,
+        "candidate": 0,
+        "points": 0
+      },
+      {
+        "baseline": 0,
+        "candidate": 0,
+        "points": 1
+      },
+      {
+        "baseline": 12,
+        "candidate": 12,
+        "points": 3
+      },
+      {
+        "baseline": 2210,
+        "candidate": 596,
+        "points": 29
+      },
+      {
+        "baseline": 2032,
+        "candidate": 522,
+        "points": 30
+      },
+      {
+        "baseline": 2128,
+        "candidate": 548,
+        "points": 31
+      },
+      {
+        "baseline": 2254,
+        "candidate": 632,
+        "points": 32
+      },
+      {
+        "baseline": 2142,
+        "candidate": 586,
+        "points": 33
+      },
+      {
+        "baseline": 2156,
+        "candidate": 676,
+        "points": 34
+      },
+      {
+        "baseline": 2732,
+        "candidate": 670,
+        "points": 35
+      },
+      {
+        "baseline": 1022,
+        "candidate": 478,
+        "points": 12
+      },
+      {
+        "baseline": 1040,
+        "candidate": 442,
+        "points": 13
+      },
+      {
+        "baseline": 1080,
+        "candidate": 374,
+        "points": 14
+      },
+      {
+        "baseline": 928,
+        "candidate": 456,
+        "points": 15
+      },
+      {
+        "baseline": 1000,
+        "candidate": 356,
+        "points": 16
+      },
+      {
+        "baseline": 1140,
+        "candidate": 462,
+        "points": 17
+      },
+      {
+        "baseline": 1222,
+        "candidate": 524,
+        "points": 18
+      },
+      {
+        "baseline": 1240,
+        "candidate": 494,
+        "points": 19
+      },
+      {
+        "baseline": 1076,
+        "candidate": 468,
+        "points": 20
+      },
+      {
+        "baseline": 1046,
+        "candidate": 464,
+        "points": 21
+      },
+      {
+        "baseline": 1578,
+        "candidate": 482,
+        "points": 22
+      },
+      {
+        "baseline": 1532,
+        "candidate": 496,
+        "points": 23
+      },
+      {
+        "baseline": 1728,
+        "candidate": 556,
+        "points": 24
+      },
+      {
+        "baseline": 1654,
+        "candidate": 530,
+        "points": 25
+      },
+      {
+        "baseline": 1846,
+        "candidate": 552,
+        "points": 26
+      },
+      {
+        "baseline": 1514,
+        "candidate": 474,
+        "points": 27
+      },
+      {
+        "baseline": 2078,
+        "candidate": 534,
+        "points": 28
+      }
+    ],
+    "qualified": true,
+    "ratio": 0.32258400625162803,
+    "sha256": "d8e3f0ce4f6ebac89f3a5f11432c5647559f1ae7c9b4118ceaf79693dea28f83",
+    "split": "heldout",
+    "valid": true
+  },
+  "run_source_sha256": "cee6a5e5bc4d33ecd4b8c2e25cea3072938c1504b99946c463405080b9192eb7"
+}

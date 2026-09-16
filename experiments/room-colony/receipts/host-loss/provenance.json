@@ -1,0 +1,8 @@
+{
+  "host_harness_sha256": "568bb1cbad0ceb73712b99d7d5edbb563c782b1a7eb5a93e748cb70d7e81896a",
+  "passage_revision": "dc7124c8b574c5e3b9f1ad4948e34b3ce36f1821",
+  "input_proposals": "receipts/live/candidate-1.py and candidate-2.py from prior model run",
+  "failure": "limactl stop --force rooms-host; Linux host VM driver SIGKILL",
+  "recovery": "same persistent Linux disk; explicit apply after network restoration",
+  "new_model_calls": 0
+}

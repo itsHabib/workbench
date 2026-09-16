@@ -1,0 +1,6 @@
+{
+  "source_sha256": "cee6a5e5bc4d33ecd4b8c2e25cea3072938c1504b99946c463405080b9192eb7",
+  "model": "gpt-6-astra via authenticated Codex CLI",
+  "generation": "two actual model calls",
+  "note": "Live trial before four review fixes; final code is separately replayed in fresh Rooms."
+}
