@@ -18,6 +18,7 @@ for the work you have, not setup prerequisites.
 | Understand one task from assignment to evidence | Follow the example below |
 | Install on a fresh machine | [Install Fleet](install.md), then [run a fleet](run-a-fleet.md) |
 | Use agents already open on your desktop | Follow the desktop path in [run a fleet](run-a-fleet.md) |
+| Run a lead and many builders as desktop sessions, without the Fleet binary | [Desktop fleet](desktop-fleet.md), three levels of structure |
 | Start agents from assignments or mail | Configure the Go watcher in [headless](headless.md) |
 | Investigate leases, delivery and formal models | [Runtime and model reference](fleet-reference.md), a dated source snapshot |
 | Check what has actually been exercised | [Provider validation](provider-runtime-validation.md) and [e2e](e2e.md) |

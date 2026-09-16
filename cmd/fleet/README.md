@@ -392,6 +392,8 @@ fixtures are not proof of actual live Claude/Codex delivery or stop behavior.
 - [docs/OVERVIEW.md](docs/OVERVIEW.md): brief overview and historical rehearsal evidence.
 - [docs/ONBOARDING.md](docs/ONBOARDING.md): setup choices and a working routine over one repository.
 - [docs/MINIMUM.md](docs/MINIMUM.md): the five habits and two files that carry most of the value with none of the machinery.
+- [docs/desktop-fleet.md](docs/desktop-fleet.md): run a lead, sub-leads and many builders as plain desktop
+  sessions in Codex or Claude Desktop, no Fleet binary; three levels of structure to grow into.
 - [docs/run-a-fleet.md](docs/run-a-fleet.md): stand up leads and seats over any repository, act as a
   lead, worker or verifier, read the fleet.
 - [docs/e2e.md](docs/e2e.md): prove a build end to end with real sessions in a sandbox of your
