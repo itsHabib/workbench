@@ -1,0 +1,98 @@
+{
+  "observed_at": "2026-09-14T00:44:01.725618+00:00",
+  "pull_requests": [
+    {
+      "number": 334,
+      "head": "d9ca988176bd47beb6afc33a70b31092b4302e0e",
+      "checks": [
+        {
+          "name": "check",
+          "outcome": "SUCCESS"
+        },
+        {
+          "name": "seats (macos-latest)",
+          "outcome": "SUCCESS"
+        },
+        {
+          "name": "seats (windows-latest)",
+          "outcome": "SUCCESS"
+        },
+        {
+          "name": "fuzz",
+          "outcome": "SUCCESS"
+        },
+        {
+          "name": "hygiene",
+          "outcome": "SUCCESS"
+        },
+        {
+          "name": "gate/authorized",
+          "outcome": "SUCCESS"
+        }
+      ],
+      "all_checks_successful": true
+    },
+    {
+      "number": 337,
+      "head": "6aa2c9430f221e3895b16da4683c199e6e76f284",
+      "checks": [
+        {
+          "name": "claude",
+          "outcome": "SKIPPED"
+        },
+        {
+          "name": "check",
+          "outcome": "SUCCESS"
+        },
+        {
+          "name": "seats (macos-latest)",
+          "outcome": "SUCCESS"
+        },
+        {
+          "name": "signal",
+          "outcome": "SUCCESS"
+        },
+        {
+          "name": "seats (windows-latest)",
+          "outcome": "SUCCESS"
+        },
+        {
+          "name": "fuzz",
+          "outcome": "SUCCESS"
+        },
+        {
+          "name": "hygiene",
+          "outcome": "SUCCESS"
+        }
+      ],
+      "all_checks_successful": false
+    },
+    {
+      "number": 340,
+      "head": "b8e99094eee6587a7f2e511cd22db30b7a0ab56b",
+      "checks": [
+        {
+          "name": "check",
+          "outcome": "SUCCESS"
+        },
+        {
+          "name": "seats (macos-latest)",
+          "outcome": "SUCCESS"
+        },
+        {
+          "name": "seats (windows-latest)",
+          "outcome": "SUCCESS"
+        },
+        {
+          "name": "fuzz",
+          "outcome": "SUCCESS"
+        },
+        {
+          "name": "hygiene",
+          "outcome": "SUCCESS"
+        }
+      ],
+      "all_checks_successful": true
+    }
+  ]
+}
