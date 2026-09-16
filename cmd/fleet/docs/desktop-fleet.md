@@ -1,6 +1,6 @@
 # Running a fleet of coding agents
 
-One lead session, a few sub-leads, and up to 25 (or many more) builder sessions running in parallel from one desktop. Works in Codex or Claude Desktop.
+One lead session, a few sub-leads, and a lot more builder sessions running in parallel from one desktop. Works in Codex or Claude Desktop.
 
 Three levels, each one a step up from the last. Start at level 1 and move up when the level you are on stops keeping up. Names, group layout, file paths, and cadences throughout are examples. Use whatever fits how you already work, as long as every session knows who it reports to.
 
