@@ -59,6 +59,8 @@ func newRig(t *testing.T) *rig {
   work) if [ -e "$FAKE/work-fail" ]; then echo "fleet: state unavailable" >&2; exit 1; fi; cat "$FAKE/work.json" ;;
   receipts) if [ -e "$FAKE/receipts.json" ]; then cat "$FAKE/receipts.json"; else echo '[]'; fi ;;
   mail) echo '[{"id":"q1","kind":"question","from":"ivy-author-1","subject":"which unit?"}]' ;;
+  status|watch) if [ -e "$FAKE/runtime.json" ]; then cat "$FAKE/runtime.json"; else echo '{"watcher":"running","configuration_error":"no deliver.json; no headless providers configured","workers":[]}'; fi ;;
+  done) if [ -e "$FAKE/done.json" ]; then cat "$FAKE/done.json"; exit "$(cat "$FAKE/done.code")"; fi; echo '{"ok":false,"sha":"abcdef","missing":["draft"]}'; exit 1 ;;
   decisions) cat "$FAKE/decisions.txt" ;;
   dispatch) printf '%s|%s\n' "$PWD" "$*" >> "$FAKE/calls.log"; if [ -e "$FAKE/dispatch-fail" ]; then echo "fleet dispatch: seat occupied" >&2; exit 1; fi; echo ok ;;
   pool) printf '%s|%s\n' "$PWD" "$*" >> "$FAKE/calls.log"; mkdir -p "$(dirname "$2")/$(basename "$2")-$3-1"; echo ok ;;

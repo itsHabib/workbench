@@ -38,6 +38,10 @@ const (
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	return runInput(args, os.Stdin, stdout, stderr)
+}
+
+func runInput(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return codeUsage
@@ -48,7 +52,26 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return codeError
 	}
 	verb, rest := args[0], args[1:]
+	if verb == "mcp" {
+		if len(rest) != 0 {
+			fmt.Fprintln(stderr, "standup mcp: no arguments; configure cwd and environment at launch")
+			return codeUsage
+		}
+		return serveMCP(stdin, stdout, stderr)
+	}
+	if mutates(verb) {
+		release, err := lockStore(env)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		defer release()
+	}
+
 	switch verb {
+	case "draft":
+		return cmdDraft(env, rest, stdin, stdout, stderr)
+	case "prepare", "status":
+		return cmdInspect(env, verb, rest, stdout, stderr)
 	case "agenda":
 		return cmdAgenda(env, rest, stdout, stderr)
 	case "new":
@@ -70,7 +93,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 const usage = `usage: standup <verb> [flags]
   agenda [--json]                        derive today's agenda from records, write and digest it
   new --agenda <id> [--from <record>]    scaffold a record pinned to that agenda; --from carries a stale draft over
-  show <id|path>                         the readback
+  show <id|path> [--json]                the readback and current plan_digest
+  draft <id|path> --expect <digest> --file <path|->
+                                         replace editable fields; clear confirmation after changes
+  prepare <id|path>                      check live plan before confirmation; JSON, no writes
+  status <id|path>                       read plan ledger, Fleet runtime and receipt evidence as JSON
+  mcp                                   serve the same operations over local stdio MCP
   confirm <id|path> --phrase "<words>" [--by <who>] [--surface text|voice]
   apply <id|path> [--dry-run] [--force-stale]
 exit: 0 ok · 1 refused · 2 usage · 4 error
@@ -125,6 +153,7 @@ func cmdAgenda(env standup.Env, args []string, stdout, stderr io.Writer) int {
 func cmdNew(env standup.Env, args []string, stdout, stderr io.Writer) int {
 	fs := flags("new", stderr)
 	id := fs.String("agenda", "", "agenda id the record is made against")
+	asJSON := fs.Bool("json", false, "return the record and readback")
 	out := fs.String("out", "", "record path (default $STANDUP_DIR/records/<agenda id>.json)")
 	from := fs.String("from", "", "carry roles, cards, decisions, deferrals and next over from this record (id or path)")
 	if fs.Parse(args) != nil {
@@ -162,18 +191,26 @@ func cmdNew(env standup.Env, args []string, stdout, stderr io.Writer) int {
 	if err := r.Save(path); err != nil {
 		return fail(stderr, err)
 	}
+	if *asJSON {
+		return printView(stdout, stderr, path, r)
+	}
 	fmt.Fprintln(stdout, path)
 	return codeOK
 }
 
 func cmdShow(env standup.Env, args []string, stdout, stderr io.Writer) int {
-	if len(args) != 1 {
-		fmt.Fprintln(stderr, "standup show: one record id or path")
+	fs := flags("show", stderr)
+	asJSON := fs.Bool("json", false, "include record and plan digest")
+	if fs.Parse(positionalFirst(args)) != nil || fs.NArg() != 1 {
 		return codeUsage
 	}
-	r, err := standup.LoadRecord(env.ResolveRecord(args[0]))
+	path := env.ResolveRecord(fs.Arg(0))
+	r, err := standup.LoadRecord(path)
 	if err != nil {
 		return fail(stderr, err)
+	}
+	if *asJSON {
+		return printView(stdout, stderr, path, r)
 	}
 	fmt.Fprint(stdout, r.Readback())
 	return codeOK
@@ -182,6 +219,7 @@ func cmdShow(env standup.Env, args []string, stdout, stderr io.Writer) int {
 func cmdConfirm(env standup.Env, args []string, stdout, stderr io.Writer) int {
 	fs := flags("confirm", stderr)
 	phrase := fs.String("phrase", "", "the words the operator said")
+	expected := fs.String("expect", "", "plan digest from readback")
 	by := fs.String("by", "", "who said them (default human:<tenant>)")
 	surface := fs.String("surface", "text", "text or voice")
 	if err := fs.Parse(positionalFirst(args)); err != nil || fs.NArg() != 1 {
@@ -197,6 +235,9 @@ func cmdConfirm(env standup.Env, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
+	if err := expectDigest(r, *expected); err != nil {
+		return fail(stderr, err)
+	}
 	if err := standup.ConfirmRecord(env, cfg, r, *phrase, *by, *surface); err != nil {
 		return fail(stderr, err)
 	}
@@ -210,6 +251,7 @@ func cmdConfirm(env standup.Env, args []string, stdout, stderr io.Writer) int {
 func cmdApply(env standup.Env, args []string, stdout, stderr io.Writer) int {
 	fs := flags("apply", stderr)
 	dryRun := fs.Bool("dry-run", false, "plan and print the steps; write nothing")
+	expected := fs.String("expect", "", "plan digest from readback")
 	forceStale := fs.Bool("force-stale", false, "apply even though the world moved since the agenda")
 	if err := fs.Parse(positionalFirst(args)); err != nil || fs.NArg() != 1 {
 		fmt.Fprintln(stderr, "standup apply: <id|path> [--dry-run] [--force-stale]")
@@ -222,6 +264,9 @@ func cmdApply(env standup.Env, args []string, stdout, stderr io.Writer) int {
 	path := env.ResolveRecord(fs.Arg(0))
 	r, err := standup.LoadRecord(path)
 	if err != nil {
+		return fail(stderr, err)
+	}
+	if err := expectDigest(r, *expected); err != nil {
 		return fail(stderr, err)
 	}
 	steps, err := standup.Apply(env, cfg, r, path, *dryRun, *forceStale)
