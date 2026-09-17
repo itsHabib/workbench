@@ -46,3 +46,31 @@ One host, one OS, simulated work measured in milliseconds, no network partition,
 skew between a store and its clients beyond what the server's own clock removes. The Rooms run
 (`swarm plane rooms`) is next: the same loop with every peer in its own microVM clone. And the
 `swarm` verbs do not run on the plane yet; this proves the contract they will move onto.
+
+# In Rooms, first matrix, 2026-09-17 (binary 1dc7624)
+
+Run by the rooms lead session on its Lima VZ host (aarch64, 6 vCPU, 4 GiB; 512 MiB
+single-vCPU Firecracker clones; redis-server 7.0.15 on the host's address). 240 tasks per run.
+Evidence: `runs/2026-09-17-rooms-1dc7624/`.
+
+| run | passed | accepted / items | unfinished | violations | wall |
+|---|---|---|---|---|---|
+| 2 clones | no | 308 / 616 | 308 | 0 | 75 s |
+| 4 clones | no | 308 / 616 | 308 | 0 | 54 s |
+| 6 clones | yes | 616 / 616 | 0 | 0 | 100 s |
+| 2 clones, clone and store killed | no | 60 / 318 | 258 | 0 | 181 s |
+| 4 clones, clone and store killed | no | 308 / 616 | 308 | 0 | 183 s |
+| 6 clones, clone and store killed | yes | 616 / 616 | 0 | 0 | 185 s |
+
+**Safety held in every run; liveness failed in four, and the cause was the driver, not the
+store.** Each clone chose "builder" or "watcher" from a random digit of its uuid. In three runs
+no clone rolled watcher, so every task was accepted and none of the 308 deliveries were. In the
+two-clone fault run the only builder was the clone that got killed. The six-clone fault run
+passed with a clone killed and Redis restarted a quarter of the way through. Fault runs take
+the full wall because `rooms clone --command` waits out `--max-wall` after a member is killed
+(a rooms follow-up, not this driver).
+
+Fixed at `5989d33`: roles are claimed from the store at start-up, the one thing identical
+clones do not share; a peer with nothing of its own kind to do helps with the other, so no
+role distribution and no single death can strand a kind of work; workers log a start and an
+end line (peer.log was empty in every clone of this matrix). Rerun pending.
