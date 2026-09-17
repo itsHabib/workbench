@@ -1,0 +1,24 @@
+{
+  "id": "req_dlh9i4h63q3s_b06cab67",
+  "at": "2026-09-17T03:13:26.743596Z",
+  "from": "t3-report-totals",
+  "scope": [
+    "pkg/report/report.go"
+  ],
+  "question": "t3-report-totals and t4-report-header both change pkg/report/report.go and report_test.go; which lands first?",
+  "options": [
+    "t3-report-totals",
+    "t4-report-header"
+  ],
+  "needs": "peer",
+  "status": "ruled",
+  "claim": {
+    "holder": "t4-report-header",
+    "epoch": 1,
+    "at": "2026-09-17T03:13:34.173076Z",
+    "until": "2026-09-17T03:14:34.173076Z"
+  },
+  "epoch": 1,
+  "decision": "dec_dlh9i7w1hru8_2f529fc0",
+  "ruled_at": "2026-09-17T03:13:34.173076Z"
+}

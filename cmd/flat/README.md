@@ -21,7 +21,10 @@ down. Those go to whoever holds the evidence (any peer) or to the operator, by t
 total order of tiers, peer < lead < operator, and no tree.
 
 `poc/KILL.md` holds the kill conditions written before the adversarial run; `poc/RESULTS.md`
-the measured result.
+the measured result: on the same substrate, the flat fleet landed six of six tasks at $3.07,
+the tree fleet five of six at $4.36 with its lead as the slow path, and both failed the same
+condition for the same rule-granularity reason (a ruling on a file did not cover its test).
+Ask and rule at package scope until `flat check` learns sibling files.
 
 ## Adopt it tomorrow
 

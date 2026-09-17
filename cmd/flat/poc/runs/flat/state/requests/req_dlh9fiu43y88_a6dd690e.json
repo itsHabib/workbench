@@ -1,0 +1,25 @@
+{
+  "id": "req_dlh9fiu43y88_a6dd690e",
+  "at": "2026-09-17T03:10:02.908768Z",
+  "from": "t5-fixture-title",
+  "scope": [
+    "pkg/fixture/fixture.go",
+    "fixtures/db.json"
+  ],
+  "question": "who lands first on pkg/fixture/fixture.go and fixtures/db.json?",
+  "options": [
+    "t3-report-totals",
+    "me"
+  ],
+  "needs": "peer",
+  "status": "ruled",
+  "claim": {
+    "holder": "t5-fixture-title",
+    "epoch": 1,
+    "at": "2026-09-17T03:10:06.869187Z",
+    "until": "2026-09-17T03:11:06.869187Z"
+  },
+  "epoch": 1,
+  "decision": "dec_dlh9fknm44rk_0fd3e025",
+  "ruled_at": "2026-09-17T03:10:06.869187Z"
+}

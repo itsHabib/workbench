@@ -1,0 +1,95 @@
+{"at":"2026-09-17T02:57:13.1283Z","kind":"admit"}
+{"at":"2026-09-17T02:57:13.156055Z","kind":"admit"}
+{"at":"2026-09-17T02:57:13.193014Z","kind":"admit"}
+{"at":"2026-09-17T02:57:13.266083Z","kind":"admit"}
+{"at":"2026-09-17T02:57:13.404571Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T02:57:13.578347Z","kind":"session_start","seat":"t1-config-timeout","session":"de12a7c3-6aa8-4fa4-9638-e3b80fe6ad88"}
+{"at":"2026-09-17T02:57:13.649357Z","kind":"session_start","seat":"t2-config-retries","session":"f3a7ec80-acbb-47c1-bdb3-918d01d14b99"}
+{"at":"2026-09-17T02:57:13.847314Z","kind":"session_start","seat":"t3-report-totals","session":"f4d0663c-2b6d-4f4f-9fb1-9eda1790022a"}
+{"at":"2026-09-17T02:57:13.973463Z","kind":"session_start","seat":"t4-report-header","session":"9797dbf9-96d0-4531-b34f-7df94854b7f1"}
+{"at":"2026-09-17T02:57:23.582535Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G; seats_full: 4 working, 4 seats"}
+{"at":"2026-09-17T02:57:29.043584Z","kind":"take","seat":"t3-report-totals","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T02:57:33.728835Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G; seats_full: 4 working, 4 seats"}
+{"at":"2026-09-17T02:57:43.30821Z","kind":"drop","seat":"t3-report-totals","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T02:57:43.948449Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T02:57:53.390142Z","kind":"nudge","seat":"t1-config-timeout","detail":"overlap_unruled: pkg/config/config_test.go is changed by t1-config-timeout and t2-config-retries with no ruling on order. one of you: `flat ask --scope pkg/config/config_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T02:57:53.390294Z","kind":"nudge","seat":"t2-config-retries","detail":"overlap_unruled: pkg/config/config_test.go is changed by t1-config-timeout and t2-config-retries with no ruling on order. one of you: `flat ask --scope pkg/config/config_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T02:57:53.390483Z","kind":"nudge","seat":"t3-report-totals","detail":"overlap_unruled: pkg/report/report.go is changed by t3-report-totals and t4-report-header with no ruling on order. one of you: `flat ask --scope pkg/report/report.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T02:57:53.390597Z","kind":"nudge","seat":"t4-report-header","detail":"overlap_unruled: pkg/report/report.go is changed by t3-report-totals and t4-report-header with no ruling on order. one of you: `flat ask --scope pkg/report/report.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T02:57:53.390707Z","kind":"nudge","seat":"t3-report-totals","detail":"overlap_unruled: pkg/report/report_test.go is changed by t3-report-totals and t4-report-header with no ruling on order. one of you: `flat ask --scope pkg/report/report_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T02:57:53.390802Z","kind":"nudge","seat":"t4-report-header","detail":"overlap_unruled: pkg/report/report_test.go is changed by t3-report-totals and t4-report-header with no ruling on order. one of you: `flat ask --scope pkg/report/report_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T02:57:53.39091Z","kind":"nudge","seat":"t4-report-header","detail":"pin_violation: branch t4-report-header changed after RESULT.json (cmd/app/main.go). a landing is a commit whose RESULT.json pins its own head; either revert those commits or rewrite RESULT.json with the new head_sha as the last commit."}
+{"at":"2026-09-17T02:57:53.391022Z","kind":"nudge","seat":"t1-config-timeout","detail":"overlap_unruled: pkg/config/config.go is changed by t1-config-timeout and t2-config-retries with no ruling on order. one of you: `flat ask --scope pkg/config/config.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T02:57:53.391126Z","kind":"nudge","seat":"t2-config-retries","detail":"overlap_unruled: pkg/config/config.go is changed by t1-config-timeout and t2-config-retries with no ruling on order. one of you: `flat ask --scope pkg/config/config.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T02:57:53.391551Z","kind":"wake","seat":"t1-config-timeout","detail":"2 notes","session":"de12a7c3-6aa8-4fa4-9638-e3b80fe6ad88"}
+{"at":"2026-09-17T02:57:53.392308Z","kind":"wake","seat":"t4-report-header","detail":"3 notes","session":"9797dbf9-96d0-4531-b34f-7df94854b7f1"}
+{"at":"2026-09-17T02:57:54.185986Z","kind":"session_start","seat":"t4-report-header","session":"9797dbf9-96d0-4531-b34f-7df94854b7f1"}
+{"at":"2026-09-17T02:57:54.255752Z","kind":"session_start","seat":"t1-config-timeout","session":"de12a7c3-6aa8-4fa4-9638-e3b80fe6ad88"}
+{"at":"2026-09-17T02:57:54.358582Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T02:57:57.748608Z","kind":"session_start","seat":"t2-config-retries","session":"ac2b55c3-0871-4e7c-806f-b5f4a73db506"}
+{"at":"2026-09-17T02:57:59.468757Z","kind":"ask","request":"req_dlh96ahqgy1k_47b149b0","by":"t1-config-timeout","seat":"t1-config-timeout","detail":"pkg/config/config.go","tier":"peer"}
+{"at":"2026-09-17T02:57:59.763486Z","kind":"route","request":"req_dlh96ahqgy1k_47b149b0","seat":"t1-config-timeout"}
+{"at":"2026-09-17T02:58:04.642915Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T02:58:09.750346Z","kind":"claim","request":"req_dlh96ahqgy1k_47b149b0","by":"t2-config-retries","detail":"implicit","epoch":1}
+{"at":"2026-09-17T02:58:09.750731Z","kind":"rule","request":"req_dlh96ahqgy1k_47b149b0","by":"t2-config-retries","detail":"dec_dlh96f7s1pbc_fb5e86e3","tier":"peer","epoch":1}
+{"at":"2026-09-17T02:58:09.75091Z","kind":"nudge","seat":"t1-config-timeout","detail":"ruling: ruled req_dlh96ahqgy1k_47b149b0 by t2-config-retries (peer): Order doesn't matter for correctness; both branches add independent fields (Timeout, Retries) to Config via separate env vars with no logical dependency. Whoever's integration/merge step runs first should land first; the other rebases on top and reconciles the struct/test additions (both fields coexist, no field removal or rename conflicts expected)."}
+{"at":"2026-09-17T02:58:13.379598Z","kind":"wake","seat":"t3-report-totals","detail":"2 notes","session":"f4d0663c-2b6d-4f4f-9fb1-9eda1790022a"}
+{"at":"2026-09-17T02:58:14.064333Z","kind":"session_start","seat":"t3-report-totals","session":"f4d0663c-2b6d-4f4f-9fb1-9eda1790022a"}
+{"at":"2026-09-17T02:58:14.937995Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T02:58:16.882294Z","kind":"ask","request":"req_dlh96ihq1uaw_ba2fcdc2","by":"t3-report-totals","seat":"t3-report-totals","detail":"pkg/report/report.go","tier":"peer"}
+{"at":"2026-09-17T02:58:17.142793Z","kind":"route","request":"req_dlh96ihq1uaw_ba2fcdc2","seat":"t3-report-totals"}
+{"at":"2026-09-17T02:58:23.460614Z","kind":"refusal","by":"rule","seat":"t4-report-header","detail":"already_ruled"}
+{"at":"2026-09-17T02:58:25.195672Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T02:58:27.875213Z","kind":"claim","request":"req_dlh96ihq1uaw_ba2fcdc2","by":"t4-report-header","detail":"implicit","epoch":1}
+{"at":"2026-09-17T02:58:27.875615Z","kind":"rule","request":"req_dlh96ihq1uaw_ba2fcdc2","by":"t4-report-header","detail":"dec_dlh96njj54ko_7f52cd11","tier":"peer","epoch":1}
+{"at":"2026-09-17T02:58:27.875802Z","kind":"nudge","seat":"t3-report-totals","detail":"ruling: ruled req_dlh96ihq1uaw_ba2fcdc2 by t4-report-header (peer): Both changes are additive and non-overlapping: t4 adds a header line above the rows, t3 adds a total line after the rows. t3-report-totals lands first (opened the request); t4-report-header rebases with a trivial merge combining both hunks."}
+{"at":"2026-09-17T02:58:35.478073Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T02:58:45.761086Z","kind":"admit"}
+{"at":"2026-09-17T02:58:46.065507Z","kind":"admit"}
+{"at":"2026-09-17T02:58:46.103918Z","kind":"session_start","seat":"t5-fixture-title","session":"8c4855ac-8f20-4b01-9274-a59010824a2c"}
+{"at":"2026-09-17T02:58:46.483925Z","kind":"session_start","seat":"t6-export-command","session":"f498ff28-221f-4b48-bb62-258c1a69db61"}
+{"at":"2026-09-17T02:58:50.7601Z","kind":"refusal","by":"check","seat":"t5-fixture-title","detail":"contended_unruled"}
+{"at":"2026-09-17T02:58:55.373059Z","kind":"refusal","by":"check","seat":"t6-export-command","detail":"contended_unruled"}
+{"at":"2026-09-17T02:59:06.529639Z","kind":"ask","request":"req_dlh975asrsxc_daaaea68","by":"t6-export-command","seat":"t6-export-command","detail":"cmd/app/main.go","tier":"peer"}
+{"at":"2026-09-17T02:59:06.847805Z","kind":"route","request":"req_dlh975asrsxc_daaaea68","seat":"t6-export-command"}
+{"at":"2026-09-17T02:59:10.957049Z","kind":"claim","request":"req_dlh975asrsxc_daaaea68","by":"t6-export-command","detail":"implicit","epoch":1}
+{"at":"2026-09-17T02:59:10.957463Z","kind":"rule","request":"req_dlh975asrsxc_daaaea68","by":"t6-export-command","detail":"dec_dlh977c0zgk8_e1f1a228","tier":"peer","epoch":1}
+{"at":"2026-09-17T02:59:10.957647Z","kind":"nudge","seat":"t6-export-command","detail":"ruling: ruled req_dlh975asrsxc_daaaea68 by t6-export-command (peer): t4-report-header lands first (already landed per board); t6-export-command rebases onto it"}
+{"at":"2026-09-17T02:59:15.386079Z","kind":"take","seat":"t5-fixture-title","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T02:59:20.254949Z","kind":"ask","request":"req_dlh97blsfueo_24aeddfa","by":"t6-export-command","seat":"t6-export-command","detail":"pkg/export/export.go","tier":"operator"}
+{"at":"2026-09-17T02:59:20.255203Z","kind":"nudge","seat":"operator","detail":"request: request req_dlh97blsfueo_24aeddfa from t6-export-command on pkg/export/export.go needs operator: \"What export format should downstream tools receive (e.g. CSV, JSON lines, JSON array, TSV)? Include field names/order if known.\". rule it if the evidence is yours: `flat rule req_dlh97blsfueo_24aeddfa --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlh97blsfueo_24aeddfa --to operator --why '...'`."}
+{"at":"2026-09-17T02:59:20.25523Z","kind":"route","request":"req_dlh97blsfueo_24aeddfa","seat":"t6-export-command","detail":"operator"}
+{"at":"2026-09-17T02:59:24.546239Z","kind":"ask","request":"req_dlh97dkre1oo_2e3f1f24","by":"t5-fixture-title","seat":"t5-fixture-title","detail":"fixtures/db.json","tier":"peer"}
+{"at":"2026-09-17T02:59:24.89134Z","kind":"route","request":"req_dlh97dkre1oo_2e3f1f24","seat":"t5-fixture-title"}
+{"at":"2026-09-17T02:59:30.067153Z","kind":"claim","request":"req_dlh97dkre1oo_2e3f1f24","by":"t5-fixture-title","detail":"implicit","epoch":1}
+{"at":"2026-09-17T02:59:30.067536Z","kind":"rule","request":"req_dlh97dkre1oo_2e3f1f24","by":"t5-fixture-title","detail":"dec_dlh97g42my28_e729b80d","tier":"peer","epoch":1}
+{"at":"2026-09-17T02:59:30.06772Z","kind":"nudge","seat":"t5-fixture-title","detail":"ruling: ruled req_dlh97dkre1oo_2e3f1f24 by t5-fixture-title (peer): t3-report-totals lands first (already landed, adds Amount field). t5-fixture-title rebases on top with a trivial merge: keep Amount field from t3, rename name-\u003etitle as title migration."}
+{"at":"2026-09-17T02:59:33.112844Z","kind":"claim","request":"req_dlh97blsfueo_24aeddfa","by":"operator","detail":"implicit","epoch":1}
+{"at":"2026-09-17T02:59:33.114681Z","kind":"rule","request":"req_dlh97blsfueo_24aeddfa","by":"operator","detail":"dec_dlh97higat08_e24f9d70","tier":"operator","epoch":1}
+{"at":"2026-09-17T02:59:33.114965Z","kind":"nudge","seat":"t6-export-command","detail":"ruling: ruled req_dlh97blsfueo_24aeddfa by operator (operator): Export format is JSON Lines: one JSON object per row, one row per line, on stdout. Keys are the fixture field names."}
+{"at":"2026-09-17T02:59:33.49494Z","kind":"nudge","seat":"t6-export-command","detail":"pin_violation: branch t6-export-command changed after RESULT.json (briefs/out/t6-export-command/START.md). a landing is a commit whose RESULT.json pins its own head; either revert those commits or rewrite RESULT.json with the new head_sha as the last commit."}
+{"at":"2026-09-17T02:59:33.495207Z","kind":"nudge","seat":"t4-report-header","detail":"overlap_unruled: briefs/out/t4-report-header/START.md is changed by t4-report-header and t6-export-command with no ruling on order. one of you: `flat ask --scope briefs/out/t4-report-header/START.md --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T02:59:33.495326Z","kind":"nudge","seat":"t6-export-command","detail":"overlap_unruled: briefs/out/t4-report-header/START.md is changed by t4-report-header and t6-export-command with no ruling on order. one of you: `flat ask --scope briefs/out/t4-report-header/START.md --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T02:59:33.495773Z","kind":"wake","seat":"t4-report-header","detail":"1 notes","session":"9797dbf9-96d0-4531-b34f-7df94854b7f1"}
+{"at":"2026-09-17T02:59:34.133503Z","kind":"session_start","seat":"t4-report-header","session":"9797dbf9-96d0-4531-b34f-7df94854b7f1"}
+{"at":"2026-09-17T02:59:38.058193Z","kind":"refusal","by":"check","seat":"t5-fixture-title","detail":"contended_unruled"}
+{"at":"2026-09-17T02:59:39.466383Z","kind":"refusal","by":"check","seat":"t4-report-header","detail":"contended_unruled"}
+{"at":"2026-09-17T02:59:40.339219Z","kind":"ask","request":"req_dlh97kty4b6o_3f6da46e","by":"t5-fixture-title","seat":"t5-fixture-title","detail":"pkg/fixture/fixture.go","tier":"peer"}
+{"at":"2026-09-17T02:59:40.675043Z","kind":"route","request":"req_dlh97kty4b6o_3f6da46e","seat":"t5-fixture-title"}
+{"at":"2026-09-17T02:59:43.647888Z","kind":"claim","request":"req_dlh97kty4b6o_3f6da46e","by":"t5-fixture-title","detail":"implicit","epoch":1}
+{"at":"2026-09-17T02:59:43.648313Z","kind":"rule","request":"req_dlh97kty4b6o_3f6da46e","by":"t5-fixture-title","detail":"dec_dlh97mco9efc_135d67d4","tier":"peer","epoch":1}
+{"at":"2026-09-17T02:59:43.648478Z","kind":"nudge","seat":"t5-fixture-title","detail":"ruling: ruled req_dlh97kty4b6o_3f6da46e by t5-fixture-title (peer): t3-report-totals lands first (already landed, adds Amount field to Row struct). t5-fixture-title rebases on top: keep Amount field, rename Name field to Title (json name-\u003etitle)."}
+{"at":"2026-09-17T02:59:44.438462Z","kind":"ask","request":"req_dlh97mpqp88o_2edd7346","by":"t6-export-command","seat":"t6-export-command","detail":"briefs/out/t4-report-header/START.md","tier":"peer"}
+{"at":"2026-09-17T02:59:44.777084Z","kind":"route","request":"req_dlh97mpqp88o_2edd7346","seat":"t6-export-command"}
+{"at":"2026-09-17T02:59:46.617779Z","kind":"refusal","by":"check","seat":"t5-fixture-title","detail":"contended_unruled"}
+{"at":"2026-09-17T02:59:47.867483Z","kind":"claim","request":"req_dlh97mpqp88o_2edd7346","by":"t6-export-command","detail":"implicit","epoch":1}
+{"at":"2026-09-17T02:59:47.867878Z","kind":"rule","request":"req_dlh97mpqp88o_2edd7346","by":"t6-export-command","detail":"dec_dlh97oaghx80_99bbe749","tier":"peer","epoch":1}
+{"at":"2026-09-17T02:59:47.868039Z","kind":"nudge","seat":"t6-export-command","detail":"ruling: ruled req_dlh97mpqp88o_2edd7346 by t6-export-command (peer): t4-report-header lands first; it already landed and t6-export-command rebased onto its tip, bringing this file in unchanged"}
+{"at":"2026-09-17T02:59:48.948836Z","kind":"ask","request":"req_dlh97osc238g_6691db69","by":"t5-fixture-title","seat":"t5-fixture-title","detail":"pkg/report/report_test.go","tier":"peer"}
+{"at":"2026-09-17T02:59:49.29263Z","kind":"nudge","seat":"t6-export-command","detail":"request: request req_dlh97osc238g_6691db69 from t5-fixture-title on pkg/report/report_test.go needs peer: \"order for report_test.go: t3, t4, then me?\". rule it if the evidence is yours: `flat rule req_dlh97osc238g_6691db69 --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlh97osc238g_6691db69 --to operator --why '...'`."}
+{"at":"2026-09-17T02:59:49.292681Z","kind":"route","request":"req_dlh97osc238g_6691db69","seat":"t5-fixture-title","detail":"t6-export-command"}
+{"at":"2026-09-17T02:59:52.735393Z","kind":"claim","request":"req_dlh97osc238g_6691db69","by":"t5-fixture-title","detail":"implicit","epoch":1}
+{"at":"2026-09-17T02:59:52.735833Z","kind":"rule","request":"req_dlh97osc238g_6691db69","by":"t5-fixture-title","detail":"dec_dlh97qiyq0rc_d1c3543c","tier":"peer","epoch":1}
+{"at":"2026-09-17T02:59:52.735989Z","kind":"nudge","seat":"t5-fixture-title","detail":"ruling: ruled req_dlh97osc238g_6691db69 by t5-fixture-title (peer): t3-report-totals lands first, then t4-report-header rebases on top (per dec_dlh96njj54ko_7f52cd11), then t5-fixture-title rebases last applying name-\u003etitle rename on top of both."}
+{"at":"2026-09-17T03:00:04.692074Z","kind":"refusal","by":"rule","seat":"t6-export-command","detail":"already_ruled"}
+{"at":"2026-09-17T03:00:36.89029Z","kind":"drop","seat":"t5-fixture-title","detail":"fixture-db","epoch":1}

@@ -1,0 +1,17 @@
+{
+  "Dir": "/private/tmp/claude-501/-Users-mh-dev/048af72c-2611-4d7c-a274-83bf5096a17c/scratchpad/sb-flat2",
+  "Mode": "flat",
+  "Model": "claude-sonnet-5",
+  "Seats": 4,
+  "Only": null,
+  "BuilderWall": 1200000000000,
+  "MaxTurns": 80,
+  "LeadEvery": 90000000000,
+  "OperatorEvery": 20000000000,
+  "WatchEvery": 20000000000,
+  "KillT2After": 25000000000,
+  "DiskFaultFor": 90000000000,
+  "DiskMin": 2147483648,
+  "Out": "/private/tmp/claude-501/-Users-mh-dev/048af72c-2611-4d7c-a274-83bf5096a17c/scratchpad/sb-flat2/runs/flat",
+  "FlatBin": "/private/tmp/claude-501/-Users-mh-dev/048af72c-2611-4d7c-a274-83bf5096a17c/scratchpad/bin/flat"
+}

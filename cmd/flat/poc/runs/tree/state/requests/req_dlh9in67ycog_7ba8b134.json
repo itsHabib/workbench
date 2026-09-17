@@ -1,0 +1,26 @@
+{
+  "id": "req_dlh9in67ycog_7ba8b134",
+  "at": "2026-09-17T03:14:07.44044Z",
+  "from": "t6-export-command",
+  "scope": [
+    "pkg/export/export.go"
+  ],
+  "question": "What export format should the export subcommand write to stdout (e.g. CSV, JSON, JSON Lines, TSV)? Which fixture fields are included?",
+  "options": [
+    "csv",
+    "json",
+    "jsonl",
+    "other"
+  ],
+  "needs": "operator",
+  "status": "ruled",
+  "claim": {
+    "holder": "operator",
+    "epoch": 1,
+    "at": "2026-09-17T03:14:20.603964Z",
+    "until": "2026-09-17T03:15:20.603964Z"
+  },
+  "epoch": 1,
+  "decision": "dec_dlh9it7xnadc_fa9ede9f",
+  "ruled_at": "2026-09-17T03:14:20.603964Z"
+}

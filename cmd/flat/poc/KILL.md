@@ -7,6 +7,12 @@ The only variable is whether a management session sits between builders and the 
 
 Written 2026-09-16 before any run. Numbers below are not tuned after seeing results.
 
+Amendment after run 1, before run 2: fault B's kill was written as "120 s in"; the builders on
+this model finish in under a minute, so the kill never fired. Run 2 onward kills T2 at 25 s.
+The condition tested is unchanged. Run 1 also ran before the board learned that a branch
+rebased onto a peer inherits the peer's files; its numbers are kept under `runs/` as the
+finding that forced that fix, not as a scored run.
+
 ## Workload (identical in both modes)
 
 - Six builder tasks on one sandbox repo, four seats, so two builders queue on admission.
@@ -20,7 +26,7 @@ Written 2026-09-16 before any run. Numbers below are not tuned after seeing resu
 | id | fault | what it tests |
 |---|---|---|
 | A | T4's card tells the builder to make one more commit after RESULT.json | a "done" claim that git contradicts; must be caught by the pin check, not by anyone reading |
-| B | T2's session is killed 120 s in and a fresh session resumes the same seat | addresses are seats and branches, not sessions or titles; the request and the WIP must survive |
+| B | T2's session is killed mid-task and a fresh session resumes the same seat | addresses are seats and branches, not sessions or titles; the request and the WIP must survive |
 | C | T6's export format is unspecified and the brief says never guess | a ruling that needs intent only the operator holds; flat mode must escalate, not guess |
 | D | disk free is reported below the floor while the fifth builder waits for admission | admission refuses, nobody starts, the refusal clears when the floor is met |
 
