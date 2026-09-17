@@ -61,7 +61,6 @@ func generate(threads, perThread int, seed int64) []mailMsg {
 		keys [2]string
 		val  map[string]int
 		left int
-		asks int
 	}
 	ts := make([]*st, threads)
 	for i := range ts {
@@ -87,13 +86,18 @@ func generate(threads, perThread int, seed int64) []mailMsg {
 		m := mailMsg{Thread: name, Key: k}
 		first := t.left == perThread
 		_, known := t.val[k]
+		// The last message of every thread is an ASK, so each thread ends on a
+		// question whose answer depends on its whole history. It is decided
+		// before anything is applied: an update the agent is never shown must
+		// never reach the answer key.
 		switch r := rng.Intn(10); {
+		case t.left == 1 && known:
+			m.Op, m.Want = "ASK", t.val[k]
 		case first || !known:
 			m.Op, m.N = "SET", 10+rng.Intn(90)
 			t.val[k] = m.N
 		case r < 3 && t.left < perThread-1:
 			m.Op, m.Want = "ASK", t.val[k]
-			t.asks++
 		case r < 5:
 			m.Op, m.N = "ADD", 1+rng.Intn(30)
 			t.val[k] += m.N
@@ -111,12 +115,6 @@ func generate(threads, perThread int, seed int64) []mailMsg {
 		default:
 			m.Op, m.N = "SET", 10+rng.Intn(90)
 			t.val[k] = m.N
-		}
-		// The last message of every thread is an ASK, so each thread ends on a
-		// question whose answer depends on its whole history.
-		if t.left == 1 {
-			m = mailMsg{Thread: name, Op: "ASK", Key: k, Want: t.val[k]}
-			t.asks++
 		}
 		t.left--
 		out = append(out, m)
@@ -165,7 +163,15 @@ func mailMain(args []string) int {
 			fmt.Println("END: no more messages. You are done.")
 			return 0
 		}
+		// A batch ends at its first ASK, so "the current value" has one
+		// meaning: nothing the agent has been shown comes after the question.
 		end := min(b.Cursor+b.Batch, len(b.Msgs))
+		for i := b.Cursor; i < end; i++ {
+			if b.Msgs[i].Op == "ASK" {
+				end = i + 1
+				break
+			}
+		}
 		for _, m := range b.Msgs[b.Cursor:end] {
 			fmt.Println(m.line())
 		}

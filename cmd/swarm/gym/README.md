@@ -49,3 +49,49 @@ slow). A gym earns its keep at the tasks where some model fails.
 - **Ruler tasks with a trap**: the obvious order is wrong, or the brief does settle what looks
   like a product question.
 - Three attempts a cell before anything is called a difference.
+
+# Capacity: how many things one agent keeps straight
+
+```sh
+swarm gym capacity --threads 2,4,8,16,32 --notes both --out DIR
+```
+
+One agent, N independent threads, messages from all of them interleaved. Each thread is a
+small ledger (SET, ADD, SUB, MOVE between its two quantities) with questions scattered
+through it; a question always ends the batch it arrives in, so "the current value" has one
+meaning. The answer key is computed from the messages shown and nothing else
+(`TestCapacityAnswerKeyMatchesVisibleMessages`). Run in two conditions: nothing but its own
+context, and a notes file it may keep.
+
+## First run, 2026-09-17, claude-sonnet-5, one run per cell
+
+| threads | messages | questions | in its head | with notes |
+|---|---|---|---|---|
+| 2 | 20 | 7 | 7 of 7 | 7 of 7 |
+| 4 | 40 | 14 | 14 of 14 | 14 of 14 |
+| 8 | 80 | 27 | 27 of 27 | 27 of 27 |
+| 16 | 160 | 48 | 48 of 48 | 48 of 48 |
+| 32 | 320 | 100 | not finished when this was written | 97 of 100 |
+
+Nothing was dropped at any size. Notes cost more (about 1.8x the turns and dollars at 16
+threads) and bought nothing here.
+
+**These numbers are a re-grade.** The harness first reported a flat 78% at every size, in
+both conditions. Identical counts across conditions was the tell. Two faults, both mine: a
+question could be followed by updates in the same batch, so "current" was ambiguous; and the
+generator applied an update it never showed before turning a thread's last slot into a
+question, so the key held values no agent could know. Both are fixed and pinned by tests; the
+saved mailboxes under `runs/2026-09-17-capacity/` were re-graded from the visible messages.
+
+**What it says.** For state that stays in the transcript, sixteen interleaved threads is not
+load. This test lets the agent look back: everything it was told is still in its context, so
+it measures careful bookkeeping over a growing transcript, not memory. The first errors
+appear around 320 messages. The knee for this kind of load is set by transcript length, and
+it is past what was run.
+
+**What it does not say.** Real load is not recoverable from the transcript: context gets
+compacted, state lives in files and other agents' heads, threads need judgment and not
+arithmetic, and a lead's threads are conversations it must initiate, not questions that
+arrive. The next version forces that: threads longer than the window so early state is gone,
+obligations the agent must raise unprompted ("remind t3 when fuel drops below 20"), and
+threads that contradict each other.

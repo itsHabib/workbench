@@ -26,7 +26,7 @@ func TestCapacityGrader(t *testing.T) {
 			continue
 		}
 		asks++
-		at := ((i / 5) + 1) * 5
+		at := i + 1 // a batch ends at its ASK
 		perfect.Replies = append(perfect.Replies, mailReply{m.Thread, m.Key, strconv.Itoa(m.Want), at})
 		stale.Replies = append(stale.Replies, mailReply{m.Thread, m.Key, strconv.Itoa(m.Want + 1), at})
 	}
@@ -43,5 +43,36 @@ func TestCapacityGrader(t *testing.T) {
 	}
 	if asks < 4 {
 		t.Fatalf("only %d asks in 40 messages", asks)
+	}
+}
+
+// The answer key must follow from the messages the agent is shown and from
+// nothing else. The first version applied a hidden update before turning a
+// thread's last slot into a question, and graded correct agents as wrong.
+func TestCapacityAnswerKeyMatchesVisibleMessages(t *testing.T) {
+	for _, threads := range []int{2, 8, 32} {
+		state := map[string]map[string]int{}
+		for i, m := range generate(threads, 10, int64(threads*1000+1)) {
+			th := state[m.Thread]
+			if th == nil {
+				th = map[string]int{}
+				state[m.Thread] = th
+			}
+			switch m.Op {
+			case "SET":
+				th[m.Key] = m.N
+			case "ADD":
+				th[m.Key] += m.N
+			case "SUB":
+				th[m.Key] -= m.N
+			case "MOVE":
+				th[m.Key] -= m.N
+				th[m.To] += m.N
+			case "ASK":
+				if th[m.Key] != m.Want {
+					t.Fatalf("threads=%d message %d: key says %d, visible messages say %d", threads, i, m.Want, th[m.Key])
+				}
+			}
+		}
 	}
 }
