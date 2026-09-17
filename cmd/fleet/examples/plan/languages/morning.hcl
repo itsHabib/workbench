@@ -1,0 +1,33 @@
+schema = "fleet-intent.example.v0"
+name = "morning"
+tenant = "mh"
+
+assignment "ivy-notes" {
+  repo = "itsHabib/ivy"
+  change = "codex/ivy-notes"
+  for = "author:ivy"
+  seat = "ivy-author-1"
+  as = "draft"
+  due = "2h"
+  brief = "Clarify the first learner exercise; stop at a draft PR."
+}
+
+assignment "rooms-notes" {
+  repo = "itsHabib/rooms"
+  change = "codex/rooms-notes"
+  for = "author:rooms"
+  seat = "rooms-author-1"
+  as = "draft"
+  due = "2h"
+  brief = "Document one existing sandbox launch; stop at a draft PR."
+}
+
+assignment "roxiq-docs" {
+  repo = "itsHabib/roxiq"
+  change = "codex/roxiq-docs"
+  for = "author:roxiq"
+  seat = "roxiq-author-1"
+  as = "draft"
+  due = "2h"
+  brief = "Clarify the race-plan explanation; stop at a draft PR."
+}
