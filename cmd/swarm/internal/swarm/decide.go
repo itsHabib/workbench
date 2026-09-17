@@ -40,8 +40,7 @@ type Tiers struct {
 // TierOf resolves a name to its tier from tiers.json; an unnamed caller is
 // a peer. Nothing in the environment can elevate a name.
 func (s *State) TierOf(name string) string {
-	var t Tiers
-	_ = readJSON(s.path("tiers.json"), &t)
+	t := s.tiers()
 	has := func(list []string) bool {
 		for _, n := range list {
 			if n == name {
@@ -65,6 +64,13 @@ func (s *State) TierOf(name string) string {
 func (s *State) Init(t Tiers) error {
 	if len(t.Operator) == 0 {
 		return errors.New("init needs at least one --operator name")
+	}
+	if remote() {
+		// Peers that share no filesystem must agree on who outranks whom, so
+		// the tiers live on the store. Re-running init replaces them.
+		if err := s.putTiersP(t); err != nil {
+			return err
+		}
 	}
 	return writeJSON(s.path("tiers.json"), t)
 }
@@ -102,6 +108,7 @@ type Request struct {
 	Decision    string       `json:"decision,omitempty"`
 	RuledAt     time.Time    `json:"ruled_at,omitempty"`
 	Escalations []Escalation `json:"escalations,omitempty"`
+	Proactive   bool         `json:"proactive,omitempty"` // a ruling made with no question asked; never listed as a request
 }
 
 // Decision is one ruling in the hash-chained ledger.
@@ -162,6 +169,9 @@ func (s *State) Ask(from string, scope []string, question string, options []stri
 		return nil, refuse("bad_tier", "needs must be one of peer, lead, operator")
 	}
 	r := &Request{ID: NewID("req"), At: Now(), From: from, Scope: scope, Question: question, Options: options, Needs: needs, Status: "open"}
+	if remote() {
+		return s.askP(r)
+	}
 	if err := s.saveRequest(r); err != nil {
 		return nil, err
 	}
@@ -255,6 +265,9 @@ func (s *State) Affinity(scope []string, exclude string) []Who {
 
 // Requests lists requests, oldest first. open=true hides ruled ones.
 func (s *State) Requests(openOnly bool) ([]Request, error) {
+	if remote() {
+		return s.requestsP(openOnly)
+	}
 	entries, err := os.ReadDir(s.path("requests"))
 	if err != nil {
 		return nil, err
@@ -318,6 +331,9 @@ func (s *State) summarizeRequests() (RequestSummary, error) {
 // ClaimRequest leases a request to holder for ttl. A live claim by another
 // holder refuses; an expired one is taken over with a new epoch.
 func (s *State) ClaimRequest(id, holder string, ttl time.Duration) (*Request, error) {
+	if remote() {
+		return s.claimRequestP(id, holder, ttl)
+	}
 	release, err := s.lock("requests", 5*time.Second, time.Minute)
 	if err != nil {
 		return nil, err
@@ -355,6 +371,9 @@ func (s *State) ClaimRequest(id, holder string, ttl time.Duration) (*Request, er
 func (s *State) Rule(id, by string, epoch int, ruling, evidence, supersedes string, order []string) (*Decision, error) {
 	if ruling == "" {
 		return nil, refuse("bad_ruling", "a ruling needs --ruling text")
+	}
+	if remote() {
+		return s.ruleP(id, by, epoch, ruling, evidence, supersedes, order)
 	}
 	release, err := s.lock("requests", 5*time.Second, time.Minute)
 	if err != nil {
@@ -473,6 +492,9 @@ func (s *State) Escalate(id, by, to, why string) (*Request, error) {
 	if _, ok := tierLevel[to]; !ok {
 		return nil, refuse("bad_tier", "escalate --to must be lead or operator")
 	}
+	if remote() {
+		return s.escalateP(id, by, to, why)
+	}
 	release, err := s.lock("requests", 5*time.Second, time.Minute)
 	if err != nil {
 		return nil, err
@@ -504,6 +526,9 @@ func (s *State) Escalate(id, by, to, why string) (*Request, error) {
 func (s *State) Decide(by string, scope []string, ruling, evidence, supersedes string, order []string) (*Decision, error) {
 	if len(scope) == 0 || ruling == "" {
 		return nil, refuse("bad_ruling", "decide needs --scope and --ruling")
+	}
+	if remote() {
+		return s.decideP(by, scope, ruling, evidence, supersedes, order)
 	}
 	release, err := s.lock("requests", 5*time.Second, time.Minute)
 	if err != nil {
@@ -585,6 +610,9 @@ type ledgerHead struct {
 // not parse and lies beyond the head is an append that never committed; it
 // is ignored rather than making every decision unreadable.
 func (s *State) Decisions() ([]Decision, error) {
+	if remote() {
+		return s.decisionsP()
+	}
 	var head ledgerHead
 	haveHead := readJSON(s.path("decisions.head"), &head) == nil
 	var lines [][]byte
@@ -701,6 +729,9 @@ func scopeMatch(x, y string) bool {
 
 // Wait blocks until the request is ruled or the timeout passes.
 func (s *State) Wait(id string, timeout, every time.Duration) (*Request, *Decision, error) {
+	if remote() {
+		return s.waitP(id, timeout, every)
+	}
 	if every <= 0 {
 		every = 2 * time.Second
 	}

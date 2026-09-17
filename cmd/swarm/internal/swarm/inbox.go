@@ -31,6 +31,9 @@ func (s *State) Nudge(seat, kind, text string) (*Note, error) {
 	if seat == "" {
 		return nil, refuse("no_seat", "nudge needs a seat")
 	}
+	if remote() {
+		return s.nudgeP(seat, kind, text)
+	}
 	dir := s.inboxDir(seat)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
@@ -52,6 +55,9 @@ func (s *State) notify(seat, text string) {
 // Inbox lists undelivered notes for seat, oldest first. consume moves them
 // to delivered/ so each is injected once.
 func (s *State) Inbox(seat string, consume bool) ([]Note, error) {
+	if remote() {
+		return s.inboxP(seat, consume)
+	}
 	dir := s.inboxDir(seat)
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {

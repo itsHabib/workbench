@@ -29,7 +29,11 @@ const kindResource = "resource"
 // otherwise a file store beside the rest of the state.
 func (s *State) Plane() (plane.Store, error) {
 	if spec := os.Getenv("SWARM_STORE"); spec != "" {
-		return plane.OpenStore(spec)
+		st, err := plane.OpenStore(spec)
+		if f, ok := st.(*plane.File); ok {
+			f.Now = func() time.Time { return Now() }
+		}
+		return st, err
 	}
 	f, err := plane.OpenFile(s.path("plane"))
 	if err != nil {
