@@ -75,401 +75,499 @@ func main() {
 	}
 }
 
-func run(verb string, args []string, cwd string) error {
+// cli is one parsed invocation. Every verb reads the same flag set, so the
+// usage text above is the whole grammar.
+type cli struct {
+	verb string
+	pos  []string
+	s    *flat.State
+	seat string
+
+	as, scope, question, options, needs, ruling, evidence, supersedes, to, why        string
+	operator, lead, verifier, diskMin, resource, dir, cmd, wakeModel, wakeTools, base string
+	jsonOut, md, phone, fetch, all, keep, wait, once, wake                            bool
+	epoch, seats, wakeMax                                                             int
+	ttl, timeout, idle, interval, unclaimed, threshold                                time.Duration
+}
+
+func parse(verb string, args []string) (*cli, error) {
+	c := &cli{verb: verb}
 	fs := flag.NewFlagSet(verb, flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
-	as := fs.String("as", "", "seat acting (default FLAT_SEAT or current branch)")
-	jsonOut := fs.Bool("json", false, "JSON output")
-	base := fs.String("base", "main", "base branch")
-	scope := fs.String("scope", "", "comma-separated paths or resource:NAME")
-	question := fs.String("question", "", "the question")
-	options := fs.String("options", "", "pipe-separated options")
-	needs := fs.String("needs", "peer", "tier needed: peer, lead, operator")
-	ruling := fs.String("ruling", "", "ruling text")
-	evidence := fs.String("evidence", "", "what the ruling rests on")
-	epoch := fs.Int("epoch", 0, "claim epoch (0 = claim now)")
-	supersedes := fs.String("supersedes", "", "decision id this one replaces")
-	to := fs.String("to", "", "tier to escalate to")
-	why := fs.String("why", "", "reason")
-	ttl := fs.Duration("ttl", 0, "lease length")
-	timeout := fs.Duration("timeout", 8*time.Minute, "wait timeout")
-	md := fs.Bool("md", false, "markdown")
-	phone := fs.Bool("phone", false, "phone-sized")
-	fetch := fs.Bool("fetch", false, "git fetch first")
-	idle := fs.Duration("idle", 20*time.Minute, "silent after")
-	all := fs.Bool("all", false, "include ruled requests")
-	keep := fs.Bool("keep", false, "do not consume inbox")
-	seats := fs.Int("seats", 0, "max working branches")
-	diskMin := fs.String("disk-min", "", "free bytes floor, e.g. 10G")
-	resource := fs.String("resource", "", "resource the new builder needs")
-	wait := fs.Bool("wait", false, "block until admitted")
-	interval := fs.Duration("interval", 30*time.Second, "watch interval")
-	once := fs.Bool("once", false, "one pass")
-	unclaimed := fs.Duration("unclaimed", 10*time.Minute, "alert after")
-	threshold := fs.Duration("threshold", 20*time.Minute, "unclaimed kill line")
-	operator := fs.String("operator", "", "operator name(s), comma-separated")
-	lead := fs.String("lead", "", "lead name(s)")
-	verifier := fs.String("verifier", "", "verifier name(s)")
-	dir := fs.String("dir", cwd, "repository directory")
-	cmd := fs.String("cmd", "", "flat binary path for the hook")
-	wake := fs.Bool("wake", false, "resume seats that have notes and are between turns")
-	wakeModel := fs.String("wake-model", "", "model for wakes")
-	wakeTools := fs.String("wake-tools", "", "allowed tools for wakes")
-	wakeMax := fs.Int("wake-max", 2, "concurrent wakes")
+	fs.StringVar(&c.as, "as", "", "seat acting (default FLAT_SEAT or current branch)")
+	fs.BoolVar(&c.jsonOut, "json", false, "JSON output")
+	fs.StringVar(&c.base, "base", "main", "base branch")
+	fs.StringVar(&c.scope, "scope", "", "comma-separated paths or resource:NAME")
+	fs.StringVar(&c.question, "question", "", "the question")
+	fs.StringVar(&c.options, "options", "", "pipe-separated options")
+	fs.StringVar(&c.needs, "needs", "peer", "tier needed: peer, lead, operator")
+	fs.StringVar(&c.ruling, "ruling", "", "ruling text")
+	fs.StringVar(&c.evidence, "evidence", "", "what the ruling rests on")
+	fs.IntVar(&c.epoch, "epoch", 0, "claim epoch (0 = claim now)")
+	fs.StringVar(&c.supersedes, "supersedes", "", "decision id this one replaces")
+	fs.StringVar(&c.to, "to", "", "tier to escalate to")
+	fs.StringVar(&c.why, "why", "", "reason")
+	fs.DurationVar(&c.ttl, "ttl", 0, "lease length")
+	fs.DurationVar(&c.timeout, "timeout", 8*time.Minute, "wait timeout")
+	fs.BoolVar(&c.md, "md", false, "markdown")
+	fs.BoolVar(&c.phone, "phone", false, "phone-sized")
+	fs.BoolVar(&c.fetch, "fetch", false, "git fetch first")
+	fs.DurationVar(&c.idle, "idle", 20*time.Minute, "silent after")
+	fs.BoolVar(&c.all, "all", false, "include ruled requests")
+	fs.BoolVar(&c.keep, "keep", false, "do not consume inbox")
+	fs.IntVar(&c.seats, "seats", 0, "max working branches")
+	fs.StringVar(&c.diskMin, "disk-min", "", "free bytes floor, e.g. 10G")
+	fs.StringVar(&c.resource, "resource", "", "resource the new builder needs")
+	fs.BoolVar(&c.wait, "wait", false, "block until admitted")
+	fs.DurationVar(&c.interval, "interval", 30*time.Second, "watch interval")
+	fs.BoolVar(&c.once, "once", false, "one pass")
+	fs.DurationVar(&c.unclaimed, "unclaimed", 10*time.Minute, "alert after")
+	fs.DurationVar(&c.threshold, "threshold", 20*time.Minute, "unclaimed kill line")
+	fs.StringVar(&c.operator, "operator", "", "operator name(s), comma-separated")
+	fs.StringVar(&c.lead, "lead", "", "lead name(s)")
+	fs.StringVar(&c.verifier, "verifier", "", "verifier name(s)")
+	fs.StringVar(&c.dir, "dir", "", "repository directory")
+	fs.StringVar(&c.cmd, "cmd", "", "flat binary path for the hook")
+	fs.BoolVar(&c.wake, "wake", false, "resume seats that have notes and are between turns")
+	fs.StringVar(&c.wakeModel, "wake-model", "", "model for wakes")
+	fs.StringVar(&c.wakeTools, "wake-tools", "", "allowed tools for wakes")
+	fs.IntVar(&c.wakeMax, "wake-max", 2, "concurrent wakes")
 
 	// Positional args may precede flags: `flat rule ID --ruling ...`.
-	var pos []string
 	for len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		pos, args = append(pos, args[0]), args[1:]
+		c.pos, args = append(c.pos, args[0]), args[1:]
 	}
 	if err := fs.Parse(args); err != nil {
-		return err
+		return nil, err
 	}
-	pos = append(pos, fs.Args()...)
-	arg := func(i int) string {
-		if i < len(pos) {
-			return pos[i]
-		}
-		return ""
-	}
+	c.pos = append(c.pos, fs.Args()...)
+	return c, nil
+}
 
-	s, err := flat.Open(cwd)
+var verbs = map[string]func(*cli) error{
+	"init":         (*cli).initTiers,
+	"board":        (*cli).board,
+	"verify":       (*cli).verify,
+	"check":        (*cli).check,
+	"ask":          (*cli).ask,
+	"requests":     (*cli).requests,
+	"claim":        (*cli).claim,
+	"rule":         (*cli).rule,
+	"decide":       (*cli).decide,
+	"escalate":     (*cli).escalate,
+	"wait":         (*cli).waitFor,
+	"decisions":    (*cli).decisions,
+	"who":          (*cli).who,
+	"take":         (*cli).take,
+	"drop":         (*cli).drop,
+	"admit":        (*cli).admit,
+	"watch":        (*cli).watch,
+	"digest":       (*cli).digest,
+	"inbox":        (*cli).inbox,
+	"nudge":        (*cli).nudge,
+	"install-hook": (*cli).installHook,
+	"stats":        (*cli).stats,
+}
+
+func run(verb string, args []string, cwd string) error {
+	c, err := parse(verb, args)
 	if err != nil {
 		return err
 	}
-	seat := *as
-	if seat == "" {
-		seat = flat.SeatOf(cwd)
+	if c.dir == "" {
+		c.dir = cwd
 	}
-	os.Setenv("FLAT_SEAT", seat)
-	emit := func(v any) error {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(v)
+	fn, ok := verbs[verb]
+	if !ok {
+		fmt.Fprint(os.Stderr, usage)
+		return fmt.Errorf("unknown verb %q", verb)
 	}
-	record := func(err error) error {
-		var ref *flat.Refusal
-		if errors.As(err, &ref) {
-			s.RecordRefusal(seat, verb, ref.Code)
-		}
+	if c.s, err = flat.Open(cwd); err != nil {
 		return err
 	}
-	split := func(v, sep string) []string {
-		if v == "" {
-			return nil
-		}
-		var out []string
-		for _, p := range strings.Split(v, sep) {
-			if p = strings.TrimSpace(p); p != "" {
-				out = append(out, p)
-			}
-		}
-		return out
+	c.seat = c.as
+	if c.seat == "" {
+		c.seat = flat.SeatOf(cwd)
 	}
+	os.Setenv("FLAT_SEAT", c.seat)
+	return fn(c)
+}
 
-	switch verb {
-	case "init":
-		return s.Init(flat.Tiers{Operator: split(*operator, ","), Lead: split(*lead, ","), Verifier: split(*verifier, ",")})
+func (c *cli) arg(i int) string {
+	if i < len(c.pos) {
+		return c.pos[i]
+	}
+	return ""
+}
 
-	case "board":
-		b, err := s.Board(flat.BoardOptions{Base: *base, Fetch: *fetch, Idle: *idle})
+func (c *cli) emit(v any) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
+}
+
+// record turns a refusal into an event before returning it.
+func (c *cli) record(err error) error {
+	var ref *flat.Refusal
+	if errors.As(err, &ref) {
+		c.s.RecordRefusal(c.seat, c.verb, ref.Code)
+	}
+	return err
+}
+
+func (c *cli) diskFloor() (uint64, error) {
+	if c.diskMin == "" {
+		return 0, nil
+	}
+	return flat.ParseBytes(c.diskMin)
+}
+
+func (c *cli) boardOpts() flat.BoardOptions {
+	return flat.BoardOptions{Base: c.base, Fetch: c.fetch, Idle: c.idle}
+}
+
+func split(v, sep string) []string {
+	if v == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(v, sep) {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (c *cli) initTiers() error {
+	return c.s.Init(flat.Tiers{Operator: split(c.operator, ","), Lead: split(c.lead, ","), Verifier: split(c.verifier, ",")})
+}
+
+func (c *cli) board() error {
+	b, err := c.s.Board(c.boardOpts())
+	if err != nil {
+		return err
+	}
+	switch {
+	case c.md:
+		fmt.Print(b.Markdown())
+	case c.phone:
+		fmt.Print(b.Phone())
+	case c.jsonOut:
+		return c.emit(b)
+	default:
+		fmt.Print(b.JSONL())
+	}
+	return nil
+}
+
+func (c *cli) verify() error {
+	b, err := c.s.Board(c.boardOpts())
+	if err != nil {
+		return err
+	}
+	for _, r := range b.Rows {
+		if r.Branch != c.arg(0) {
+			continue
+		}
+		if c.jsonOut {
+			return c.emit(r)
+		}
+		fmt.Printf("%s %s tip %s", r.Branch, r.State, r.Tip[:8])
+		if r.HeadSHA != "" {
+			fmt.Printf(" pinned %s", r.HeadSHA[:8])
+		}
+		if len(r.Extra) > 0 {
+			fmt.Printf(" changed after RESULT: %s", strings.Join(r.Extra, ", "))
+		}
+		fmt.Println()
+		if r.State != "landed" {
+			return c.record(&flat.Refusal{Code: r.State, Msg: "not landed"})
+		}
+		return nil
+	}
+	return fmt.Errorf("no branch %q", c.arg(0))
+}
+
+func (c *cli) check() error {
+	p := c.arg(0)
+	if p == "" {
+		return errors.New("check needs a path")
+	}
+	b, err := c.s.Board(c.boardOpts())
+	if err != nil {
+		return err
+	}
+	others := touching(b, p, c.seat)
+	ds, err := c.s.Lookup([]string{p})
+	if err != nil {
+		return err
+	}
+	switch {
+	case len(others) == 0:
+		fmt.Printf("clear: no other branch has changed %s\n", p)
+	case len(ds) > 0:
+		d := ds[len(ds)-1]
+		fmt.Printf("contended but ruled: %s also changed by %s. ruling %s by %s (%s): %s\n", p, strings.Join(others, ", "), d.ID, d.By, d.Tier, d.Ruling)
+	default:
+		fmt.Printf("contended, no ruling: %s is also changed by %s. do not edit it until ruled: flat ask --scope %s --question 'who lands first on %s?' --options '%s|me' then flat wait ID\n", p, strings.Join(others, ", "), p, p, strings.Split(others[0], " ")[0])
+		return c.record(&flat.Refusal{Code: "contended_unruled", Msg: p})
+	}
+	return nil
+}
+
+// touching lists the other branches that changed p or something under it.
+func touching(b *flat.Board, p, seat string) []string {
+	var out []string
+	dir := strings.TrimSuffix(p, "/") + "/"
+	for _, r := range b.Rows {
+		if r.Branch == seat {
+			continue
+		}
+		for _, f := range r.Files {
+			if f == p || strings.HasPrefix(f, dir) {
+				out = append(out, r.Branch+" ("+r.State+")")
+				break
+			}
+		}
+	}
+	return out
+}
+
+func (c *cli) ask() error {
+	r, err := c.s.Ask(c.seat, split(c.scope, ","), c.question, split(c.options, "|"), c.needs)
+	if err != nil {
+		return c.record(err)
+	}
+	if c.jsonOut {
+		return c.emit(r)
+	}
+	fmt.Printf("asked %s (needs %s). wait with: flat wait %s\n", r.ID, r.Needs, r.ID)
+	return nil
+}
+
+func (c *cli) requests() error {
+	rs, err := c.s.Requests(!c.all)
+	if err != nil {
+		return err
+	}
+	if c.jsonOut {
+		return c.emit(rs)
+	}
+	if len(rs) == 0 {
+		fmt.Println("no open requests")
+	}
+	for _, r := range rs {
+		claim := ""
+		if r.Claim != nil && r.Status == "claimed" {
+			claim = fmt.Sprintf(" claimed by %s (epoch %d)", r.Claim.Holder, r.Claim.Epoch)
+		}
+		fmt.Printf("%s %s from %s needs %s age %s%s\n  scope %s\n  q: %s", r.ID, r.Status, r.From, r.Needs, ageOf(r.At), claim, strings.Join(r.Scope, ","), r.Question)
+		if len(r.Options) > 0 {
+			fmt.Printf("\n  options: %s", strings.Join(r.Options, " | "))
+		}
+		fmt.Println()
+	}
+	return nil
+}
+
+func (c *cli) claim() error {
+	r, err := c.s.ClaimRequest(c.arg(0), c.seat, c.ttl)
+	if err != nil {
+		return c.record(err)
+	}
+	fmt.Printf("claimed %s epoch %d until %s. rule with: flat rule %s --epoch %d --ruling '...' --evidence '...'\n", r.ID, r.Claim.Epoch, r.Claim.Until.Format(time.RFC3339), r.ID, r.Claim.Epoch)
+	return nil
+}
+
+func (c *cli) rule() error {
+	d, err := c.s.Rule(c.arg(0), c.seat, c.epoch, c.ruling, c.evidence, c.supersedes)
+	if err != nil {
+		return c.record(err)
+	}
+	if c.jsonOut {
+		return c.emit(d)
+	}
+	fmt.Printf("ruled %s -> %s by %s (%s)\n", c.arg(0), d.ID, d.By, d.Tier)
+	return nil
+}
+
+func (c *cli) decide() error {
+	d, err := c.s.Decide(c.seat, split(c.scope, ","), c.ruling, c.evidence, c.supersedes)
+	if err != nil {
+		return c.record(err)
+	}
+	fmt.Printf("decided %s by %s (%s) on %s\n", d.ID, d.By, d.Tier, strings.Join(d.Scope, ","))
+	return nil
+}
+
+func (c *cli) escalate() error {
+	r, err := c.s.Escalate(c.arg(0), c.seat, c.to, c.why)
+	if err != nil {
+		return c.record(err)
+	}
+	fmt.Printf("escalated %s to %s\n", r.ID, r.Needs)
+	return nil
+}
+
+func (c *cli) waitFor() error {
+	r, d, err := c.s.Wait(c.arg(0), c.timeout, 0)
+	if err != nil {
+		return c.record(err)
+	}
+	if c.jsonOut {
+		return c.emit(map[string]any{"request": r, "decision": d})
+	}
+	if d == nil {
+		fmt.Printf("ruled %s (decision %s not found in ledger)\n", r.ID, r.Decision)
+		return nil
+	}
+	fmt.Printf("RULED %s by %s (%s)\n%s\n", r.ID, d.By, d.Tier, d.Ruling)
+	if d.Evidence != "" {
+		fmt.Printf("evidence: %s\n", d.Evidence)
+	}
+	return nil
+}
+
+func (c *cli) decisions() error {
+	var ds []flat.Decision
+	var err error
+	if c.scope != "" {
+		ds, err = c.s.Lookup(split(c.scope, ","))
+	} else {
+		ds, err = c.s.Effective()
+	}
+	if err != nil {
+		return err
+	}
+	if c.jsonOut {
+		return c.emit(ds)
+	}
+	if len(ds) == 0 {
+		fmt.Println("no rulings")
+	}
+	for _, d := range ds {
+		fmt.Printf("%s %s %s (%s) on %s: %s\n", d.ID, d.At.Format("15:04"), d.By, d.Tier, strings.Join(d.Scope, ","), d.Ruling)
+	}
+	return nil
+}
+
+func (c *cli) who() error {
+	if c.arg(0) == "" {
+		return errors.New("who needs a scope")
+	}
+	ws := c.s.Affinity(split(c.arg(0), ","), "")
+	if c.jsonOut {
+		return c.emit(ws)
+	}
+	if len(ws) == 0 {
+		fmt.Println("nobody has context on that scope yet")
+	}
+	for _, w := range ws {
+		fmt.Printf("%s: %s\n", w.Seat, strings.Join(w.Why, "; "))
+	}
+	return nil
+}
+
+func (c *cli) take() error {
+	r, err := c.s.Take(c.arg(0), c.seat, c.ttl)
+	if err != nil {
+		return c.record(err)
+	}
+	fmt.Printf("holding %s (epoch %d) until %s\n", r.Name, r.Epoch, r.Until.Format(time.RFC3339))
+	return nil
+}
+
+func (c *cli) drop() error {
+	if err := c.s.Drop(c.arg(0), c.seat); err != nil {
+		return c.record(err)
+	}
+	fmt.Printf("dropped %s\n", c.arg(0))
+	return nil
+}
+
+func (c *cli) admit() error {
+	floor, err := c.diskFloor()
+	if err != nil {
+		return err
+	}
+	opts := flat.AdmitOptions{Seats: c.seats, DiskMin: floor, Base: c.base, Resource: c.resource}
+	for {
+		a, err := c.s.Admit(opts)
 		if err != nil {
 			return err
 		}
-		switch {
-		case *md:
-			fmt.Print(b.Markdown())
-		case *phone:
-			fmt.Print(b.Phone())
-		case *jsonOut:
-			return emit(b)
-		default:
-			fmt.Print(b.JSONL())
-		}
-		return nil
-
-	case "verify":
-		b, err := s.Board(flat.BoardOptions{Base: *base, Fetch: *fetch, Idle: *idle})
-		if err != nil {
-			return err
-		}
-		for _, r := range b.Rows {
-			if r.Branch == arg(0) {
-				if *jsonOut {
-					return emit(r)
-				}
-				fmt.Printf("%s %s tip %s", r.Branch, r.State, r.Tip[:8])
-				if r.HeadSHA != "" {
-					fmt.Printf(" pinned %s", r.HeadSHA[:8])
-				}
-				if len(r.Extra) > 0 {
-					fmt.Printf(" changed after RESULT: %s", strings.Join(r.Extra, ", "))
-				}
-				fmt.Println()
-				if r.State != "landed" {
-					return record(&flat.Refusal{Code: r.State, Msg: "not landed"})
-				}
-				return nil
-			}
-		}
-		return fmt.Errorf("no branch %q", arg(0))
-
-	case "check":
-		p := arg(0)
-		if p == "" {
-			return errors.New("check needs a path")
-		}
-		b, err := s.Board(flat.BoardOptions{Base: *base, Fetch: *fetch, Idle: *idle})
-		if err != nil {
-			return err
-		}
-		var others []string
-		for _, r := range b.Rows {
-			if r.Branch == seat {
-				continue
-			}
-			for _, f := range r.Files {
-				if f == p || strings.HasPrefix(f, strings.TrimSuffix(p, "/")+"/") {
-					others = append(others, r.Branch+" ("+r.State+")")
-					break
-				}
-			}
-		}
-		ds, err := s.Lookup([]string{p})
-		if err != nil {
-			return err
-		}
-		switch {
-		case len(others) == 0:
-			fmt.Printf("clear: no other branch has changed %s\n", p)
-		case len(ds) > 0:
-			d := ds[len(ds)-1]
-			fmt.Printf("contended but ruled: %s also changed by %s. ruling %s by %s (%s): %s\n", p, strings.Join(others, ", "), d.ID, d.By, d.Tier, d.Ruling)
-		default:
-			fmt.Printf("contended, no ruling: %s is also changed by %s. do not edit it until ruled: flat ask --scope %s --question 'who lands first on %s?' --options '%s|me' then flat wait ID\n", p, strings.Join(others, ", "), p, p, strings.Split(others[0], " ")[0])
-			return record(&flat.Refusal{Code: "contended_unruled", Msg: p})
-		}
-		return nil
-
-	case "ask":
-		r, err := s.Ask(seat, split(*scope, ","), *question, split(*options, "|"), *needs)
-		if err != nil {
-			return record(err)
-		}
-		if *jsonOut {
-			return emit(r)
-		}
-		fmt.Printf("asked %s (needs %s). wait with: flat wait %s\n", r.ID, r.Needs, r.ID)
-		return nil
-
-	case "requests":
-		rs, err := s.Requests(!*all)
-		if err != nil {
-			return err
-		}
-		if *jsonOut {
-			return emit(rs)
-		}
-		if len(rs) == 0 {
-			fmt.Println("no open requests")
-		}
-		for _, r := range rs {
-			claim := ""
-			if r.Claim != nil && r.Status == "claimed" {
-				claim = fmt.Sprintf(" claimed by %s (epoch %d)", r.Claim.Holder, r.Claim.Epoch)
-			}
-			fmt.Printf("%s %s from %s needs %s age %s%s\n  scope %s\n  q: %s", r.ID, r.Status, r.From, r.Needs, ageOf(r.At), claim, strings.Join(r.Scope, ","), r.Question)
-			if len(r.Options) > 0 {
-				fmt.Printf("\n  options: %s", strings.Join(r.Options, " | "))
-			}
-			fmt.Println()
-		}
-		return nil
-
-	case "claim":
-		r, err := s.ClaimRequest(arg(0), seat, *ttl)
-		if err != nil {
-			return record(err)
-		}
-		fmt.Printf("claimed %s epoch %d until %s. rule with: flat rule %s --epoch %d --ruling '...' --evidence '...'\n", r.ID, r.Claim.Epoch, r.Claim.Until.Format(time.RFC3339), r.ID, r.Claim.Epoch)
-		return nil
-
-	case "rule":
-		d, err := s.Rule(arg(0), seat, *epoch, *ruling, *evidence, *supersedes)
-		if err != nil {
-			return record(err)
-		}
-		if *jsonOut {
-			return emit(d)
-		}
-		fmt.Printf("ruled %s -> %s by %s (%s)\n", arg(0), d.ID, d.By, d.Tier)
-		return nil
-
-	case "decide":
-		d, err := s.Decide(seat, split(*scope, ","), *ruling, *evidence, *supersedes)
-		if err != nil {
-			return record(err)
-		}
-		fmt.Printf("decided %s by %s (%s) on %s\n", d.ID, d.By, d.Tier, strings.Join(d.Scope, ","))
-		return nil
-
-	case "escalate":
-		r, err := s.Escalate(arg(0), seat, *to, *why)
-		if err != nil {
-			return record(err)
-		}
-		fmt.Printf("escalated %s to %s\n", r.ID, r.Needs)
-		return nil
-
-	case "wait":
-		r, d, err := s.Wait(arg(0), *timeout, 0)
-		if err != nil {
-			return record(err)
-		}
-		if *jsonOut {
-			return emit(map[string]any{"request": r, "decision": d})
-		}
-		if d == nil {
-			fmt.Printf("ruled %s (decision %s not found in ledger)\n", r.ID, r.Decision)
-			return nil
-		}
-		fmt.Printf("RULED %s by %s (%s)\n%s\n", r.ID, d.By, d.Tier, d.Ruling)
-		if d.Evidence != "" {
-			fmt.Printf("evidence: %s\n", d.Evidence)
-		}
-		return nil
-
-	case "decisions":
-		var ds []flat.Decision
-		if *scope != "" {
-			ds, err = s.Lookup(split(*scope, ","))
-		} else {
-			ds, err = s.Effective()
-		}
-		if err != nil {
-			return err
-		}
-		if *jsonOut {
-			return emit(ds)
-		}
-		if len(ds) == 0 {
-			fmt.Println("no rulings")
-		}
-		for _, d := range ds {
-			fmt.Printf("%s %s %s (%s) on %s: %s\n", d.ID, d.At.Format("15:04"), d.By, d.Tier, strings.Join(d.Scope, ","), d.Ruling)
-		}
-		return nil
-
-	case "who":
-		if arg(0) == "" {
-			return errors.New("who needs a scope")
-		}
-		ws := s.Affinity(split(arg(0), ","), "")
-		if *jsonOut {
-			return emit(ws)
-		}
-		if len(ws) == 0 {
-			fmt.Println("nobody has context on that scope yet")
-		}
-		for _, w := range ws {
-			fmt.Printf("%s: %s\n", w.Seat, strings.Join(w.Why, "; "))
-		}
-		return nil
-
-	case "take":
-		r, err := s.Take(arg(0), seat, *ttl)
-		if err != nil {
-			return record(err)
-		}
-		fmt.Printf("holding %s (epoch %d) until %s\n", r.Name, r.Epoch, r.Until.Format(time.RFC3339))
-		return nil
-
-	case "drop":
-		if err := s.Drop(arg(0), seat); err != nil {
-			return record(err)
-		}
-		fmt.Printf("dropped %s\n", arg(0))
-		return nil
-
-	case "admit":
-		var floor uint64
-		if *diskMin != "" {
-			if floor, err = flat.ParseBytes(*diskMin); err != nil {
-				return err
-			}
-		}
-		for {
-			a, err := s.Admit(flat.AdmitOptions{Seats: *seats, DiskMin: floor, Base: *base, Resource: *resource})
-			if err != nil {
-				return err
-			}
-			if a.Admitted || !*wait {
-				if *jsonOut {
-					_ = emit(a)
-				} else if a.Admitted {
-					fmt.Printf("admitted (%d working)\n", a.Active)
-				} else {
-					fmt.Printf("refused: %s\n", strings.Join(a.Reasons, "; "))
-				}
-				if !a.Admitted {
-					return record(&flat.Refusal{Code: "not_admitted", Msg: strings.Join(a.Reasons, "; ")})
-				}
-				return nil
-			}
+		if !a.Admitted && c.wait {
 			time.Sleep(5 * time.Second)
+			continue
 		}
-
-	case "watch":
-		var floor uint64
-		if *diskMin != "" {
-			if floor, err = flat.ParseBytes(*diskMin); err != nil {
-				return err
-			}
-		}
-		return s.Watch(flat.WatchOptions{Interval: *interval, Base: *base, Fetch: *fetch, Idle: *idle, UnclaimedAfter: *unclaimed, DiskMin: floor, Once: *once, Out: os.Stdout,
-			Wake: *wake, WakeOpts: flat.WakeOptions{Model: *wakeModel, Tools: *wakeTools, Max: *wakeMax}})
-
-	case "digest":
-		d, err := s.ReadDigest()
-		if err != nil {
-			b, alerts, err := s.WatchOnce(flat.WatchOptions{Base: *base, Idle: *idle, UnclaimedAfter: *unclaimed})
-			if err != nil {
-				return err
-			}
-			d = s.Digest(b, alerts)
-		}
-		fmt.Print(d)
-		return nil
-
-	case "inbox":
-		notes, err := s.Inbox(seat, !*keep)
-		if err != nil {
-			return err
-		}
-		if len(notes) == 0 {
-			fmt.Printf("inbox %s: empty\n", seat)
-		}
-		for _, n := range notes {
-			fmt.Printf("[%s %s] %s\n", n.At.Format("15:04"), n.Kind, n.Text)
-		}
-		return nil
-
-	case "nudge":
-		_, err := s.Nudge(arg(0), "manual", strings.Join(pos[1:], " "))
-		return err
-
-	case "install-hook":
-		return installHook(*dir, *cmd)
-
-	case "stats":
-		st, err := s.Stats(*threshold, *base)
-		if err != nil {
-			return err
-		}
-		return emit(st)
+		return c.reportAdmission(a)
 	}
-	fmt.Fprint(os.Stderr, usage)
-	return fmt.Errorf("unknown verb %q", verb)
+}
+
+func (c *cli) reportAdmission(a *flat.Admission) error {
+	reasons := strings.Join(a.Reasons, "; ")
+	switch {
+	case c.jsonOut:
+		_ = c.emit(a)
+	case a.Admitted:
+		fmt.Printf("admitted (%d working)\n", a.Active)
+	default:
+		fmt.Printf("refused: %s\n", reasons)
+	}
+	if !a.Admitted {
+		return c.record(&flat.Refusal{Code: "not_admitted", Msg: reasons})
+	}
+	return nil
+}
+
+func (c *cli) watch() error {
+	floor, err := c.diskFloor()
+	if err != nil {
+		return err
+	}
+	return c.s.Watch(flat.WatchOptions{Interval: c.interval, Base: c.base, Fetch: c.fetch, Idle: c.idle, UnclaimedAfter: c.unclaimed, DiskMin: floor, Once: c.once, Out: os.Stdout,
+		Wake: c.wake, WakeOpts: flat.WakeOptions{Model: c.wakeModel, Tools: c.wakeTools, Max: c.wakeMax}})
+}
+
+func (c *cli) digest() error {
+	d, err := c.s.ReadDigest()
+	if err != nil {
+		b, alerts, err := c.s.WatchOnce(flat.WatchOptions{Base: c.base, Idle: c.idle, UnclaimedAfter: c.unclaimed})
+		if err != nil {
+			return err
+		}
+		d = c.s.Digest(b, alerts)
+	}
+	fmt.Print(d)
+	return nil
+}
+
+func (c *cli) inbox() error {
+	notes, err := c.s.Inbox(c.seat, !c.keep)
+	if err != nil {
+		return err
+	}
+	if len(notes) == 0 {
+		fmt.Printf("inbox %s: empty\n", c.seat)
+	}
+	for _, n := range notes {
+		fmt.Printf("[%s %s] %s\n", n.At.Format("15:04"), n.Kind, n.Text)
+	}
+	return nil
+}
+
+func (c *cli) nudge() error {
+	_, err := c.s.Nudge(c.arg(0), "manual", strings.Join(c.pos[1:], " "))
+	return err
+}
+
+func (c *cli) stats() error {
+	st, err := c.s.Stats(c.threshold, c.base)
+	if err != nil {
+		return err
+	}
+	return c.emit(st)
 }
 
 func ageOf(t time.Time) string {
@@ -481,7 +579,8 @@ func ageOf(t time.Time) string {
 }
 
 // installHook merges the flat hook into <dir>/.claude/settings.json.
-func installHook(dir, cmd string) error {
+func (c *cli) installHook() error {
+	cmd := c.cmd
 	if cmd == "" {
 		exe, err := os.Executable()
 		if err != nil {
@@ -489,7 +588,7 @@ func installHook(dir, cmd string) error {
 		}
 		cmd = filepath.ToSlash(exe)
 	}
-	path := filepath.Join(dir, ".claude", "settings.json")
+	path := filepath.Join(c.dir, ".claude", "settings.json")
 	settings := map[string]any{}
 	if data, err := os.ReadFile(path); err == nil {
 		if err := json.Unmarshal(data, &settings); err != nil {
@@ -503,13 +602,7 @@ func installHook(dir, cmd string) error {
 	want := flat.HookSettings(cmd)["hooks"].(map[string]any)
 	for event, entries := range want {
 		existing, _ := hooks[event].([]any)
-		present := false
-		for _, e := range existing {
-			if strings.Contains(fmt.Sprint(e), "flat hook") || strings.Contains(fmt.Sprint(e), "flat.exe hook") {
-				present = true
-			}
-		}
-		if present {
+		if hasFlatHook(existing) {
 			continue
 		}
 		for _, e := range entries.([]map[string]any) {
@@ -530,4 +623,14 @@ func installHook(dir, cmd string) error {
 	}
 	fmt.Printf("hook installed in %s (%s hook)\n", path, cmd)
 	return nil
+}
+
+func hasFlatHook(entries []any) bool {
+	for _, e := range entries {
+		s := fmt.Sprint(e)
+		if strings.Contains(s, "flat hook") || strings.Contains(s, "flat.exe hook") {
+			return true
+		}
+	}
+	return false
 }

@@ -39,6 +39,16 @@ type Stats struct {
 	RuledByRouted    int            `json:"ruled_by_routed"` // rulings made by a seat the index picked
 }
 
+// tally is the per-request timeline the event log yields.
+type tally struct {
+	asked, claimed, ruled map[string]time.Time
+	routed                map[string]map[string]bool
+}
+
+func newTally() *tally {
+	return &tally{asked: map[string]time.Time{}, claimed: map[string]time.Time{}, ruled: map[string]time.Time{}, routed: map[string]map[string]bool{}}
+}
+
 // Stats computes the scorecard. threshold is the unclaimed kill line.
 func (s *State) Stats(threshold time.Duration, base string) (*Stats, error) {
 	st := &Stats{ByNeeds: map[string]int{}, Refusals: map[string]int{}}
@@ -46,85 +56,95 @@ func (s *State) Stats(threshold time.Duration, base string) (*Stats, error) {
 	if err != nil {
 		return nil, err
 	}
-	asked := map[string]time.Time{}
-	claimed := map[string]time.Time{}
-	ruled := map[string]time.Time{}
-	routed := map[string]map[string]bool{}
+	t := newTally()
 	for _, e := range events {
-		switch e.Kind {
-		case "route":
-			set := map[string]bool{}
-			for _, seat := range strings.Split(e.Detail, ",") {
-				if seat != "" {
-					set[seat] = true
-				}
-			}
-			if len(set) > 0 {
-				st.Routed++
-			}
-			routed[e.Request] = set
-		case "ask":
-			asked[e.Request] = e.At
-			st.Requests++
-			st.ByNeeds[e.Tier]++
-		case "claim":
-			if _, ok := claimed[e.Request]; !ok {
-				claimed[e.Request] = e.At
-			}
-		case "rule":
-			ruled[e.Request] = e.At
-			st.Ruled++
-			if routed[e.Request][e.By] {
-				st.RuledByRouted++
-			}
-			if e.Tier == TierOperator {
-				st.OperatorRulings++
-			}
-		case "escalate":
-			st.Escalations++
-			if e.Tier == TierOperator {
-				st.OperatorRequests++
-			}
-		case "refuse_admit":
-			st.AdmitRefusals++
-		case "nudge":
-			st.Nudges++
-		case "wake":
-			st.Wakes++
-		case "take_over":
-			st.Takeovers++
-		case "lock_broken":
-			st.LocksBroken++
-		case "refusal":
-			st.Refusals[e.Detail]++
-		}
+		st.absorb(e, t)
 	}
 	st.OperatorRequests += st.ByNeeds[TierOperator]
-	now := Now()
-	var claimTimes, ruleTimes []float64
-	for id, at := range asked {
-		if c, ok := claimed[id]; ok {
-			d := c.Sub(at)
-			claimTimes = append(claimTimes, d.Seconds())
-			if d > threshold {
-				st.UnclaimedOver++
-			}
-		} else if now.Sub(at) > threshold {
-			st.UnclaimedOver++
-		}
-		if r, ok := ruled[id]; ok {
-			ruleTimes = append(ruleTimes, r.Sub(at).Seconds())
-		} else {
-			st.Open++
-		}
-	}
-	st.ClaimP50Seconds, st.ClaimMaxSeconds = p50max(claimTimes)
-	st.RuleP50Seconds, st.RuleMaxSeconds = p50max(ruleTimes)
-
+	st.latencies(t, threshold)
 	b, err := s.Board(BoardOptions{Base: base})
 	if err != nil {
 		return nil, err
 	}
+	st.fromBoard(b)
+	return st, nil
+}
+
+func (st *Stats) absorb(e Event, t *tally) {
+	switch e.Kind {
+	case "route":
+		set := map[string]bool{}
+		for _, seat := range strings.Split(e.Detail, ",") {
+			if seat != "" {
+				set[seat] = true
+			}
+		}
+		if len(set) > 0 {
+			st.Routed++
+		}
+		t.routed[e.Request] = set
+	case "ask":
+		t.asked[e.Request] = e.At
+		st.Requests++
+		st.ByNeeds[e.Tier]++
+	case "claim":
+		if _, ok := t.claimed[e.Request]; !ok {
+			t.claimed[e.Request] = e.At
+		}
+	case "rule":
+		t.ruled[e.Request] = e.At
+		st.Ruled++
+		if t.routed[e.Request][e.By] {
+			st.RuledByRouted++
+		}
+		if e.Tier == TierOperator {
+			st.OperatorRulings++
+		}
+	case "escalate":
+		st.Escalations++
+		if e.Tier == TierOperator {
+			st.OperatorRequests++
+		}
+	case "refuse_admit":
+		st.AdmitRefusals++
+	case "nudge":
+		st.Nudges++
+	case "wake":
+		st.Wakes++
+	case "take_over":
+		st.Takeovers++
+	case "lock_broken":
+		st.LocksBroken++
+	case "refusal":
+		st.Refusals[e.Detail]++
+	}
+}
+
+func (st *Stats) latencies(t *tally, threshold time.Duration) {
+	now := Now()
+	var claimTimes, ruleTimes []float64
+	for id, at := range t.asked {
+		c, claimed := t.claimed[id]
+		switch {
+		case claimed:
+			claimTimes = append(claimTimes, c.Sub(at).Seconds())
+			if c.Sub(at) > threshold {
+				st.UnclaimedOver++
+			}
+		case now.Sub(at) > threshold:
+			st.UnclaimedOver++
+		}
+		if r, ok := t.ruled[id]; ok {
+			ruleTimes = append(ruleTimes, r.Sub(at).Seconds())
+			continue
+		}
+		st.Open++
+	}
+	st.ClaimP50Seconds, st.ClaimMaxSeconds = p50max(claimTimes)
+	st.RuleP50Seconds, st.RuleMaxSeconds = p50max(ruleTimes)
+}
+
+func (st *Stats) fromBoard(b *Board) {
 	for _, r := range b.Rows {
 		switch r.State {
 		case "landed":
@@ -147,10 +167,9 @@ func (s *State) Stats(threshold time.Duration, base string) (*Stats, error) {
 			st.ContendedUnruled++
 		}
 	}
-	return st, nil
 }
 
-func p50max(xs []float64) (p50, max float64) {
+func p50max(xs []float64) (p50, hi float64) {
 	if len(xs) == 0 {
 		return 0, 0
 	}

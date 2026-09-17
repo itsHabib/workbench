@@ -154,18 +154,36 @@ func Run(o RunOptions) error {
 		go func() { defer bg.Done(); r.lead(ctx) }()
 	}
 
+	r.runBuilders(selectTasks(o.Only))
+	r.logf("all builders finished; final pass")
+	cancel()
+	bg.Wait()
+	flat.WaitWakes()
+	if _, _, err := r.state.WatchOnce(r.watchOptions()); err != nil {
+		r.logf("final watch: %v", err)
+	}
+	return r.collect()
+}
+
+// selectTasks narrows the workload to only, when given.
+func selectTasks(only []string) []Task {
 	tasks := Tasks()
-	if len(o.Only) > 0 {
-		var sub []Task
-		for _, t := range tasks {
-			for _, want := range o.Only {
-				if t.Branch == want {
-					sub = append(sub, t)
-				}
+	if len(only) == 0 {
+		return tasks
+	}
+	var sub []Task
+	for _, t := range tasks {
+		for _, want := range only {
+			if t.Branch == want {
+				sub = append(sub, t)
 			}
 		}
-		tasks = sub
 	}
+	return sub
+}
+
+// runBuilders admits and runs every task, in order, and waits for all.
+func (r *runner) runBuilders(tasks []Task) {
 	var builders sync.WaitGroup
 	for i, t := range tasks {
 		r.admit(i, t)
@@ -184,14 +202,6 @@ func Run(o RunOptions) error {
 		}(t)
 	}
 	builders.Wait()
-	r.logf("all builders finished; final pass")
-	cancel()
-	bg.Wait()
-	flat.WaitWakes()
-	if _, _, err := r.state.WatchOnce(r.watchOptions()); err != nil {
-		r.logf("final watch: %v", err)
-	}
-	return r.collect()
 }
 
 func (r *runner) watchOptions() flat.WatchOptions {

@@ -203,6 +203,7 @@ type Who struct {
 
 // Affinity lists seats with context on scope, best first: branches whose
 // files overlap it, seats that ruled on it before, holders of a resource in
+// it. A landed seat counts: it holds the most context and a wake can resume
 // it. exclude drops the asker. This is the index; git and the ledger are
 // its source, nobody registers.
 func (s *State) Affinity(scope []string, exclude string) []Who {
@@ -222,9 +223,6 @@ func (s *State) Affinity(scope []string, exclude string) []Who {
 	}
 	if b, err := s.Board(BoardOptions{}); err == nil {
 		for _, row := range b.Rows {
-			if row.State == "landed" || row.State == "silent" {
-				continue
-			}
 			var hits []string
 			for _, f := range row.Files {
 				if isResultFile(f) || !scopesOverlap([]string{f}, scope) {
@@ -374,38 +372,13 @@ func (s *State) Rule(id, by string, epoch int, ruling, evidence, supersedes stri
 		return nil, refuse("tier_too_low", "%s needs %s; %s is %s. use: flat escalate %s --to %s --why '...'", id, r.Needs, by, tier, id, r.Needs)
 	}
 	now := Now()
-	switch c := r.Claim; {
-	case c != nil && c.Holder != by && now.Before(c.Until):
-		return nil, refuse("claimed_by_other", "%s is claimed by %s until %s", id, c.Holder, c.Until.Format(time.RFC3339))
-	case c != nil && c.Holder == by && epoch != 0 && epoch != c.Epoch:
-		return nil, refuse("claim_fenced", "your claim on %s is epoch %d, you passed %d; it changed hands", id, c.Epoch, epoch)
-	case c != nil && c.Holder == by && epoch == 0 && now.After(c.Until):
-		return nil, refuse("claim_expired", "your claim on %s expired at %s; claim again", id, c.Until.Format(time.RFC3339))
-	case c == nil || c.Holder != by:
-		r.Epoch++
-		r.Claim = &Claim{Holder: by, Epoch: r.Epoch, At: now, Until: now.Add(time.Minute)}
-		s.appendEvent(Event{Kind: "claim", Request: id, By: by, Epoch: r.Epoch, Detail: "implicit"})
+	if err := s.claimForRule(r, by, epoch, now); err != nil {
+		return nil, err
 	}
-
-	// Tiebreak against an existing effective decision on the same scope.
-	effective, err := s.Effective()
+	supersedes, err = s.tiebreak(r.Scope, tier, supersedes)
 	if err != nil {
 		return nil, err
 	}
-	for _, d := range effective {
-		if !scopesOverlap(d.Scope, r.Scope) || d.ID == supersedes {
-			continue
-		}
-		switch {
-		case Level(d.Tier) > Level(tier):
-			return nil, refuse("outranked", "%s already ruled on %s at tier %s; a %s cannot override it", d.ID, strings.Join(d.Scope, ","), d.Tier, tier)
-		case Level(d.Tier) == Level(tier):
-			return nil, refuse("must_supersede", "%s already ruled on %s; pass --supersedes %s and say why in --evidence", d.ID, strings.Join(d.Scope, ","), d.ID)
-		default:
-			supersedes = d.ID // a higher tier overrides silently, recorded
-		}
-	}
-
 	d := &Decision{ID: NewID("dec"), At: now, Request: id, Scope: r.Scope, Ruling: ruling, By: by, Tier: tier, Evidence: evidence, Supersedes: supersedes}
 	if err := s.appendDecision(d); err != nil {
 		return nil, err
@@ -417,6 +390,48 @@ func (s *State) Rule(id, by string, epoch int, ruling, evidence, supersedes stri
 	s.appendEvent(Event{Kind: "rule", Request: id, By: by, Tier: tier, Epoch: r.Claim.Epoch, Detail: d.ID})
 	s.notify(r.From, fmt.Sprintf("ruled %s by %s (%s): %s", id, by, tier, ruling))
 	return d, nil
+}
+
+// claimForRule checks the caller's claim on r, or takes one when the
+// request is free. epoch 0 means "claim now"; a nonzero epoch must match.
+func (s *State) claimForRule(r *Request, by string, epoch int, now time.Time) error {
+	c := r.Claim
+	switch {
+	case c != nil && c.Holder != by && now.Before(c.Until):
+		return refuse("claimed_by_other", "%s is claimed by %s until %s", r.ID, c.Holder, c.Until.Format(time.RFC3339))
+	case c != nil && c.Holder == by && epoch != 0 && epoch != c.Epoch:
+		return refuse("claim_fenced", "your claim on %s is epoch %d, you passed %d; it changed hands", r.ID, c.Epoch, epoch)
+	case c != nil && c.Holder == by && epoch == 0 && now.After(c.Until):
+		return refuse("claim_expired", "your claim on %s expired at %s; claim again", r.ID, c.Until.Format(time.RFC3339))
+	case c == nil || c.Holder != by:
+		r.Epoch++
+		r.Claim = &Claim{Holder: by, Epoch: r.Epoch, At: now, Until: now.Add(time.Minute)}
+		s.appendEvent(Event{Kind: "claim", Request: r.ID, By: by, Epoch: r.Epoch, Detail: "implicit"})
+	}
+	return nil
+}
+
+// tiebreak resolves a new ruling at tier against the effective rulings on
+// overlapping scope. Equal tier must name what it supersedes; a higher tier
+// overrides and the override is recorded; a lower tier is refused.
+func (s *State) tiebreak(scope []string, tier, supersedes string) (string, error) {
+	effective, err := s.Effective()
+	if err != nil {
+		return "", err
+	}
+	for _, d := range effective {
+		if !scopesOverlap(d.Scope, scope) || d.ID == supersedes {
+			continue
+		}
+		switch {
+		case Level(d.Tier) > Level(tier):
+			return "", refuse("outranked", "%s already ruled on %s at tier %s; a %s cannot override it", d.ID, strings.Join(d.Scope, ","), d.Tier, tier)
+		case Level(d.Tier) == Level(tier):
+			return "", refuse("must_supersede", "%s already ruled on %s; pass --supersedes %s and say why in --evidence", d.ID, strings.Join(d.Scope, ","), d.ID)
+		}
+		supersedes = d.ID
+	}
+	return supersedes, nil
 }
 
 // Escalate raises the tier a request needs and releases any claim.
@@ -462,22 +477,9 @@ func (s *State) Decide(by string, scope []string, ruling, evidence, supersedes s
 	}
 	defer release()
 	tier := s.TierOf(by)
-	effective, err := s.Effective()
+	supersedes, err = s.tiebreak(scope, tier, supersedes)
 	if err != nil {
 		return nil, err
-	}
-	for _, d := range effective {
-		if !scopesOverlap(d.Scope, scope) || d.ID == supersedes {
-			continue
-		}
-		switch {
-		case Level(d.Tier) > Level(tier):
-			return nil, refuse("outranked", "%s already ruled on %s at tier %s", d.ID, strings.Join(d.Scope, ","), d.Tier)
-		case Level(d.Tier) == Level(tier):
-			return nil, refuse("must_supersede", "%s already ruled on %s; pass --supersedes %s", d.ID, strings.Join(d.Scope, ","), d.ID)
-		default:
-			supersedes = d.ID
-		}
 	}
 	d := &Decision{ID: NewID("dec"), At: Now(), Scope: scope, Ruling: ruling, By: by, Tier: tier, Evidence: evidence, Supersedes: supersedes}
 	if err := s.appendDecision(d); err != nil {

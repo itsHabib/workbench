@@ -233,6 +233,14 @@ func TestTiersAndTiebreak(t *testing.T) {
 	if _, err := s.Rule(r2.ID, "peer1", 0, "csv", "", ""); err == nil || !strings.Contains(err.Error(), "outranked") {
 		t.Fatalf("peer overrode operator: %v", err)
 	}
+}
+
+func TestTiebreakAndEscalation(t *testing.T) {
+	main := repo(t)
+	s := open(t, main)
+	if err := s.Init(Tiers{Operator: []string{"op"}, Lead: []string{"ld"}}); err != nil {
+		t.Fatal(err)
+	}
 	// Same tier, same scope: must supersede explicitly.
 	r3, _ := s.Ask("b", []string{"a.go"}, "?", nil, "")
 	d3, err := s.Rule(r3.ID, "peer1", 0, "first", "", "")
@@ -542,5 +550,37 @@ func TestHookRecordsTurnBoundaries(t *testing.T) {
 	send("SessionEnd")
 	if _, ok := s.Wakeable("w"); !ok {
 		t.Fatal("ended session not wakeable")
+	}
+}
+
+func TestRebaseOntoPeerIsInherited(t *testing.T) {
+	main := repo(t)
+	s := open(t, main)
+	p := branch(t, main, "p", "a.go")
+	land(t, p, "p")
+	q := branch(t, main, "q", "b.go")
+	// q rebases onto p's tip, as a ruling "p lands first" tells it to.
+	must(t, q, "rebase", "-q", "p")
+	b, err := s.Board(BoardOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	qr := rowOf(t, b, "q")
+	if len(qr.Files) != 1 || qr.Files[0] != "b.go" {
+		t.Fatalf("q files = %v, want only its own b.go", qr.Files)
+	}
+	if qr.State != "working" || qr.ResultPath != "" {
+		t.Fatalf("q inherited p's landing: state=%s result=%s", qr.State, qr.ResultPath)
+	}
+	if len(b.Contended) != 0 {
+		t.Fatalf("inherited files counted as contention: %+v", b.Contended)
+	}
+	land(t, q, "q")
+	b, _ = s.Board(BoardOptions{})
+	if got := rowOf(t, b, "q").State; got != "landed" {
+		t.Fatalf("q after landing = %s", got)
+	}
+	if got := rowOf(t, b, "p").State; got != "landed" {
+		t.Fatalf("p disturbed by q's rebase: %s", got)
 	}
 }

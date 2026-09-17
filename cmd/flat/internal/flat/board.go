@@ -83,6 +83,12 @@ func (o *BoardOptions) defaults() {
 	}
 }
 
+// tipRef is a branch's local and remote tips.
+type tipRef struct {
+	local, remote     string
+	localAt, remoteAt int64
+}
+
 // Board derives the fleet state from the repository at s.Repo.
 func (s *State) Board(opts BoardOptions) (*Board, error) {
 	opts.defaults()
@@ -97,98 +103,34 @@ func (s *State) Board(opts BoardOptions) (*Board, error) {
 		return nil, fmt.Errorf("base branch %s: %w", opts.Base, err)
 	}
 	b.BaseSHA = baseSHA
-
-	type ref struct {
-		local, remote     string
-		localAt, remoteAt int64
-	}
-	refs := map[string]*ref{}
-	lines, err := gitLines(s.Repo, "for-each-ref", "--format=%(refname)%00%(objectname)%00%(committerdate:unix)", "refs/heads", "refs/remotes/origin")
+	refs, err := s.collectRefs()
 	if err != nil {
 		return nil, err
 	}
-	for _, line := range lines {
-		parts := strings.SplitN(line, "\x00", 3)
-		if len(parts) != 3 {
-			continue
-		}
-		at, _ := strconv.ParseInt(parts[2], 10, 64)
-		switch {
-		case strings.HasPrefix(parts[0], "refs/heads/"):
-			name := strings.TrimPrefix(parts[0], "refs/heads/")
-			r := refs[name]
-			if r == nil {
-				r = &ref{}
-				refs[name] = r
-			}
-			r.local, r.localAt = parts[1], at
-		case strings.HasPrefix(parts[0], "refs/remotes/origin/"):
-			name := strings.TrimPrefix(parts[0], "refs/remotes/origin/")
-			if name == "HEAD" {
-				continue
-			}
-			r := refs[name]
-			if r == nil {
-				r = &ref{}
-				refs[name] = r
-			}
-			r.remote, r.remoteAt = parts[1], at
-		}
-	}
 	delete(refs, opts.Base)
-
 	effective, err := s.Effective()
 	if err != nil {
 		return nil, err
 	}
-
-	names := make([]string, 0, len(refs))
-	for n := range refs {
-		names = append(names, n)
-	}
-	sort.Strings(names)
+	names, tips, rows := pickTips(s.Repo, refs)
 	byFile := map[string][]string{}
 	for _, name := range names {
-		r := refs[name]
-		tip, at := r.local, r.localAt
-		if tip == "" || (r.remote != "" && !isAncestor(s.Repo, r.remote, r.local)) {
-			tip, at = r.remote, r.remoteAt
-		}
-		row := Row{Branch: name, Tip: tip, TipAt: time.Unix(at, 0).UTC()}
+		row := rows[name]
 		row.AgeSeconds = int64(b.At.Sub(row.TipAt).Seconds())
-		row.Unpushed = r.local != "" && r.local != r.remote
-		mb, err := Git(s.Repo, "merge-base", baseSHA, tip)
-		if err != nil {
-			mb = baseSHA
+		fork := s.forkPoint(name, row.Tip, baseSHA, tips)
+		if row.Tip == fork {
+			continue // nothing of its own on this branch yet
 		}
-		if tip == mb {
-			continue // nothing on this branch yet
-		}
-		row.Files, _ = gitLines(s.Repo, "diff", "--name-only", mb, tip)
-		s.classify(&row, opts)
+		row.Files, _ = gitLines(s.Repo, "diff", "--name-only", fork, row.Tip)
+		s.classify(row, opts)
 		for _, f := range row.Files {
-			if isResultFile(f) {
-				continue
+			if !isResultFile(f) {
+				byFile[f] = append(byFile[f], name)
 			}
-			byFile[f] = append(byFile[f], name)
 		}
-		b.Rows = append(b.Rows, row)
+		b.Rows = append(b.Rows, *row)
 	}
-
-	files := make([]string, 0, len(byFile))
-	for f, bs := range byFile {
-		if len(bs) > 1 {
-			files = append(files, f)
-		}
-	}
-	sort.Strings(files)
-	for _, f := range files {
-		c := Contention{File: f, Branches: byFile[f]}
-		if d := latestCovering(effective, f); d != nil {
-			c.Ruled, c.Decision = true, d.ID
-		}
-		b.Contended = append(b.Contended, c)
-	}
+	b.Contended = contentions(byFile, effective)
 	for i := range b.Rows {
 		b.Rows[i].Overlaps = overlapsFor(b.Rows[i].Branch, b.Contended)
 	}
@@ -197,10 +139,113 @@ func (s *State) Board(opts BoardOptions) (*Board, error) {
 	return b, nil
 }
 
+// collectRefs reads every local and origin branch tip.
+func (s *State) collectRefs() (map[string]*tipRef, error) {
+	refs := map[string]*tipRef{}
+	lines, err := gitLines(s.Repo, "for-each-ref", "--format=%(refname)%00%(objectname)%00%(committerdate:unix)", "refs/heads", "refs/remotes/origin")
+	if err != nil {
+		return nil, err
+	}
+	get := func(name string) *tipRef {
+		r := refs[name]
+		if r == nil {
+			r = &tipRef{}
+			refs[name] = r
+		}
+		return r
+	}
+	for _, line := range lines {
+		parts := strings.SplitN(line, "\x00", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		at, _ := strconv.ParseInt(parts[2], 10, 64)
+		if name, ok := strings.CutPrefix(parts[0], "refs/heads/"); ok {
+			r := get(name)
+			r.local, r.localAt = parts[1], at
+			continue
+		}
+		if name, ok := strings.CutPrefix(parts[0], "refs/remotes/origin/"); ok && name != "HEAD" {
+			r := get(name)
+			r.remote, r.remoteAt = parts[1], at
+		}
+	}
+	return refs, nil
+}
+
+// pickTips chooses each branch's tip: the local one when it contains the
+// remote, else the remote. Unpushed marks a local tip the remote lacks.
+func pickTips(repo string, refs map[string]*tipRef) ([]string, map[string]string, map[string]*Row) {
+	names := make([]string, 0, len(refs))
+	for n := range refs {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	tips := map[string]string{}
+	rows := map[string]*Row{}
+	for _, name := range names {
+		r := refs[name]
+		tip, at := r.local, r.localAt
+		if tip == "" || (r.remote != "" && !isAncestor(repo, r.remote, r.local)) {
+			tip, at = r.remote, r.remoteAt
+		}
+		tips[name] = tip
+		rows[name] = &Row{Branch: name, Tip: tip, TipAt: time.Unix(at, 0).UTC(), Unpushed: r.local != "" && r.local != r.remote}
+	}
+	return names, tips, rows
+}
+
+// contentions lists every file two or more branches changed, with the
+// effective ruling that covers it if any.
+func contentions(byFile map[string][]string, effective []Decision) []Contention {
+	files := make([]string, 0, len(byFile))
+	for f, bs := range byFile {
+		if len(bs) > 1 {
+			files = append(files, f)
+		}
+	}
+	sort.Strings(files)
+	var out []Contention
+	for _, f := range files {
+		c := Contention{File: f, Branches: byFile[f]}
+		if d := latestCovering(effective, f); d != nil {
+			c.Ruled, c.Decision = true, d.ID
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// forkPoint is where a branch's own work begins: the deepest merge-base
+// with the base branch or with any other branch's tip. A branch that
+// rebased onto a peer, as a ruling may tell it to, carries the peer's
+// commits; those are inherited, not its own changes, and must not count
+// as contention or as its landing.
+func (s *State) forkPoint(name, tip, baseSHA string, tips map[string]string) string {
+	best := baseSHA
+	if mb, err := Git(s.Repo, "merge-base", baseSHA, tip); err == nil {
+		best = mb
+	}
+	for other, otherTip := range tips {
+		if other == name || otherTip == "" || otherTip == tip {
+			continue
+		}
+		mb, err := Git(s.Repo, "merge-base", otherTip, tip)
+		if err != nil || mb == best || mb == tip {
+			continue
+		}
+		if isAncestor(s.Repo, best, mb) {
+			best = mb
+		}
+	}
+	return best
+}
+
 func (s *State) classify(row *Row, opts BoardOptions) {
 	row.State = "working"
+	own := "briefs/out/" + row.Branch + "/RESULT.json"
 	for _, f := range row.Files {
-		if isResultFile(f) {
+		if f == own || (isResultFile(f) && strings.Contains(f, "/"+row.Branch+"/")) {
 			row.ResultPath = f
 			break
 		}
