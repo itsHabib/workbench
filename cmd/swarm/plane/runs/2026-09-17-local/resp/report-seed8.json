@@ -1,0 +1,29 @@
+{
+  "seed": 8,
+  "store": "resp",
+  "check": {
+    "items": 313,
+    "accepted": 308,
+    "claims": 668,
+    "refusals": {},
+    "replays": 1
+  },
+  "tasks": 154,
+  "events": 154,
+  "children": 34,
+  "workers_spawned": 55,
+  "workers_crashed": 55,
+  "kills_sent": 12,
+  "pauses_sent": 4,
+  "store_restarts": 2,
+  "stale_attempts_refused": 0,
+  "lease_takeovers": 29,
+  "max_recover_ms": 369,
+  "recover_bound_ms": 2080,
+  "over_bound": 0,
+  "seat_pool": 5,
+  "peak_seats_held": 5,
+  "wall": 9384697375,
+  "finished": true,
+  "passed": true
+}

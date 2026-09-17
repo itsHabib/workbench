@@ -1,0 +1,32 @@
+{
+  "seed": 3,
+  "store": "file",
+  "check": {
+    "items": 313,
+    "accepted": 308,
+    "claims": 755,
+    "refusals": {
+      "commit:done": 3,
+      "commit:fenced": 11
+    },
+    "replays": 0
+  },
+  "tasks": 154,
+  "events": 154,
+  "children": 34,
+  "workers_spawned": 67,
+  "workers_crashed": 67,
+  "kills_sent": 12,
+  "pauses_sent": 4,
+  "store_restarts": 0,
+  "stale_attempts_refused": 14,
+  "lease_takeovers": 44,
+  "max_recover_ms": 809,
+  "recover_bound_ms": 2080,
+  "over_bound": 0,
+  "seat_pool": 5,
+  "peak_seats_held": 5,
+  "wall": 26031295167,
+  "finished": true,
+  "passed": true
+}

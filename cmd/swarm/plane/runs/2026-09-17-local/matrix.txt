@@ -1,0 +1,48 @@
+=== file, 10 seeds ===
+seed  store accept  tasks  events crash  refused  taken   recoverMS seats   violations unfinish  verdict
+1     file  308     154    154    61     44       75      899       5/5     0          0         PASS
+2     file  308     154    154    75     42       75      844       5/5     0          0         PASS
+3     file  308     154    154    67     14       44      809       5/5     0          0         PASS
+4     file  308     154    154    51     51       67      562       5/5     0          0         PASS
+5     file  308     154    154    59     46       74      666       5/5     0          0         PASS
+6     file  308     154    154    70     45       81      641       5/5     0          0         PASS
+7     file  308     154    154    60     42       73      683       5/5     0          0         PASS
+8     file  308     154    154    62     47       76      821       5/5     0          0         PASS
+9     file  308     154    154    72     48       88      1325      5/5     0          0         PASS
+10    file  308     154    154    66     32       68      625       5/5     0          0         PASS
+all 10 runs passed
+
+=== resp, 10 seeds, store killed mid-run ===
+seed  store accept  tasks  events crash  refused  taken   recoverMS seats   violations unfinish  verdict
+1     resp  308     154    154    54     2        26      249       5/5     0          0         PASS
+2     resp  308     154    154    64     2        33      112       5/5     0          0         PASS
+3     resp  308     154    154    66     0        31      156       5/5     0          0         PASS
+4     resp  308     154    154    67     1        40      156       5/5     0          0         PASS
+5     resp  308     154    154    60     0        32      173       5/5     0          0         PASS
+6     resp  308     154    154    66     1        38      235       5/5     0          0         PASS
+7     resp  308     154    154    52     2        29      583       5/5     0          0         PASS
+8     resp  308     154    154    55     0        29      369       5/5     0          0         PASS
+9     resp  308     154    154    69     2        36      126       5/5     0          0         PASS
+10    resp  308     154    154    56     0        24      684       5/5     0          0         PASS
+all 10 runs passed
+
+=== mutant no-epoch (must FAIL) ===
+      current-lease task/t017.a: accepted commit by t-5-24 under epoch 1; the current lease is t-5-33 epoch 2
+      ... 3 more
+5 of 5 runs FAILED
+
+=== mutant no-done (must FAIL) ===
+      accepted-once task/t001: second accepted commit by t-5-4 (epoch 2); first at seq 75
+      ... 806 more
+5 of 5 runs FAILED
+
+=== mutant no-pending (must FAIL) ===
+      no-claim-after event/t000.done: granted epoch 2 to e-5-10 after commit at seq 89
+      ... 428 more
+5 of 5 runs FAILED
+
+=== mutant epoch-reuse (must FAIL) ===
+      epochs-grow seat/seat00: granted epoch 1, already granted up to 1
+      ... 280 more
+5 of 5 runs FAILED
+MATRIX-DONE
