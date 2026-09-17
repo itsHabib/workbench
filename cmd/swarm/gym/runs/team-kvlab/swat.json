@@ -1,0 +1,113 @@
+{
+  "at": "2026-09-17T22:37:19.441873Z",
+  "shape": "swat",
+  "model": "claude-sonnet-5",
+  "store": "resp:127.0.0.1:56440/team2-swat",
+  "seats": [
+    {
+      "seat": "p1",
+      "role": "peer",
+      "joined_s": 0.190866959,
+      "wall_s": 126.268304792,
+      "turns": 38,
+      "cost_usd": 0.8063582,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p2",
+      "role": "peer",
+      "joined_s": 0.26624475,
+      "wall_s": 130.04212275,
+      "turns": 27,
+      "cost_usd": 0.539822,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p3",
+      "role": "joiner",
+      "joined_s": 20.365423667,
+      "wall_s": 107.903425,
+      "turns": 22,
+      "cost_usd": 0.5062277999999999,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p4",
+      "role": "joiner",
+      "joined_s": 40.438108917,
+      "wall_s": 88.656852292,
+      "turns": 20,
+      "cost_usd": 0.4460935999999999,
+      "cost_known": true,
+      "wakes": 0
+    }
+  ],
+  "hidden_passed": 20,
+  "hidden_total": 20,
+  "builds": true,
+  "own_test_files": 5,
+  "wall_s": 140.570337334,
+  "cost_usd": 2.2985016,
+  "turns": 107,
+  "work": [
+    {
+      "id": "go-mod-init",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "Initialize go.mod for kvlab"
+    },
+    {
+      "id": "pkg-store",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "store package"
+    },
+    {
+      "id": "pkg-wal",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p3",
+      "holder": "",
+      "title": "wal package"
+    },
+    {
+      "id": "pkg-query",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p4",
+      "holder": "",
+      "title": "query package"
+    },
+    {
+      "id": "pkg-stats",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "stats package"
+    },
+    {
+      "id": "pkg-engine",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "engine package"
+    }
+  ],
+  "requests": 1,
+  "commits_by_author": {
+    "harness": 1,
+    "p1": 2,
+    "p2": 1,
+    "p3": 1,
+    "p4": 1
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "at": "2026-09-17T22:37:19.441874Z",
+  "shape": "flat",
+  "model": "claude-sonnet-5",
+  "store": "resp:127.0.0.1:56440/team2-flat",
+  "seats": [
+    {
+      "seat": "p1",
+      "role": "peer",
+      "joined_s": 0.190948125,
+      "wall_s": 139.826572667,
+      "turns": 19,
+      "cost_usd": 0.4836588,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p2",
+      "role": "peer",
+      "joined_s": 0.266264792,
+      "wall_s": 130.600357375,
+      "turns": 41,
+      "cost_usd": 0.7613083999999999,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p3",
+      "role": "peer",
+      "joined_s": 0.347762959,
+      "wall_s": 135.063253041,
+      "turns": 34,
+      "cost_usd": 0.7976204000000001,
+      "cost_known": true,
+      "wakes": 0
+    }
+  ],
+  "hidden_passed": 20,
+  "hidden_total": 20,
+  "builds": true,
+  "own_test_files": 5,
+  "wall_s": 140.017573625,
+  "cost_usd": 2.0425876,
+  "turns": 94,
+  "work": [
+    {
+      "id": "store",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p2",
+      "holder": "",
+      "title": "store package"
+    },
+    {
+      "id": "wal",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p3",
+      "holder": "",
+      "title": "wal package"
+    },
+    {
+      "id": "query",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p1",
+      "holder": "",
+      "title": "query package"
+    },
+    {
+      "id": "stats",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p2",
+      "holder": "",
+      "title": "stats package"
+    },
+    {
+      "id": "engine",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p3",
+      "holder": "",
+      "title": "engine package"
+    }
+  ],
+  "requests": 0,
+  "commits_by_author": {
+    "harness": 1,
+    "p1": 1,
+    "p2": 2,
+    "p3": 2
+  }
+}

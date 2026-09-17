@@ -97,6 +97,8 @@ type cli struct {
 	s    *swarm.State
 	seat string
 
+	title, files, result string
+
 	as, scope, question, options, needs, ruling, evidence, supersedes, to, why        string
 	operator, lead, verifier, diskMin, resource, dir, cmd, wakeModel, wakeTools, base string
 	orderFlag, verifyCmd, into, forBranch                                             string
@@ -150,6 +152,9 @@ func parse(verb string, args []string) (*cli, error) {
 	fs.StringVar(&c.orderFlag, "order", "", "branches in landing order, comma-separated, when ruling on order")
 	fs.StringVar(&c.verifyCmd, "verify", "", "watch: command to run at each landed head, e.g. 'go test ./...'")
 	fs.DurationVar(&c.window, "window", time.Hour, "load window")
+	fs.StringVar(&c.title, "title", "", "work title")
+	fs.StringVar(&c.files, "files", "", "comma-separated paths the work touches")
+	fs.StringVar(&c.result, "result", "", "what was done")
 	fs.StringVar(&c.into, "into", "", "split children as branch:title|branch:title")
 	fs.StringVar(&c.forBranch, "for", "", "admit: the branch this seat is for; reserves the seat until it is on the board")
 
@@ -184,6 +189,8 @@ var verbs = map[string]func(*cli) error{
 	"consolidate":  (*cli).consolidate,
 	"who":          (*cli).who,
 	"take":         (*cli).take,
+	"work":         (*cli).work,
+	"idle":         (*cli).idleWait,
 	"drop":         (*cli).drop,
 	"admit":        (*cli).admit,
 	"watch":        (*cli).watch,
@@ -567,6 +574,60 @@ func (c *cli) who() error {
 	for _, w := range ws {
 		fmt.Printf("%s: %s\n", w.Seat, strings.Join(w.Why, "; "))
 	}
+	return nil
+}
+
+func (c *cli) work() error {
+	var w *swarm.Work
+	var err error
+	switch c.arg(0) {
+	case "add":
+		w, err = c.s.WorkAdd(c.arg(1), c.title, split(c.files, ","), c.seat, c.supersedes)
+	case "claim":
+		w, err = c.s.WorkClaim(c.arg(1), c.seat, c.ttl)
+	case "drop":
+		w, err = c.s.WorkDrop(c.arg(1), c.seat)
+	case "done":
+		w, err = c.s.WorkDone(c.arg(1), c.seat, c.result)
+	case "list", "":
+		return c.workList()
+	default:
+		return fmt.Errorf("work: add|list|claim|done|drop")
+	}
+	if err != nil {
+		return c.record(err)
+	}
+	fmt.Printf("%s %s: %s\n", w.State, w.ID, w.Title)
+	return nil
+}
+
+func (c *cli) workList() error {
+	ws, err := c.s.WorkList()
+	if err != nil {
+		return err
+	}
+	if c.jsonOut {
+		return c.emit(ws)
+	}
+	for _, w := range ws {
+		who := w.Holder
+		if w.State == "done" {
+			who = w.DoneBy
+		}
+		fmt.Printf("%-8s %-24s %-12s %s  [%s]\n", w.State, w.ID, who, w.Title, strings.Join(w.Files, ","))
+	}
+	if len(ws) == 0 {
+		fmt.Println("no work yet")
+	}
+	return nil
+}
+
+func (c *cli) idleWait() error {
+	line := c.s.Idle(c.seat, c.timeout)
+	if line == "" {
+		return &swarm.Refusal{Code: "timeout", Msg: "nothing to do yet"}
+	}
+	fmt.Println(line)
 	return nil
 }
 

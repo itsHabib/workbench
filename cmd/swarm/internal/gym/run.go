@@ -46,6 +46,9 @@ const usage = `swarm gym: which model is good enough for which seat
   swarm gym table --out DIR
   swarm gym capacity [--threads 2,4,8,16] [--notes both] [--reps 1] --out DIR
                 how many interleaved threads one agent keeps straight, in its head and with a notes file
+  swarm gym team --shape solo|flat|swat|tree [--n 3] [--store resp:HOST:PORT/PREFIX] --out DIR
+                one goal, no task cards, one team shape; graded by hidden tests on origin main
+  swarm gym team-table DIR...
 `
 
 // Main is the gym subcommand.
@@ -64,6 +67,10 @@ func Main(args []string) int {
 		return runCmd(args[1:])
 	case "capacity":
 		return capacityCmd(args[1:])
+	case "team":
+		return teamCmd(args[1:])
+	case "team-table":
+		return teamTableCmd(args[1:])
 	case "mail":
 		return mailMain(args[1:])
 	case "table":

@@ -1,0 +1,59 @@
+{
+  "at": "2026-09-17T22:29:47.496949Z",
+  "shape": "tree",
+  "model": "claude-sonnet-5",
+  "store": "resp:127.0.0.1:56440/team1-tree",
+  "seats": [
+    {
+      "seat": "b1",
+      "role": "builder",
+      "joined_s": 0.366916125,
+      "wall_s": 167.160990167,
+      "turns": 44,
+      "cost_usd": 1.0676618000000002,
+      "cost_known": true
+    },
+    {
+      "seat": "b2",
+      "role": "builder",
+      "joined_s": 0.556983458,
+      "wall_s": 163.654969292,
+      "turns": 32,
+      "cost_usd": 0.7227669999999999,
+      "cost_known": true
+    },
+    {
+      "seat": "b3",
+      "role": "builder",
+      "joined_s": 0.768127833,
+      "wall_s": 163.432099792,
+      "turns": 42,
+      "cost_usd": 0.818451,
+      "cost_known": true
+    },
+    {
+      "seat": "lead",
+      "role": "lead",
+      "joined_s": 0.259288292,
+      "wall_s": 178.383583625,
+      "turns": 63,
+      "cost_usd": 1.3346491999999999,
+      "cost_known": true
+    }
+  ],
+  "hidden_passed": 20,
+  "hidden_total": 20,
+  "builds": true,
+  "own_test_files": 5,
+  "wall_s": 178.643472542,
+  "cost_usd": 3.9435290000000003,
+  "turns": 181,
+  "work": null,
+  "requests": -1,
+  "commits_by_author": {
+    "b1": 2,
+    "b2": 2,
+    "b3": 1,
+    "harness": 1
+  }
+}

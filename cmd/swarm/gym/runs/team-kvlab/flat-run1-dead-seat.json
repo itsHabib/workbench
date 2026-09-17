@@ -1,0 +1,57 @@
+{
+  "at": "2026-09-17T22:29:47.496953Z",
+  "shape": "flat",
+  "model": "claude-sonnet-5",
+  "store": "resp:127.0.0.1:56440/team1-flat",
+  "seats": [
+    {
+      "seat": "p1",
+      "role": "peer",
+      "joined_s": 0.259314666,
+      "wall_s": 209.809211709,
+      "turns": 24,
+      "cost_usd": 0.7005282,
+      "cost_known": true
+    },
+    {
+      "seat": "p2",
+      "role": "peer",
+      "joined_s": 0.370168333,
+      "wall_s": 240.484409375,
+      "turns": 28,
+      "cost_usd": 0.7387814,
+      "cost_known": true
+    },
+    {
+      "seat": "p3",
+      "role": "peer",
+      "joined_s": 0.583036375,
+      "wall_s": 203.1949235,
+      "turns": 20,
+      "cost_usd": 0.440192,
+      "cost_known": true
+    }
+  ],
+  "hidden_passed": 15,
+  "hidden_total": 20,
+  "builds": true,
+  "own_test_files": 4,
+  "wall_s": 240.855258916,
+  "cost_usd": 1.8795016000000002,
+  "turns": 72,
+  "work": null,
+  "requests": -1,
+  "commits_by_author": {
+    "harness": 1,
+    "p1": 1,
+    "p2": 2,
+    "p3": 1
+  },
+  "failed_tests": [
+    "kvlab/engine.TestHiddenExpiry",
+    "kvlab/engine.TestHiddenLogShape",
+    "kvlab/engine.TestHiddenReplies",
+    "kvlab/engine.TestHiddenRestoreRoundTrip",
+    "kvlab/engine.TestHiddenValueSizes"
+  ]
+}
