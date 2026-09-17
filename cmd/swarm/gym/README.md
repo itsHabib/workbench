@@ -17,7 +17,7 @@ output tokens, cost (marked unknown when a session was killed before reporting),
 
 ## First pass, 2026-09-17: the gym works; the tasks are too easy
 
-Seven tasks, three models, one attempt each, $6.13 in all. Rows: `runs/2026-09-17-smoke/`.
+Seven tasks, three models, one attempt each, $6.20 in all. Rows: `runs/2026-09-17-smoke/`.
 
 | task | seat | level | haiku 4.5 | sonnet 5 | opus 5 |
 |---|---|---|---|---|---|
