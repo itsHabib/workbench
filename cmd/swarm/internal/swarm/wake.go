@@ -27,7 +27,7 @@ type SessionRecord struct {
 }
 
 func (s *State) sessionPath(seat string) string {
-	return s.path("sessions", strings.ReplaceAll(seat, "/", "_")+".json")
+	return s.path("sessions", fileKey(seat)+".json")
 }
 
 // Session returns the last record for seat.
@@ -45,6 +45,12 @@ func (s *State) recordSession(seat string, ev hookInput) {
 	}
 	r, err := s.Session(seat)
 	now := Now()
+	if err == nil && r.SessionID != ev.SessionID && ev.Event != "SessionStart" {
+		// A late event from a session this seat no longer runs. Only a
+		// SessionStart may replace the seat's session; an old session's
+		// delayed Stop must not make the old session the resumable one.
+		return
+	}
 	if err != nil || r.SessionID != ev.SessionID {
 		r = &SessionRecord{Seat: seat, SessionID: ev.SessionID, Cwd: ev.Cwd, Started: now}
 	}
@@ -75,10 +81,13 @@ func (s *State) Wakeable(seat string) (*SessionRecord, bool) {
 
 // WakeOptions is how a wake runs the provider.
 type WakeOptions struct {
-	Model string
-	Tools string
-	Max   int           // concurrent wakes
-	Wall  time.Duration // per wake
+	Model      string
+	Tools      string
+	Max        int           // concurrent wakes
+	Wall       time.Duration // per wake
+	PerSeatHr  int           // most wakes one seat may get in an hour; default 6
+	MaxAttempt int           // failed wakes before a note is parked for the operator; default 3
+	Backoff    time.Duration // wait after a failed wake before trying that seat again; default 2m
 }
 
 func (o *WakeOptions) defaults() {
@@ -90,6 +99,15 @@ func (o *WakeOptions) defaults() {
 	}
 	if o.Wall <= 0 {
 		o.Wall = 6 * time.Minute
+	}
+	if o.PerSeatHr <= 0 {
+		o.PerSeatHr = 6
+	}
+	if o.MaxAttempt <= 0 {
+		o.MaxAttempt = 3
+	}
+	if o.Backoff <= 0 {
+		o.Backoff = 2 * time.Minute
 	}
 }
 
@@ -105,6 +123,7 @@ type WakeResult struct {
 	OutputTok int       `json:"output_tokens"`
 	CostUSD   float64   `json:"cost_usd"`
 	Err       string    `json:"err,omitempty"`
+	Delivered bool      `json:"delivered"` // the provider took at least one turn, so the notes were acknowledged
 }
 
 var (
@@ -152,7 +171,7 @@ func (s *State) WakePending(opts WakeOptions) []string {
 			continue
 		}
 		rec, ok := s.Wakeable(seat)
-		if !ok {
+		if !ok || !s.wakeAllowed(seat, opts) {
 			continue
 		}
 		wakeMu.Lock()
@@ -164,7 +183,9 @@ func (s *State) WakePending(opts WakeOptions) []string {
 		if busy {
 			continue
 		}
-		notes, _ = s.Inbox(seat, true)
+		// Notes stay in the inbox while the wake runs. They are acknowledged
+		// (moved to delivered) only after the provider took a turn, so a wake
+		// that never starts loses nothing.
 		started = append(started, seat)
 		go s.wake(seat, rec, notes, opts)
 	}
@@ -195,9 +216,11 @@ func (s *State) wake(seat string, rec *SessionRecord, notes []Note, opts WakeOpt
 	cmd.Env = append(os.Environ(), "SWARM_SEAT="+seat)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
-	if err := cmd.Run(); err != nil {
-		res.Err = strings.TrimSpace(err.Error() + " " + tailOf(errb.String(), 300))
-		if ee, ok := err.(*exec.ExitError); ok {
+	runErr := cmd.Run()
+	if runErr != nil {
+		res.Err = strings.TrimSpace(runErr.Error() + " " + tailOf(errb.String(), 300))
+		res.Exit = -1 // could not run at all, unless the provider reported a code
+		if ee, ok := runErr.(*exec.ExitError); ok {
 			res.Exit = ee.ExitCode()
 		}
 	}
@@ -212,8 +235,88 @@ func (s *State) wake(seat string, rec *SessionRecord, notes []Note, opts WakeOpt
 		res.NumTurns, res.CostUSD, res.OutputTok = parsed.NumTurns, parsed.Cost, parsed.Usage.Output
 	}
 	res.Ended = Now()
+	res.Delivered = res.NumTurns > 0
+	if res.Delivered {
+		s.ackNotes(seat, notes)
+	} else {
+		s.wakeFailed(seat, notes, opts, res.Err)
+	}
 	_ = appendLine(s.path("wakes.jsonl"), res)
-	_ = os.WriteFile(filepath.Join(s.path("watch"), "wake-"+seat+"-"+res.Started.Format("150405")+".out.json"), out.Bytes(), 0o644)
+	_ = os.WriteFile(filepath.Join(s.path("watch"), "wake-"+fileKey(seat)+"-"+res.Started.Format("150405")+".out.json"), out.Bytes(), 0o644)
+}
+
+// ackNotes moves exactly the notes a wake carried to delivered.
+func (s *State) ackNotes(seat string, notes []Note) {
+	var ws wakeState
+	if readJSON(s.wakeStatePath(seat), &ws) == nil && ws.Failures > 0 {
+		ws.Failures, ws.RetryAt = 0, time.Time{}
+		_ = writeJSON(s.wakeStatePath(seat), &ws)
+	}
+	dir := s.inboxDir(seat)
+	done := filepath.Join(dir, "delivered")
+	_ = os.MkdirAll(done, 0o755)
+	for _, n := range notes {
+		_ = os.Rename(filepath.Join(dir, n.ID+".json"), filepath.Join(done, n.ID+".json"))
+	}
+}
+
+// wakeState is one seat's wake history: for the hourly budget, the backoff
+// after a failure, and the attempts a parked note has had.
+type wakeState struct {
+	Started  []time.Time `json:"started"`
+	Failures int         `json:"failures"`
+	RetryAt  time.Time   `json:"retry_at"`
+}
+
+func (s *State) wakeStatePath(seat string) string {
+	return s.path("sessions", fileKey(seat)+".wakes.json")
+}
+
+// wakeAllowed applies the backoff and the hourly budget, and records the
+// start when it says yes.
+func (s *State) wakeAllowed(seat string, opts WakeOptions) bool {
+	var ws wakeState
+	_ = readJSON(s.wakeStatePath(seat), &ws)
+	now := Now()
+	if now.Before(ws.RetryAt) {
+		return false
+	}
+	recent := ws.Started[:0]
+	for _, t := range ws.Started {
+		if now.Sub(t) < time.Hour {
+			recent = append(recent, t)
+		}
+	}
+	ws.Started = recent
+	if len(ws.Started) >= opts.PerSeatHr {
+		s.appendEvent(Event{Kind: "wake_budget", Seat: seat, Detail: fmt.Sprintf("%d wakes in the last hour", len(ws.Started))})
+		return false
+	}
+	ws.Started = append(ws.Started, now)
+	_ = writeJSON(s.wakeStatePath(seat), &ws)
+	return true
+}
+
+// wakeFailed leaves the notes in the inbox, backs the seat off, and after
+// MaxAttempt failures parks the notes for the operator instead of trying
+// forever.
+func (s *State) wakeFailed(seat string, notes []Note, opts WakeOptions, why string) {
+	var ws wakeState
+	_ = readJSON(s.wakeStatePath(seat), &ws)
+	ws.Failures++
+	ws.RetryAt = Now().Add(opts.Backoff * time.Duration(ws.Failures))
+	s.appendEvent(Event{Kind: "wake_failed", Seat: seat, Detail: why})
+	if ws.Failures >= opts.MaxAttempt {
+		dir := s.inboxDir(seat)
+		dead := filepath.Join(dir, "undeliverable")
+		_ = os.MkdirAll(dead, 0o755)
+		for _, n := range notes {
+			_ = os.Rename(filepath.Join(dir, n.ID+".json"), filepath.Join(dead, n.ID+".json"))
+		}
+		_, _ = s.Nudge("operator", "undeliverable", fmt.Sprintf("%d notes for %s could not be delivered after %d wakes: %s", len(notes), seat, ws.Failures, why))
+		ws.Failures = 0
+	}
+	_ = writeJSON(s.wakeStatePath(seat), &ws)
 }
 
 func tailOf(s string, n int) string {

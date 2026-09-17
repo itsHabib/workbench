@@ -22,11 +22,13 @@ type Resource struct {
 }
 
 func (s *State) resourcePath(name string) string {
-	return s.path("resources", strings.ReplaceAll(name, "/", "_")+".json")
+	return s.path("resources", fileKey(name)+".json")
 }
 
 // Take leases name to holder for ttl. Another holder's unexpired lease
-// refuses; an expired one changes hands with a new epoch.
+// refuses; an expired or released one changes hands. The epoch only ever
+// grows: a release keeps the record as a tombstone, so a token handed out
+// once is never handed out again.
 func (s *State) Take(name, holder string, ttl time.Duration) (*Resource, error) {
 	if name == "" || holder == "" {
 		return nil, refuse("bad_take", "take needs a resource name and --as <seat>")
@@ -43,17 +45,17 @@ func (s *State) Take(name, holder string, ttl time.Duration) (*Resource, error) 
 	var r Resource
 	err = readJSON(s.resourcePath(name), &r)
 	switch {
-	case err == nil && r.Holder != holder && now.Before(r.Until):
-		return nil, refuse("held_by_other", "%s is held by %s until %s", name, r.Holder, r.Until.Format(time.RFC3339))
-	case err == nil && r.Holder == holder:
-		r.Until = now.Add(ttl)
-	case err == nil:
-		r = Resource{Name: name, Holder: holder, Epoch: r.Epoch + 1, Since: now, Until: now.Add(ttl)}
-		s.appendEvent(Event{Kind: "take_over", Seat: holder, Detail: name})
-	case errors.Is(err, os.ErrNotExist):
-		r = Resource{Name: name, Holder: holder, Epoch: 1, Since: now, Until: now.Add(ttl)}
-	default:
+	case err != nil && !errors.Is(err, os.ErrNotExist):
 		return nil, err
+	case err == nil && r.Holder != "" && r.Holder != holder && now.Before(r.Until):
+		return nil, refuse("held_by_other", "%s is held by %s until %s", name, r.Holder, r.Until.Format(time.RFC3339))
+	case err == nil && r.Holder == holder && now.Before(r.Until):
+		r.Until = now.Add(ttl) // renewal keeps the epoch
+	default:
+		if r.Holder != "" && r.Holder != holder {
+			s.appendEvent(Event{Kind: "take_over", Seat: holder, Detail: name})
+		}
+		r = Resource{Name: name, Holder: holder, Epoch: r.Epoch + 1, Since: now, Until: now.Add(ttl)}
 	}
 	if err := writeJSON(s.resourcePath(name), &r); err != nil {
 		return nil, err
@@ -62,16 +64,18 @@ func (s *State) Take(name, holder string, ttl time.Duration) (*Resource, error) 
 	return &r, nil
 }
 
-// Drop releases name if holder holds it.
-func (s *State) Drop(name, holder string) error {
+// Drop releases name if holder holds it under epoch. epoch 0 means "the
+// lease I hold now"; a caller that kept its token passes it, and a delayed
+// drop from an earlier lease is refused instead of releasing a later one.
+func (s *State) Drop(name, holder string, epoch int) error {
 	release, err := s.lock("resources", 5*time.Second, time.Minute)
 	if err != nil {
 		return err
 	}
 	defer release()
 	var r Resource
-	if err := readJSON(s.resourcePath(name), &r); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+	if err := readJSON(s.resourcePath(name), &r); err != nil || r.Holder == "" {
+		if err == nil || errors.Is(err, os.ErrNotExist) {
 			return refuse("not_held", "%s is not held", name)
 		}
 		return err
@@ -79,7 +83,11 @@ func (s *State) Drop(name, holder string) error {
 	if r.Holder != holder {
 		return refuse("held_by_other", "%s is held by %s, not %s", name, r.Holder, holder)
 	}
-	if err := os.Remove(s.resourcePath(name)); err != nil {
+	if epoch != 0 && epoch != r.Epoch {
+		return refuse("lease_fenced", "%s is at epoch %d; your token %d is from an earlier lease", name, r.Epoch, epoch)
+	}
+	r.Holder, r.Until = "", Now()
+	if err := writeJSON(s.resourcePath(name), &r); err != nil {
 		return err
 	}
 	s.appendEvent(Event{Kind: "drop", Seat: holder, Detail: name, Epoch: r.Epoch})
@@ -98,7 +106,7 @@ func (s *State) Resources() ([]Resource, error) {
 			continue
 		}
 		var r Resource
-		if err := readJSON(filepath.Join(s.path("resources"), e.Name()), &r); err == nil {
+		if err := readJSON(filepath.Join(s.path("resources"), e.Name()), &r); err == nil && r.Holder != "" {
 			out = append(out, r)
 		}
 	}
@@ -109,7 +117,7 @@ func (s *State) Resources() ([]Resource, error) {
 // Holder returns who holds name now, or "" when free or expired.
 func (s *State) Holder(name string) string {
 	var r Resource
-	if err := readJSON(s.resourcePath(name), &r); err != nil || Now().After(r.Until) {
+	if err := readJSON(s.resourcePath(name), &r); err != nil || r.Holder == "" || Now().After(r.Until) {
 		return ""
 	}
 	return r.Holder

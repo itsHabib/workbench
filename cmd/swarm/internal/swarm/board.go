@@ -225,7 +225,12 @@ func contentions(byFile map[string][]string, effective []Decision) []Contention 
 // their commits; those are inherited, not its own changes, and must not
 // count as contention or as its landing.
 func (s *State) ownFiles(name, tip, baseSHA string, tips map[string]string) []string {
-	lines, err := gitLines(s.Repo, append([]string{"log", "--format=", "--name-only", tip, "--not", s.ownFloor(name, tip, baseSHA)}, s.inherited(name, tip, tips)...)...)
+	// First-parent history is the seat's own line of work: what a merge
+	// brought in arrives through a second parent and is never on it, no
+	// matter where the merged branch's tip moves afterwards. A merge commit
+	// is diffed against all its parents (cc), so only what the merge itself
+	// changed, a conflict resolution or a novel edit, counts as the seat's.
+	lines, err := gitLines(s.Repo, append([]string{"log", "--first-parent", "--diff-merges=cc", "--format=", "--name-only", tip, "--not", s.ownFloor(name, tip, baseSHA)}, s.inherited(name, tip, tips)...)...)
 	if err != nil {
 		return nil
 	}

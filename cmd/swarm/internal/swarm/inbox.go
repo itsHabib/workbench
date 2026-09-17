@@ -23,7 +23,7 @@ type Note struct {
 }
 
 func (s *State) inboxDir(seat string) string {
-	return s.path("inbox", strings.ReplaceAll(seat, "/", "_"))
+	return s.path("inbox", fileKey(seat))
 }
 
 // Nudge drops a note in seat's inbox.

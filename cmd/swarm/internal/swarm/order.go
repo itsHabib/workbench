@@ -146,7 +146,7 @@ func contains(xs []string, x string) bool {
 // firstCommitAt is when a branch's own work began: its earliest commit
 // that no branch it is built on already had.
 func (s *State) firstCommitAt(r Row, b *Board) time.Time {
-	args := append([]string{"log", "--reverse", "--format=%ct", r.Tip, "--not", b.BaseSHA}, s.inherited(r.Branch, r.Tip, b.tips)...)
+	args := append([]string{"log", "--first-parent", "--reverse", "--format=%ct", r.Tip, "--not", b.BaseSHA}, s.inherited(r.Branch, r.Tip, b.tips)...)
 	out, err := Git(s.Repo, args...)
 	if err != nil || out == "" {
 		return r.TipAt

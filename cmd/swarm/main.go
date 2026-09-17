@@ -90,7 +90,7 @@ type cli struct {
 
 	as, scope, question, options, needs, ruling, evidence, supersedes, to, why        string
 	operator, lead, verifier, diskMin, resource, dir, cmd, wakeModel, wakeTools, base string
-	orderFlag, verifyCmd, into                                                        string
+	orderFlag, verifyCmd, into, forBranch                                             string
 	jsonOut, md, phone, fetch, all, keep, wait, once, wake                            bool
 	epoch, seats, wakeMax                                                             int
 	ttl, timeout, idle, interval, unclaimed, threshold, window                        time.Duration
@@ -142,6 +142,7 @@ func parse(verb string, args []string) (*cli, error) {
 	fs.StringVar(&c.verifyCmd, "verify", "", "watch: command to run at each landed head, e.g. 'go test ./...'")
 	fs.DurationVar(&c.window, "window", time.Hour, "load window")
 	fs.StringVar(&c.into, "into", "", "split children as branch:title|branch:title")
+	fs.StringVar(&c.forBranch, "for", "", "admit: the branch this seat is for; reserves the seat until it is on the board")
 
 	// Positional args may precede flags: `swarm rule ID --ruling ...`.
 	for len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -374,6 +375,10 @@ func (c *cli) consolidate() error {
 	if c.jsonOut {
 		return c.emit(res)
 	}
+	if res.HeadRed != "" {
+		fmt.Printf("HEAD %s FAILED VERIFY before any merge: an earlier merge was never verified and is red. fix or undo it, then run consolidate again.\n", res.HeadRed[:8])
+		return c.record(&swarm.Refusal{Code: "head_red", Msg: res.HeadRed})
+	}
 	fmt.Printf("merged %d: %s\n", len(res.Merged), strings.Join(res.Merged, ", "))
 	if len(res.Conflicted) > 0 {
 		fmt.Printf("CONFLICTED %d (merge these by hand, in this order): %s\n", len(res.Conflicted), strings.Join(res.Conflicted, ", "))
@@ -566,7 +571,7 @@ func (c *cli) take() error {
 }
 
 func (c *cli) drop() error {
-	if err := c.s.Drop(c.arg(0), c.seat); err != nil {
+	if err := c.s.Drop(c.arg(0), c.seat, c.epoch); err != nil {
 		return c.record(err)
 	}
 	fmt.Printf("dropped %s\n", c.arg(0))
@@ -578,7 +583,7 @@ func (c *cli) admit() error {
 	if err != nil {
 		return err
 	}
-	opts := swarm.AdmitOptions{Seats: c.seats, DiskMin: floor, Base: c.base, Resource: c.resource}
+	opts := swarm.AdmitOptions{Seats: c.seats, DiskMin: floor, Base: c.base, Resource: c.resource, For: c.forBranch}
 	for {
 		a, err := c.s.Admit(opts)
 		if err != nil {

@@ -69,67 +69,73 @@ func NewID(kind string) string {
 	return fmt.Sprintf("%s_%s_%s", kind, strconv.FormatInt(Now().UnixNano(), 36), hex.EncodeToString(b[:]))
 }
 
-// writeAtomic writes data to path via a temporary file and rename, so a
-// reader never sees a partial file. Rename replaces on every platform Go
-// supports.
+// writeAtomic writes data to path through a temporary file, an fsync and
+// a rename, then fsyncs the directory, so a reader never sees a partial
+// file and a crash never leaves a renamed file whose bytes were not on disk.
 func writeAtomic(path string, data []byte) error {
 	tmp := fmt.Sprintf("%s.tmp.%d.%s", path, os.Getpid(), strconv.FormatInt(Now().UnixNano(), 36))
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
+	syncDir(filepath.Dir(path))
 	return nil
 }
 
-// lock takes an exclusive create-only lock file for a mutation window. It
-// waits up to wait for a rival to release; a lock older than stale is
-// treated as abandoned and broken, with the break recorded in the event log.
-func (s *State) lock(name string, wait, stale time.Duration) (release func(), err error) {
-	path := s.path(name + ".lock")
-	deadline := Now().Add(wait)
-	for {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err == nil {
-			_, _ = fmt.Fprintf(f, "%d %s\n", os.Getpid(), Now().Format(time.RFC3339Nano))
-			_ = f.Close()
-			return func() { _ = os.Remove(path) }, nil
-		}
-		if !errors.Is(err, os.ErrExist) {
-			return nil, err
-		}
-		if Now().Sub(lockTakenAt(path)) > stale {
-			_ = os.Remove(path)
-			s.appendEvent(Event{Kind: "lock_broken", Detail: name})
-			continue
-		}
-		if Now().After(deadline) {
-			return nil, fmt.Errorf("lock %s held by another process for over %s", name, wait)
-		}
-		time.Sleep(50 * time.Millisecond)
+// syncDir makes a rename or create in dir durable. Best effort: some
+// platforms cannot sync a directory, and the data file itself is synced.
+func syncDir(dir string) {
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
 	}
 }
 
-// lockTakenAt reads the time the holder wrote into the lock file, so stale
-// detection does not depend on a filesystem's modification time. A lock
-// whose content cannot be read falls back to its modification time; one
-// that has vanished reads as fresh.
-func lockTakenAt(path string) time.Time {
-	data, err := os.ReadFile(path)
-	if err == nil {
-		fields := strings.Fields(string(data))
-		if len(fields) == 2 {
-			if at, err := time.Parse(time.RFC3339Nano, fields[1]); err == nil {
-				return at
-			}
+// lock takes the named mutation lock, waiting up to wait. It is an OS
+// advisory lock on a file that is never deleted: a holder that dies
+// releases it at once, and a holder that is merely slow keeps it for as
+// long as it lives. Age is never evidence of death, so nothing is broken by
+// age, and a release can never remove somebody else's lock. The stale
+// argument is kept for callers and ignored.
+func (s *State) lock(name string, wait, _ time.Duration) (release func(), err error) {
+	f, err := os.OpenFile(s.path(name+".lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		ok, err := tryLock(f)
+		if err != nil {
+			_ = f.Close()
+			return nil, err
 		}
+		if ok {
+			return func() { unlock(f); _ = f.Close() }, nil
+		}
+		if time.Now().After(deadline) {
+			_ = f.Close()
+			return nil, fmt.Errorf("lock %s held by another process for over %s", name, wait)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	if st, err := os.Stat(path); err == nil {
-		return st.ModTime()
-	}
-	return Now()
 }
 
 // WriteFileAtomic writes data to path through a temporary file and a
@@ -163,6 +169,23 @@ func (s *State) appendEvent(e Event) {
 	_ = appendLine(s.path("events.jsonl"), e)
 }
 
+// fileKey turns a seat or resource name into a file name no other name
+// maps to: every byte outside [A-Za-z0-9.-] is written as _xx hex, and the
+// underscore itself is escaped, so "a/b" and "a_b" stay distinct.
+func fileKey(name string) string {
+	var sb strings.Builder
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '-':
+			sb.WriteByte(c)
+		default:
+			fmt.Fprintf(&sb, "_%02x", c)
+		}
+	}
+	return sb.String()
+}
+
 // RecordRefusal notes that the substrate said no to a seat, so stats can
 // count how often builders hit the boundary and on what.
 func (s *State) RecordRefusal(seat, verb, code string) {
@@ -193,8 +216,10 @@ func appendLine(path string, v any) error {
 		return err
 	}
 	defer f.Close()
-	_, err = f.Write(append(data, '\n'))
-	return err
+	if _, err = f.Write(append(data, '\n')); err != nil {
+		return err
+	}
+	return f.Sync()
 }
 
 func readLines(path string, fn func([]byte) error) error {

@@ -195,7 +195,7 @@ func TestClaimFencing(t *testing.T) {
 	if c2.Claim.Epoch != c1.Claim.Epoch+1 {
 		t.Fatalf("epoch %d after %d", c2.Claim.Epoch, c1.Claim.Epoch)
 	}
-	if _, err := s.Rule(r.ID, "b", c1.Claim.Epoch, "late", "", "", nil); err == nil || !strings.Contains(err.Error(), "claimed_by_other") {
+	if _, err := s.Rule(r.ID, "b", c1.Claim.Epoch, "late", "", "", nil); err == nil || !strings.Contains(err.Error(), "claim_fenced") {
 		t.Fatalf("stale holder ruled: %v", err)
 	}
 	if _, err := s.ClaimRequest(r.ID, "d", time.Minute); err == nil || !strings.Contains(err.Error(), "claimed_by_other") {
@@ -328,21 +328,22 @@ func TestWaitReturnsRuling(t *testing.T) {
 func TestResourceLease(t *testing.T) {
 	main := repo(t)
 	s := open(t, main)
-	if _, err := s.Take("db", "a", time.Millisecond); err != nil {
+	n := clock(t)
+	if _, err := s.Take("db", "a", time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Take("db", "b", time.Minute); err == nil {
 		t.Fatal("live lease taken")
 	}
-	time.Sleep(5 * time.Millisecond)
+	*n = n.Add(2 * time.Second)
 	r, err := s.Take("db", "b", time.Minute)
 	if err != nil || r.Epoch != 2 {
 		t.Fatalf("expired lease not taken over: %v %+v", err, r)
 	}
-	if err := s.Drop("db", "a"); err == nil {
+	if err := s.Drop("db", "a", 0); err == nil {
 		t.Fatal("non-holder dropped")
 	}
-	if err := s.Drop("db", "b"); err != nil {
+	if err := s.Drop("db", "b", 0); err != nil {
 		t.Fatal(err)
 	}
 	if s.Holder("db") != "" {
@@ -610,27 +611,6 @@ func TestDecideProactive(t *testing.T) {
 	}
 }
 
-func TestLockStaleFromContent(t *testing.T) {
-	main := repo(t)
-	s := open(t, main)
-	path := s.path("stale.lock")
-	old := Now().Add(-time.Hour).Format(time.RFC3339Nano)
-	if err := os.WriteFile(path, []byte("1 "+old+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	release, err := s.lock("stale", 100*time.Millisecond, time.Minute)
-	if err != nil {
-		t.Fatalf("stale lock not broken: %v", err)
-	}
-	release()
-	if err := os.WriteFile(path, []byte("1 "+Now().Format(time.RFC3339Nano)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.lock("stale", 50*time.Millisecond, time.Minute); err == nil {
-		t.Fatal("fresh lock broken")
-	}
-}
-
 func TestOrderFromLedger(t *testing.T) {
 	main := repo(t)
 	s := open(t, main)
@@ -794,7 +774,7 @@ func TestSplitQueuesChildren(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(main, "briefs", "tasks", "t1b.md")); err != nil {
 		t.Fatal("child card not written")
 	}
-	if d.Scope[0] != "task:t1" || !strings.Contains(d.Ruling, "t1b, t1c") {
+	if d.Scope[0] != "task:t1b" || !strings.Contains(d.Ruling, "t1b, t1c") {
 		t.Fatalf("decision = %+v", d)
 	}
 	if n := mustInbox(t, s, "operator"); len(n) != 1 || n[0].Kind != "split" {

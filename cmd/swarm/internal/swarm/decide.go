@@ -368,6 +368,22 @@ func (s *State) Rule(id, by string, epoch int, ruling, evidence, supersedes stri
 	if r.Status == "ruled" {
 		return nil, refuse("already_ruled", "%s was ruled by %s", id, r.Decision)
 	}
+	// The ledger append is the commit point. If a ruling for this request is
+	// already in the ledger, an earlier attempt crashed between the append
+	// and the request update: finish that attempt instead of ruling again.
+	if prior, err := s.decisionFor(id); err != nil {
+		return nil, err
+	} else if prior != nil {
+		r.Status, r.Decision, r.RuledAt = "ruled", prior.ID, prior.At
+		if err := s.saveRequest(r); err != nil {
+			return nil, err
+		}
+		s.appendEvent(Event{Kind: "rule_recovered", Request: id, By: prior.By, Detail: prior.ID})
+		if prior.By == by {
+			return prior, nil
+		}
+		return nil, refuse("already_ruled", "%s was ruled by %s", id, prior.ID)
+	}
 	tier := s.TierOf(by)
 	if Level(tier) < Level(r.Needs) {
 		return nil, refuse("tier_too_low", "%s needs %s; %s is %s. use: swarm escalate %s --to %s --why '...'", id, r.Needs, by, tier, id, r.Needs)
@@ -397,6 +413,17 @@ func (s *State) Rule(id, by string, epoch int, ruling, evidence, supersedes stri
 // request is free. epoch 0 means "claim now"; a nonzero epoch must match.
 func (s *State) claimForRule(r *Request, by string, epoch int, now time.Time) error {
 	c := r.Claim
+	if epoch != 0 {
+		// An explicit epoch is a fencing token: it must name the live claim,
+		// held by the caller, not yet expired. It never acquires.
+		switch {
+		case c == nil || c.Holder != by || c.Epoch != epoch:
+			return refuse("claim_fenced", "epoch %d is not your live claim on %s; it changed hands or was never yours", epoch, r.ID)
+		case !now.Before(c.Until):
+			return refuse("claim_expired", "your claim on %s expired at %s; claim again", r.ID, c.Until.Format(time.RFC3339))
+		}
+		return nil
+	}
 	switch {
 	case c != nil && c.Holder != by && now.Before(c.Until):
 		return refuse("claimed_by_other", "%s is claimed by %s until %s", r.ID, c.Holder, c.Until.Format(time.RFC3339))
@@ -421,12 +448,18 @@ func (s *State) tiebreak(scope []string, tier, supersedes string) (string, error
 		return "", err
 	}
 	for _, d := range effective {
-		if !scopesOverlap(d.Scope, scope) || d.ID == supersedes {
+		if !scopesOverlap(d.Scope, scope) {
+			continue
+		}
+		// Rank first: naming a higher ruling in --supersedes does not make a
+		// lower tier able to replace it.
+		if Level(d.Tier) > Level(tier) {
+			return "", refuse("outranked", "%s already ruled on %s at tier %s; a %s cannot override it", d.ID, strings.Join(d.Scope, ","), d.Tier, tier)
+		}
+		if d.ID == supersedes {
 			continue
 		}
 		switch {
-		case Level(d.Tier) > Level(tier):
-			return "", refuse("outranked", "%s already ruled on %s at tier %s; a %s cannot override it", d.ID, strings.Join(d.Scope, ","), d.Tier, tier)
 		case Level(d.Tier) == Level(tier):
 			return "", refuse("must_supersede", "%s already ruled on %s; pass --supersedes %s and say why in --evidence", d.ID, strings.Join(d.Scope, ","), d.ID)
 		}
@@ -490,9 +523,26 @@ func (s *State) Decide(by string, scope []string, ruling, evidence, supersedes s
 	return d, nil
 }
 
+// decisionFor returns the ledger's ruling for a request, if one exists.
+func (s *State) decisionFor(request string) (*Decision, error) {
+	all, err := s.Decisions()
+	if err != nil {
+		return nil, err
+	}
+	for i := range all {
+		if all[i].Request == request {
+			return &all[i], nil
+		}
+	}
+	return nil, nil
+}
+
 func (s *State) appendDecision(d *Decision) error {
 	all, err := s.Decisions()
 	if err != nil {
+		return err
+	}
+	if err := trimTornTail(s.path("decisions.jsonl")); err != nil {
 		return err
 	}
 	d.Prev = "genesis"
@@ -501,22 +551,59 @@ func (s *State) appendDecision(d *Decision) error {
 	}
 	d.Hash = ""
 	d.Hash = hashOf(d)
-	return appendLine(s.path("decisions.jsonl"), d)
+	if err := appendLine(s.path("decisions.jsonl"), d); err != nil {
+		return err
+	}
+	// The head pointer is what makes a decision committed. It is written
+	// after the line is on disk, so a line with no head behind it is a torn
+	// or uncommitted tail, and a head with no line behind it is a truncation.
+	return writeJSON(s.path("decisions.head"), ledgerHead{Count: len(all) + 1, Hash: d.Hash})
 }
 
-// Decisions reads the whole ledger and verifies the chain.
+// trimTornTail cuts an append that never finished (bytes after the last
+// newline) so the next decision starts on its own line. Decisions() has
+// already established those bytes are beyond the committed head.
+func trimTornTail(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 || data[len(data)-1] == '\n' {
+		return nil
+	}
+	keep := strings.LastIndexByte(string(data), '\n') + 1
+	return os.Truncate(path, int64(keep))
+}
+
+// ledgerHead is the committed tail of the ledger: how many decisions and
+// the hash of the last. The chain detects an edit; the head detects a
+// removed tail.
+type ledgerHead struct {
+	Count int    `json:"count"`
+	Hash  string `json:"hash"`
+}
+
+// Decisions reads the whole ledger and verifies it: every link of the
+// chain, and the tail against the committed head. A final line that does
+// not parse and lies beyond the head is an append that never committed; it
+// is ignored rather than making every decision unreadable.
 func (s *State) Decisions() ([]Decision, error) {
+	var head ledgerHead
+	haveHead := readJSON(s.path("decisions.head"), &head) == nil
+	var lines [][]byte
+	if err := readLines(s.path("decisions.jsonl"), func(line []byte) error {
+		lines = append(lines, append([]byte(nil), line...))
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 	var out []Decision
-	err := readLines(s.path("decisions.jsonl"), func(line []byte) error {
+	for i, line := range lines {
 		var d Decision
 		if err := json.Unmarshal(line, &d); err != nil {
-			return err
+			if i == len(lines)-1 && haveHead && head.Count == len(out) {
+				break // torn, uncommitted tail
+			}
+			return nil, fmt.Errorf("decision ledger unreadable at line %d: %w", i+1, err)
 		}
 		out = append(out, d)
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
 	prev := "genesis"
 	for i, d := range out {
@@ -526,6 +613,18 @@ func (s *State) Decisions() ([]Decision, error) {
 			return nil, fmt.Errorf("decision ledger broken at line %d (%s)", i+1, want)
 		}
 		prev = want
+	}
+	if haveHead {
+		switch {
+		case len(out) < head.Count:
+			return nil, fmt.Errorf("decision ledger truncated: %d decisions, head committed %d", len(out), head.Count)
+		case len(out) == head.Count+1:
+			// line on disk, head not yet advanced: the append committed the
+			// line but crashed before the head; adopt it.
+			_ = writeJSON(s.path("decisions.head"), ledgerHead{Count: len(out), Hash: out[len(out)-1].Hash})
+		case len(out) == head.Count && head.Count > 0 && out[len(out)-1].Hash != head.Hash:
+			return nil, fmt.Errorf("decision ledger tail does not match committed head %s", head.Hash)
+		}
 	}
 	return out, nil
 }

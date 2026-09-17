@@ -388,7 +388,7 @@ func (r *runner) admit(i int, t Task) {
 		r.mu.Lock()
 		running := r.running
 		r.mu.Unlock()
-		a, err := r.state.Admit(swarm.AdmitOptions{Seats: r.o.Seats, DiskMin: r.o.DiskMin, Base: "main"})
+		a, err := r.state.Admit(swarm.AdmitOptions{Seats: r.o.Seats, DiskMin: r.o.DiskMin, Base: "main", For: t.Branch})
 		if err != nil {
 			r.logf("admit %s: %v", t.Branch, err)
 			time.Sleep(5 * time.Second)
