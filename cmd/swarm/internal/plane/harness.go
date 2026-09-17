@@ -48,6 +48,7 @@ type WorkerOptions struct {
 	CrashProb   float64 // chance to die at each crash point
 	SplitEvery  int     // every Nth task commits two children with it; 0 = never
 	StopWhenDry bool    // exit when nothing of Kind is left pending
+	Seats       bool    // hold a seat from the shared pool around each task, and release it
 	Broken      Broken  // file store only: run deliberately wrong
 }
 
@@ -81,8 +82,26 @@ func RunWorker(o WorkerOptions) error {
 	n := 0
 	for {
 		n++
+		// Admission: a task worker occupies one seat of a fixed pool while it
+		// works and gives it back after. A worker that dies holding a seat
+		// loses it when the lease lapses; nobody frees it by hand.
+		var seat *Grant
+		if o.Seats && o.Kind == "task" {
+			sg, err := s.ClaimNext(ctx, "seat", o.Incarnation, 3*o.TTL, fmt.Sprintf("%s:s%d", o.Incarnation, n))
+			if err != nil {
+				time.Sleep(o.Poll)
+				continue
+			}
+			seat = &sg
+		}
+		release := func() {
+			if seat != nil {
+				_ = s.Release(ctx, *seat)
+			}
+		}
 		g, err := s.ClaimNext(ctx, o.Kind, o.Incarnation, o.TTL, fmt.Sprintf("%s:c%d", o.Incarnation, n))
 		if errors.Is(err, ErrNone) {
+			release()
 			if o.StopWhenDry && dry(ctx, s, o.Kind) {
 				return nil
 			}
@@ -90,6 +109,7 @@ func RunWorker(o WorkerOptions) error {
 			continue
 		}
 		if err != nil {
+			release()
 			time.Sleep(o.Poll)
 			continue
 		}
@@ -109,6 +129,7 @@ func RunWorker(o WorkerOptions) error {
 		_, err = s.Commit(ctx, g, o.Incarnation, fmt.Sprintf("%s/%s:e%d:%s", g.Kind, g.ID, g.Epoch, o.Incarnation), emit)
 		dice("after-commit")
 		_ = err // fenced or done: the work is discarded, which is the point
+		release()
 	}
 }
 
@@ -154,9 +175,21 @@ type FaultOptions struct {
 	Pauses     int                                    // SIGSTOP a worker for longer than its lease, then SIGCONT
 	Restart    func() (down time.Duration, err error) // restarts the store under load; nil = none
 	Restarts   int
+	Seats      int // size of the seat pool; 0 = no admission
 	Deadline   time.Duration
 	Broken     Broken
 	Out        string // evidence directory
+}
+
+// recoverBound is how long a lapsed lease may wait for a new owner: two
+// lease periods and two polls, plus one seat lease when work is gated on a
+// seat pool, since the peer that died may have been holding a seat too.
+func recoverBound(o FaultOptions) time.Duration {
+	b := 2*o.TTL + 2*o.Poll
+	if o.Seats > 0 {
+		b += 3 * o.TTL
+	}
+	return b
 }
 
 // FaultReport is one run's outcome.
@@ -177,6 +210,8 @@ type FaultReport struct {
 	MaxRecoverMS int64         `json:"max_recover_ms"` // longest a lapsed lease waited for a new owner
 	BoundMS      int64         `json:"recover_bound_ms"`
 	OverBound    int           `json:"over_bound"`
+	SeatPool     int           `json:"seat_pool"`
+	PeakSeats    int           `json:"peak_seats_held"` // most seats under live lease at once; must not exceed the pool
 	Wall         time.Duration `json:"wall"`
 	Finished     bool          `json:"finished"`
 	Passed       bool          `json:"passed"`
@@ -203,8 +238,13 @@ func RunFault(o FaultOptions) (*FaultReport, error) {
 			return nil, err
 		}
 	}
+	for i := 0; i < o.Seats; i++ {
+		if err := s.Put(ctx, Item{Kind: "seat", ID: fmt.Sprintf("seat%02d", i)}); err != nil {
+			return nil, err
+		}
+	}
 	rng := rand.New(rand.NewSource(o.Seed))
-	rep := &FaultReport{Seed: o.Seed, Store: strings.SplitN(o.Store, ":", 2)[0], BoundMS: (2*o.TTL + 2*o.Poll).Milliseconds()}
+	rep := &FaultReport{Seed: o.Seed, Store: strings.SplitN(o.Store, ":", 2)[0], BoundMS: recoverBound(o).Milliseconds()}
 	var mu sync.Mutex
 	live := map[int]*proc{}
 	next := 0
@@ -215,7 +255,7 @@ func RunFault(o FaultOptions) (*FaultReport, error) {
 		mu.Unlock()
 		inc := fmt.Sprintf("%s-%d-%d", kind[:1], o.Seed, id) // a fresh incarnation every start
 		w := WorkerOptions{Store: o.Store, Kind: kind, Incarnation: inc, TTL: o.TTL, Poll: o.Poll, WorkMin: o.WorkMin, WorkMax: o.WorkMax,
-			Seed: o.Seed*1000 + int64(id), CrashProb: o.CrashProb, SplitEvery: o.SplitEvery, StopWhenDry: false, Broken: o.Broken}
+			Seed: o.Seed*1000 + int64(id), CrashProb: o.CrashProb, SplitEvery: o.SplitEvery, StopWhenDry: false, Broken: o.Broken, Seats: o.Seats > 0}
 		spec, _ := json.Marshal(w)
 		cmd := exec.Command(o.Bin, "plane", "worker", string(spec))
 		cmd.Stderr = nil
@@ -348,7 +388,7 @@ func RunFault(o FaultOptions) (*FaultReport, error) {
 	rep.Check = Check(h, "task", "event")
 	rep.measure(h, o, downtime)
 	rep.Wall = time.Since(start)
-	rep.Passed = rep.Finished && rep.Check.OK() && rep.OverBound == 0
+	rep.Passed = rep.Finished && rep.Check.OK() && rep.OverBound == 0 && (o.Seats == 0 || rep.PeakSeats <= o.Seats)
 	if o.Out != "" {
 		_ = os.MkdirAll(o.Out, 0o755)
 		writeJSONL(filepath.Join(o.Out, fmt.Sprintf("history-seed%d.jsonl", o.Seed)), h)
@@ -376,15 +416,17 @@ func (rep *FaultReport) measure(h []Event, o FaultOptions, downtime [][2]time.Ti
 			rep.Events++
 		case !e.OK && (e.Code == "fenced" || e.Code == "done" || e.Code == "expired") && e.Op != "claim":
 			rep.Fenced++
+		case e.OK && e.Op == "release":
+			delete(held, k) // given back, not lapsed: the next claim is not a recovery
 		case e.OK && !e.Replay && e.Op == "claim":
-			if p, ok := held[k]; ok && p.owner != e.By && !p.until.IsZero() {
+			if p, ok := held[k]; ok && p.owner != e.By && !p.until.IsZero() && e.Kind != "seat" {
 				rep.Takeovers++
 				gap := e.At.Sub(p.until)
 				if !duringDowntime(p.until, e.At, downtime) {
 					if ms := gap.Milliseconds(); ms > rep.MaxRecoverMS {
 						rep.MaxRecoverMS = ms
 					}
-					if gap > 2*o.TTL+2*o.Poll {
+					if gap > recoverBound(o) {
 						rep.OverBound++
 					}
 				}
@@ -395,6 +437,36 @@ func (rep *FaultReport) measure(h []Event, o FaultOptions, downtime [][2]time.Ti
 		}
 	}
 	rep.Tasks = o.Tasks + rep.Children
+	rep.SeatPool = o.Seats
+	rep.PeakSeats = peakHeld(h, "seat")
+}
+
+// peakHeld replays the history and returns the most items of a kind that
+// were under an unexpired lease at the same moment.
+func peakHeld(h []Event, kind string) int {
+	until := map[string]time.Time{}
+	peak := 0
+	for _, e := range h {
+		if e.Kind != kind || !e.OK || e.Replay {
+			continue
+		}
+		switch e.Op {
+		case "claim", "renew":
+			until[e.ID] = e.Until
+		case "release", "commit":
+			delete(until, e.ID)
+		}
+		n := 0
+		for _, u := range until {
+			if e.At.Before(u) {
+				n++
+			}
+		}
+		if n > peak {
+			peak = n
+		}
+	}
+	return peak
 }
 
 func duringDowntime(from, to time.Time, downtime [][2]time.Time) bool {
