@@ -1,0 +1,19 @@
+no token check: at most one accepted completion VIOLATED (49 states)
+  1. peer0 sees the task pending
+  2. peer0 acquires the lease, token 1
+  3. peer0 pauses
+  4. peer1 sees the task pending
+  5. lease expires while peer0 is paused
+  6. peer0 resumes
+  7. peer1 acquires the lease, token 2
+  8. peer0 completes with token 1: ACCEPTED
+  9. peer1 completes with token 2: ACCEPTED
+token check: at most one accepted completion holds (54 states)
+token check, pending check not atomic with the grant: at most one accepted completion VIOLATED (36 states)
+  1. peer0 sees the task pending
+  2. peer0 acquires the lease, token 1
+  3. peer1 sees the task pending
+  4. peer0 completes with token 1: ACCEPTED
+  5. peer1 acquires the lease, token 2
+  6. peer1 completes with token 2: ACCEPTED
+token check + done flag, pending check not atomic: at most one accepted completion holds (62 states)

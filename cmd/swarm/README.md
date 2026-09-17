@@ -1,5 +1,12 @@
 # flat
 
+> **Experimental. Not for unattended use.** An independent review found the experiment behind
+> this tool does not support its headline claim and reproduced ten safety defects
+> ([KNOWN-DEFECTS.md](KNOWN-DEFECTS.md), [the review](poc/review-2026-09-17-codex/REVIEW.md)).
+> The parts worth keeping are the read-only git/RESULT observer, a scoped decisions record, and
+> alerts over an existing wake mechanism; the plan is to fold those into `cmd/fleet` and delete
+> the rest. Do not adopt the watcher, wakes, leases or admission as they stand.
+
 A fleet of coding agents with no management sessions. One Go binary, state in files under the
 repository's git directory, works on macOS, Linux and Windows.
 

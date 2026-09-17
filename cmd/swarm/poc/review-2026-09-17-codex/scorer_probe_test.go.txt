@@ -1,0 +1,3 @@
+package poc
+import("testing";"github.com/itsHabib/workbench/cmd/swarm/internal/swarm")
+func TestReviewKill4CannotFail(t *testing.T){for _,st:=range []string{"landed","working","silent","pin_violation","pin_invalid","blocked","made-up"}{k:=killFaultA(t.TempDir(),map[string]swarm.Row{"x":{Branch:"x",State:st}},"x");if !k.Passed{t.Fatal(st,k)};t.Log(st,k.Passed,k.Detail)};if !killFaultA(t.TempDir(),nil,"missing").Passed{t.Fatal("missing failed")}}
