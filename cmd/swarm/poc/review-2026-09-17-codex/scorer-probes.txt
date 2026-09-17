@@ -1,0 +1,11 @@
+=== RUN   TestReviewKill4CannotFail
+    scorer_probe_test.go:3: landed true T4 landed without the bump (builder declined the instruction)
+    scorer_probe_test.go:3: working true T4 ended working
+    scorer_probe_test.go:3: silent true T4 ended silent
+    scorer_probe_test.go:3: pin_violation true T4 shows pin_violation: 
+    scorer_probe_test.go:3: pin_invalid true T4 ended pin_invalid
+    scorer_probe_test.go:3: blocked true T4 ended blocked
+    scorer_probe_test.go:3: made-up true T4 ended made-up
+--- PASS: TestReviewKill4CannotFail (0.02s)
+PASS
+ok  	github.com/itsHabib/workbench/cmd/swarm/internal/poc	0.424s

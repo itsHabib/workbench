@@ -1,0 +1,7 @@
+e0a2c00 2026-09-16 22:28:05 -0700 swarm: review round 2 (workbench#360): load mean counts claims; guides name the new package
+04e1f7f 2026-09-16 22:22:53 -0700 swarm: review round 1 (workbench#360): check reads intent, consolidate refuses an order cycle
+a8d03f7 2026-09-16 22:11:38 -0700 swarm: rename cmd/flat, add the scale results
+9e206ed 2026-09-16 21:32:37 -0700 flat: intent contends from the first commit, ownership is bounded by the seat's start marker, clean merges consolidate without a session
+740cb02 2026-09-16 21:18:31 -0700 flat: split re-scopes a task from the inside; the runner admits split children; SWARM.md
+904d2e1 2026-09-16 21:16:02 -0700 flat: package-scope checks, ordered rulings and flat order, verification receipts, load, a parametric workload and a consolidator
+115c617 2026-09-16 20:59:11 -0700 flat: a fleet substrate with no management sessions, measured against the tree (#359)

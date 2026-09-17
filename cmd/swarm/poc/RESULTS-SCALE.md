@@ -1,5 +1,15 @@
 # Results at scale, 2026-09-17
 
+> **Status, 2026-09-17: development evidence, not a result.** An independent adversarial review
+> ([review-2026-09-17-codex/REVIEW.md](review-2026-09-17-codex/REVIEW.md)) found the headline claim
+> unsupported. Both arms ran on this substrate, so nothing here compares against the
+> prompts-and-loop hierarchy that actually worked; the generator supplied the decomposition and
+> handoffs a lead would author; kill condition 4 cannot fail; the scored scale runs predate the
+> fix that made `check` read intent; and one run per mode gives no variance. What survives: a
+> derived board, scoped rulings and wakes can carry some coordination on a pre-decomposed local
+> workload. The review also reproduced ten safety defects in the substrate; see
+> [KNOWN-DEFECTS.md](../KNOWN-DEFECTS.md).
+
 The six-task runs (`RESULTS.md`) said a flat fleet does at least as well as a tree. The
 question a fifty-builder day raises is whether that holds where the tree started to hurt.
 These runs are five times the size: 30 generated tasks over 6 packages, so five builders
@@ -13,7 +23,7 @@ under `runs/` keep that name.
 
 **At 30 builders both modes pass every kill condition, and the lead buys nothing.** The
 substrate carries the fleet either way. The tree's lead ran 8 ticks and wrote 18,729 output
-tokens; no metric is better for it. It raised median wait from 0.1 to 0.6 minutes, produced
+tokens. One metric is better for it: its worst wait was shorter (0.9 vs 1.4 minutes). It raised median wait from 0.1 to 0.6 minutes, produced
 the run's only operator request, and that request had no product question in it. Cost and
 wall clock are 8% and 7% worse. The margin is modest because the substrate does the work in
 both modes, which is the point: nothing is left for a rank to do.
