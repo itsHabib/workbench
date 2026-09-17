@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/itsHabib/workbench/cmd/swarm/internal/gym"
 	"github.com/itsHabib/workbench/cmd/swarm/internal/poc"
 	"github.com/itsHabib/workbench/cmd/swarm/internal/swarm"
 )
@@ -45,6 +46,8 @@ watch       watch [--interval 30s] [--once] [--fetch] [--idle 20m] [--unclaimed 
             digest
 inbox       inbox [--keep] · nudge SEAT TEXT · hook · install-hook [--dir REPO]
 stats       stats [--threshold 20m] [--json]
+gym         gym list · gym run --models a,b --out DIR · gym table --out DIR     which model for which seat
+plane       plane fault --store file|resp · plane rooms ...                      the store and its fault harness
 poc         poc init DIR · poc run --dir DIR --mode flat|tree [...] · poc stats --run DIR
 
 --as SEAT applies to every verb; default SWARM_SEAT, else the checked-out branch.
@@ -61,6 +64,9 @@ func main() {
 	}
 	if verb == "plane" {
 		os.Exit(planeMain(args))
+	}
+	if verb == "gym" {
+		os.Exit(gym.Main(args))
 	}
 	if verb == "hook" {
 		_ = swarm.Hook(os.Stdin, os.Stdout)
