@@ -1,4 +1,4 @@
-# flat
+# swarm
 
 A fleet substrate with no management sessions: a board derived from git, a hash-chained
 decision ledger, claims with fencing epochs, resource leases, admission, and a watcher that
@@ -9,7 +9,7 @@ contract; `poc/KILL.md` and `poc/RESULTS.md` are the adversarial run that justif
 ## Layout
 
 - `main.go` — verbs and exit codes. Positional arguments may precede flags.
-- `internal/flat` — the substrate. `board.go` derives rows, pin checks and contention from
+- `internal/swarm` — the substrate. `board.go` derives rows, pin checks and contention from
   git; `decide.go` is requests, claims, rulings, tiers, routing and the ledger; `resource.go`
   leases; `admit.go` admission (`disk_unix.go`, `disk_windows.go`); `watch.go` alerts,
   digest and renders; `inbox.go` notes and the hook; `wake.go` session records and wakes;
@@ -48,7 +48,7 @@ go test ./cmd/swarm/...
 GOOS=windows go build -o /dev/null ./cmd/swarm
 ```
 
-`internal/flat` tests build hermetic repositories (unsigned, hook-free commits) and exercise
+`internal/swarm` tests build hermetic repositories (unsigned, hook-free commits) and exercise
 pin states, contention, fencing, tiebreak, escalation, ledger tampering, leases, admission,
 watch alerts, hook delivery, affinity routing and turn-boundary recording. The poc runner is
 exercised by `swarm poc run --only t1-config-timeout` against a fresh `swarm poc init`.

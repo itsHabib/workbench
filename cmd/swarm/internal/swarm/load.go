@@ -19,6 +19,7 @@ type SeatLoad struct {
 	ClaimAvgMin   float64 `json:"claim_avg_min"`   // mean wait over the window, requests this seat claimed
 	ClaimMaxMin   float64 `json:"claim_max_min"`
 	RuledInWindow int     `json:"ruled_in_window"`
+	claims        int     // claims counted into ClaimAvgMin
 }
 
 // Load reports every address's queue over the last window, operator
@@ -106,7 +107,8 @@ func (s *State) foldLoadEvents(events []Event, since time.Time, get func(string)
 
 // accumulate keeps a running mean and max without storing every sample.
 func accumulate(l *SeatLoad, wait float64) (avg, hi float64) {
-	n := float64(l.RuledInWindow + 1)
+	l.claims++
+	n := float64(l.claims)
 	avg = l.ClaimAvgMin + (wait-l.ClaimAvgMin)/n
 	hi = l.ClaimMaxMin
 	if wait > hi {

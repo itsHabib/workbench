@@ -703,6 +703,15 @@ func TestVerifyReceipts(t *testing.T) {
 	}
 }
 
+func TestLoadMeanCountsClaims(t *testing.T) {
+	l := &SeatLoad{}
+	l.ClaimAvgMin, l.ClaimMaxMin = accumulate(l, 2)
+	l.ClaimAvgMin, l.ClaimMaxMin = accumulate(l, 4)
+	if l.ClaimAvgMin != 3 || l.ClaimMaxMin != 4 {
+		t.Fatalf("two claims before any ruling: avg %v max %v", l.ClaimAvgMin, l.ClaimMaxMin)
+	}
+}
+
 func TestLoad(t *testing.T) {
 	main := repo(t)
 	s := open(t, main)
