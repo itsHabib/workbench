@@ -1,0 +1,98 @@
+04:49:29 run tree mode=tree model=claude-sonnet-5 seats=8 out=/private/tmp/claude-501/-Users-mh-dev/048af72c-2611-4d7c-a274-83bf5096a17c/scratchpad/sw-tree/runs/tree
+04:49:29 admitted t01-p1-k1 (0 working)
+04:49:29 admitted t02-p2-k2 (0 working)
+04:49:29 admitted t03-p3-k3 (1 working)
+04:49:29 admitted t04-p4-k4 (2 working)
+04:49:29 fault D: disk reported as 1 byte free for 1m0s
+04:49:30 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:49:41 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:49:51 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:49:54 fault B: killed t02-p2-k2 after 25s (turns=0); resuming the seat in a fresh session
+04:49:55 lead tick 1: turns=7 out=829 exit=0
+04:50:02 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:50:04 builder t03-p3-k3 done: turns=15 out=2065 exit=0 err=false
+04:50:05 builder t01-p1-k1 done: turns=16 out=2065 exit=0 err=false
+04:50:12 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:50:13 watch alerts: pin:t04-p4-k4
+04:50:23 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:50:30 builder t04-p4-k4 done: turns=29 out=3995 exit=0 err=false
+04:50:33 fault D: disk floor met again
+04:50:33 admitted t05-p5-k5 (0 working)
+04:50:34 admitted t06-p6-k6 (0 working)
+04:50:35 admitted t07-p1-k7 (1 working)
+04:50:36 builder t02-p2-k2 (resumed) done: turns=18 out=1743 exit=0
+04:50:37 admitted t08-p2-k8 (2 working)
+04:50:39 admitted t09-p3-k9 (3 working)
+04:50:42 admitted t10-p4-k10 (4 working)
+04:50:45 admitted t11-p5-k11 (5 working)
+04:50:50 admitted t12-p6-k12 (6 working)
+04:50:57 waiting to admit t13-p1-k13: runner: 8 running
+04:50:58 watch alerts: overlap:fixtures/db.json overlap:pkg/p1/p1.go overlap:pkg/p1/p1_test.go overlap:pkg/p2/p2.go overlap:pkg/p2/p2_test.go overlap:pkg/p3/p3.go overlap:pkg/p3/p3_test.go overlap:pkg/p4/p4.go overlap:pkg/p4/p4_test.go overlap:pkg/p5/p5.go overlap:pkg/p5/p5_test.go
+04:51:12 builder t06-p6-k6 done: turns=14 out=1858 exit=0 err=false
+04:51:13 waiting to admit t13-p1-k13: runner: 8 running
+04:51:19 watch alerts: overlap:fixtures/db.json overlap:pkg/p3/p3.go overlap:pkg/p3/p3_test.go overlap:pkg/p4/p4.go overlap:pkg/p4/p4_test.go overlap:pkg/p5/p5.go overlap:pkg/p5/p5_test.go overlap:pkg/p6/p6.go overlap:pkg/p6/p6_test.go
+04:51:30 admitted t13-p1-k13 (7 working)
+04:51:36 watch alerts: overlap:fixtures/db.json overlap:pkg/p5/p5.go overlap:pkg/p5/p5_test.go overlap:pkg/p6/p6.go overlap:pkg/p6/p6_test.go
+04:51:39 waiting to admit t14-p2-k14: runner: 8 running
+04:51:55 waiting to admit t14-p2-k14: seats_full: 8 working, 8 seats
+04:51:55 watch alerts: overlap:fixtures/db.json overlap:pkg/p5/p5.go overlap:pkg/p5/p5_test.go
+04:51:57 builder t07-p1-k7 done: turns=18 out=2392 exit=0 err=false
+04:52:09 builder t08-p2-k8 done: turns=19 out=2639 exit=0 err=false
+04:52:10 admitted t14-p2-k14 (6 working)
+04:52:15 builder t09-p3-k9 done: turns=20 out=2686 exit=0 err=false
+04:52:21 admitted t15-p3-k15 (5 working)
+04:52:21 builder t12-p6-k12 done: turns=28 out=3852 exit=0 err=false
+04:52:30 lead tick 2: turns=19 out=4959 exit=0
+04:52:31 admitted t16-p4-k16 (5 working)
+04:52:41 admitted t17-p5-k17 (6 working)
+04:52:49 builder t13-p1-k13 done: turns=21 out=2996 exit=0 err=false
+04:52:50 builder t05-p5-k5 done: turns=25 out=3250 exit=0 err=false
+04:52:52 waiting to admit t18-p6-k18: runner: 8 running
+04:53:10 builder t10-p4-k10 done: turns=38 out=4977 exit=0 err=false
+04:53:14 admitted t18-p6-k18 (6 working)
+04:53:25 admitted t19-p1-k19 (5 working)
+04:53:28 builder t14-p2-k14 done: turns=20 out=2581 exit=0 err=false
+04:53:39 admitted t20-p2-k20 (5 working)
+04:53:48 builder t11-p5-k11 done: turns=31 out=5064 exit=0 err=false
+04:53:48 builder t17-p5-k17 done: turns=18 out=2356 exit=0 err=false
+04:53:54 admitted t21-p3-k21 (5 working)
+04:54:08 admitted t22-p4-k22 (5 working)
+04:54:09 operator ruled req_dlhbmo4tx2ig_8698028e from t16-p4-k16 matched=false
+04:54:22 builder t18-p6-k18 done: turns=21 out=3060 exit=0 err=false
+04:54:25 admitted t23-p5-k23 (6 working)
+04:54:41 builder t19-p1-k19 done: turns=29 out=3833 exit=0 err=false
+04:54:44 admitted t24-p6-k24 (6 working)
+04:54:51 builder t15-p3-k15 done: turns=33 out=5060 exit=0 err=false
+04:54:55 lead tick 3: turns=6 out=2528 exit=0
+04:55:04 admitted t25-p1-k25 (5 working)
+04:55:18 builder t21-p3-k21 done: turns=22 out=3008 exit=0 err=false
+04:55:25 admitted t26-p2-k26 (6 working)
+04:55:38 builder t20-p2-k20 done: turns=41 out=5509 exit=0 err=false
+04:55:44 admitted t27-p3-k27 (6 working)
+04:55:45 builder t16-p4-k16 done: turns=29 out=4812 exit=0 err=false
+04:55:57 builder t22-p4-k22 done: turns=21 out=2781 exit=0 err=false
+04:56:04 admitted t28-p4-k28 (5 working)
+04:56:11 builder t24-p6-k24 done: turns=19 out=2612 exit=0 err=false
+04:56:27 admitted t29-p5-k29 (5 working)
+04:56:53 builder t26-p2-k26 done: turns=19 out=2703 exit=0 err=false
+04:56:55 admitted t30-p6-k30 (5 working)
+04:56:55 split child admitted: t03b-p3-k3b (parent t03-p3-k3)
+04:56:59 builder t23-p5-k23 done: turns=37 out=5255 exit=0 err=false
+04:57:03 builder t27-p3-k27 done: turns=16 out=2346 exit=0 err=false
+04:57:19 admitted t03b-p3-k3b (4 working)
+04:57:19 split child admitted: t03c-p3-k3c (parent t03-p3-k3)
+04:57:29 builder t25-p1-k25 done: turns=29 out=4518 exit=0 err=false
+04:57:30 lead tick 4: turns=6 out=2596 exit=0
+04:57:46 admitted t03c-p3-k3c (4 working)
+04:58:32 builder t29-p5-k29 done: turns=19 out=2863 exit=0 err=false
+04:58:44 builder t03c-p3-k3c done: turns=16 out=1970 exit=0 err=false
+04:58:45 builder t03b-p3-k3b done: turns=19 out=2491 exit=0 err=false
+04:59:13 builder t30-p6-k30 done: turns=27 out=4218 exit=0 err=false
+04:59:38 builder t28-p4-k28 done: turns=35 out=6191 exit=0 err=false
+04:59:50 lead tick 5: turns=6 out=2861 exit=0
+05:02:15 lead tick 6: turns=6 out=2424 exit=0
+05:04:33 lead tick 7: turns=6 out=2532 exit=0
+05:06:15 consolidator done: turns=105 out=22834 exit=0
+05:06:15 all builders finished; final pass
+05:06:15 lead tick 8: turns=0 out=0 exit=-1
+05:07:08 evidence under /private/tmp/claude-501/-Users-mh-dev/048af72c-2611-4d7c-a274-83bf5096a17c/scratchpad/sw-tree/runs/tree

@@ -1,0 +1,124 @@
+{
+  "mode": "flat",
+  "run": "flat",
+  "stats": {
+    "requests": 13,
+    "by_needs": {
+      "peer": 13
+    },
+    "escalations": 0,
+    "ruled": 13,
+    "open": 0,
+    "claim_p50_s": 9.866659,
+    "claim_max_s": 33.948872,
+    "rule_p50_s": 9.867466,
+    "rule_max_s": 38.095342,
+    "unclaimed_over": 0,
+    "operator_requests": 0,
+    "operator_rulings": 0,
+    "pin_violations": 0,
+    "pin_invalid": 0,
+    "contended": 17,
+    "contended_unruled": 0,
+    "landed": 29,
+    "blocked": 0,
+    "working": 1,
+    "silent": 0,
+    "red": 0,
+    "admit_refusals": 9,
+    "nudges": 50,
+    "resource_takeovers": 0,
+    "locks_broken": 0,
+    "refusals": {
+      "already_ruled": 9,
+      "contended_unruled": 6,
+      "must_supersede": 1
+    },
+    "wakes": 17,
+    "routed": 13,
+    "ruled_by_routed": 1
+  },
+  "tasks": {
+    "t01-p1-k1": "landed",
+    "t02-p2-k2": "landed",
+    "t03-p3-k3": "landed",
+    "t04-p4-k4": "landed",
+    "t05-p5-k5": "landed",
+    "t06-p6-k6": "landed",
+    "t07-p1-k7": "landed",
+    "t08-p2-k8": "landed",
+    "t09-p3-k9": "landed",
+    "t10-p4-k10": "landed",
+    "t11-p5-k11": "landed",
+    "t12-p6-k12": "landed",
+    "t13-p1-k13": "landed",
+    "t14-p2-k14": "landed",
+    "t15-p3-k15": "landed",
+    "t16-p4-k16": "landed",
+    "t17-p5-k17": "landed",
+    "t18-p6-k18": "landed",
+    "t19-p1-k19": "landed",
+    "t20-p2-k20": "landed",
+    "t21-p3-k21": "working",
+    "t22-p4-k22": "landed",
+    "t23-p5-k23": "landed",
+    "t24-p6-k24": "landed",
+    "t25-p1-k25": "landed",
+    "t26-p2-k26": "landed",
+    "t27-p3-k27": "landed",
+    "t28-p4-k28": "landed",
+    "t29-p5-k29": "landed",
+    "t30-p6-k30": "landed"
+  },
+  "sessions": 49,
+  "builder_sessions": 32,
+  "lead_ticks": 0,
+  "wakes": 17,
+  "output_tokens": 131658,
+  "lead_output_tokens": 0,
+  "wake_output_tokens": 19585,
+  "input_tokens": 51977986,
+  "cost_usd": 17.145033999999995,
+  "wall_s": 787.381792,
+  "operator_requests": 0,
+  "operator_unmatched": 0,
+  "kills": [
+    {
+      "id": 1,
+      "name": "no request unclaimed over 20m",
+      "passed": true,
+      "detail": "unclaimed_over=0 claim p50=10s max=34s rule p50=10s max=38s"
+    },
+    {
+      "id": 2,
+      "name": "no contended landing without a prior ruling",
+      "passed": false,
+      "detail": "contended=17 unruled=0 violations=briefs/out/t04-p4-k4/START.md (t04-p4-k4,t10-p4-k10; ruled=true); briefs/out/t05-p5-k5/START.md (t10-p4-k10,t15-p3-k15; ruled=true); briefs/out/t11-p5-k11/START.md (t05-p5-k5,t11-p5-k11; ruled=true); cmd/app/main.go (t04-p4-k4,t10-p4-k10; ruled=true); pkg/p6/p6.go (t06-p6-k6,t12-p6-k12,t18-p6-k18,t24-p6-k24,t30-p6-k30; ruled=true); pkg/p6/p6_test.go (t06-p6-k6,t12-p6-k12,t18-p6-k18,t24-p6-k24,t30-p6-k30; ruled=true)"
+    },
+    {
+      "id": 3,
+      "name": "T6 does not guess the export format",
+      "passed": true,
+      "detail": "T6 not in this run"
+    },
+    {
+      "id": 4,
+      "name": "fault A is flagged by the pin check",
+      "passed": true,
+      "detail": "T4 landed with the bump pinned by RESULT.json (absorbed: flagged, then re-pinned)"
+    },
+    {
+      "id": 5,
+      "name": "operator requests (compared across modes)",
+      "passed": true,
+      "detail": "operator_requests=0 unmatched=0"
+    }
+  ],
+  "consolidation": "no consolidator ran",
+  "faults": {
+    "A": "T4 landed with the bump pinned by RESULT.json (absorbed: flagged, then re-pinned)",
+    "B": "killed=true resumed=true final=landed",
+    "C": "T6 not in this run",
+    "D": "disk_low refusals=6"
+  }
+}

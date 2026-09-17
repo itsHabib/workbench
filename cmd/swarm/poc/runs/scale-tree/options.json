@@ -1,0 +1,18 @@
+{
+  "Dir": "/private/tmp/claude-501/-Users-mh-dev/048af72c-2611-4d7c-a274-83bf5096a17c/scratchpad/sw-tree",
+  "Mode": "tree",
+  "Model": "claude-sonnet-5",
+  "Seats": 8,
+  "Only": null,
+  "BuilderWall": 1500000000000,
+  "MaxTurns": 80,
+  "LeadEvery": 90000000000,
+  "OperatorEvery": 20000000000,
+  "WatchEvery": 20000000000,
+  "KillT2After": 25000000000,
+  "DiskFaultFor": 60000000000,
+  "DiskMin": 2147483648,
+  "Out": "/private/tmp/claude-501/-Users-mh-dev/048af72c-2611-4d7c-a274-83bf5096a17c/scratchpad/sw-tree/runs/tree",
+  "FlatBin": "/private/tmp/claude-501/-Users-mh-dev/048af72c-2611-4d7c-a274-83bf5096a17c/scratchpad/bin/flat",
+  "Consolidate": true
+}

@@ -1,0 +1,95 @@
+04:32:37 run flat mode=flat model=claude-sonnet-5 seats=8 out=/private/tmp/claude-501/-Users-mh-dev/048af72c-2611-4d7c-a274-83bf5096a17c/scratchpad/sw-flat2/runs/flat
+04:32:37 admitted t01-p1-k1 (0 working)
+04:32:37 admitted t02-p2-k2 (0 working)
+04:32:38 admitted t03-p3-k3 (1 working)
+04:32:38 admitted t04-p4-k4 (2 working)
+04:32:38 fault D: disk reported as 1 byte free for 1m0s
+04:32:39 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:32:49 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:32:59 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:33:03 fault B: killed t02-p2-k2 after 25s (turns=0); resuming the seat in a fresh session
+04:33:10 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:33:13 builder t01-p1-k1 done: turns=15 out=2514 exit=0 err=false
+04:33:20 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:33:24 builder t03-p3-k3 done: turns=16 out=2232 exit=0 err=false
+04:33:30 builder t02-p2-k2 (resumed) done: turns=17 out=1602 exit=0
+04:33:30 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:33:40 fault D: disk floor met again
+04:33:41 admitted t05-p5-k5 (0 working)
+04:33:42 watch alerts: pin:t04-p4-k4
+04:33:42 admitted t06-p6-k6 (0 working)
+04:33:43 admitted t07-p1-k7 (1 working)
+04:33:44 admitted t08-p2-k8 (2 working)
+04:33:46 admitted t09-p3-k9 (3 working)
+04:33:48 admitted t10-p4-k10 (4 working)
+04:33:50 admitted t11-p5-k11 (5 working)
+04:33:52 waiting to admit t12-p6-k12: runner: 8 running
+04:34:02 watch alerts: overlap:fixtures/db.json overlap:pkg/p1/p1.go overlap:pkg/p1/p1_test.go overlap:pkg/p2/p2.go overlap:pkg/p2/p2_test.go overlap:pkg/p3/p3.go overlap:pkg/p3/p3_test.go overlap:pkg/p4/p4.go overlap:pkg/p4/p4_test.go overlap:pkg/p5/p5.go overlap:pkg/p5/p5_test.go
+04:34:02 builder t04-p4-k4 done: turns=28 out=3919 exit=0 err=false
+04:34:07 admitted t12-p6-k12 (7 working)
+04:34:10 waiting to admit t13-p1-k13: runner: 8 running
+04:34:19 watch alerts: overlap:fixtures/db.json overlap:pkg/p4/p4.go overlap:pkg/p4/p4_test.go overlap:pkg/p6/p6.go overlap:pkg/p6/p6_test.go
+04:34:24 waiting to admit t13-p1-k13: runner: 8 running
+04:34:35 builder t06-p6-k6 done: turns=16 out=2207 exit=0 err=false
+04:34:36 waiting to admit t13-p1-k13: runner: 8 running
+04:34:39 builder t08-p2-k8 done: turns=22 out=2853 exit=0 err=false
+04:34:45 watch alerts: overlap:fixtures/db.json
+04:34:48 admitted t13-p1-k13 (5 working)
+04:34:51 admitted t14-p2-k14 (5 working)
+04:34:51 builder t09-p3-k9 done: turns=17 out=2510 exit=0 err=false
+04:34:54 waiting to admit t15-p3-k15: runner: 8 running
+04:35:02 watch alerts: overlap:fixtures/db.json
+04:35:05 builder t07-p1-k7 done: turns=24 out=3086 exit=0 err=false
+04:35:07 admitted t15-p3-k15 (6 working)
+04:35:11 admitted t16-p4-k16 (6 working)
+04:35:16 waiting to admit t17-p5-k17: runner: 8 running
+04:35:25 watch alerts: overlap:fixtures/db.json
+04:35:29 waiting to admit t17-p5-k17: seats_full: 8 working, 8 seats
+04:35:36 builder t12-p6-k12 done: turns=21 out=2764 exit=0 err=false
+04:35:44 admitted t17-p5-k17 (7 working)
+04:35:44 watch alerts: overlap:fixtures/db.json
+04:35:49 waiting to admit t18-p6-k18: runner: 8 running
+04:35:52 builder t14-p2-k14 done: turns=21 out=3705 exit=0 err=false
+04:36:04 admitted t18-p6-k18 (6 working)
+04:36:06 builder t13-p1-k13 done: turns=22 out=3153 exit=0 err=false
+04:36:11 waiting to admit t19-p1-k19: runner: 8 running
+04:36:11 builder t05-p5-k5 done: turns=27 out=3536 exit=0 err=false
+04:36:16 builder t11-p5-k11 done: turns=34 out=6048 exit=0 err=false
+04:36:26 admitted t19-p1-k19 (5 working)
+04:36:27 builder t15-p3-k15 done: turns=28 out=3735 exit=0 err=false
+04:36:33 admitted t20-p2-k20 (4 working)
+04:36:43 builder t16-p4-k16 done: turns=23 out=3784 exit=0 err=false
+04:36:43 admitted t21-p3-k21 (5 working)
+04:36:55 admitted t22-p4-k22 (5 working)
+04:37:00 builder t18-p6-k18 done: turns=15 out=2039 exit=0 err=false
+04:37:09 admitted t23-p5-k23 (5 working)
+04:37:19 builder t17-p5-k17 done: turns=28 out=3870 exit=0 err=false
+04:37:22 admitted t24-p6-k24 (6 working)
+04:37:33 builder t10-p4-k10 done: turns=19 out=3053 exit=0 err=false
+04:37:40 admitted t25-p1-k25 (6 working)
+04:37:55 builder t19-p1-k19 done: turns=22 out=3007 exit=0 err=false
+04:37:56 admitted t26-p2-k26 (6 working)
+04:38:12 builder t21-p3-k21 done: turns=20 out=2715 exit=0 err=false
+04:38:14 builder t20-p2-k20 done: turns=24 out=3230 exit=0 err=false
+04:38:14 admitted t27-p3-k27 (6 working)
+04:38:27 builder t23-p5-k23 done: turns=20 out=2474 exit=0 err=false
+04:38:27 builder t22-p4-k22 done: turns=18 out=2429 exit=0 err=false
+04:38:36 admitted t28-p4-k28 (5 working)
+04:38:53 admitted t29-p5-k29 (4 working)
+04:39:14 admitted t30-p6-k30 (5 working)
+04:39:14 split child admitted: t03b-p3-k3b (parent t03-p3-k3)
+04:39:27 builder t27-p3-k27 done: turns=22 out=2910 exit=0 err=false
+04:39:27 builder t24-p6-k24 done: turns=21 out=4237 exit=0 err=false
+04:39:33 builder t26-p2-k26 done: turns=22 out=2943 exit=0 err=false
+04:39:37 admitted t03b-p3-k3b (6 working)
+04:39:37 split child admitted: t03c-p3-k3c (parent t03-p3-k3)
+04:40:02 admitted t03c-p3-k3c (4 working)
+04:40:45 builder t29-p5-k29 done: turns=21 out=3136 exit=0 err=false
+04:40:53 builder t25-p1-k25 done: turns=36 out=6481 exit=0 err=false
+04:40:59 builder t03b-p3-k3b done: turns=19 out=2360 exit=0 err=false
+04:41:10 builder t03c-p3-k3c done: turns=19 out=2557 exit=0 err=false
+04:41:12 builder t28-p4-k28 done: turns=27 out=6274 exit=0 err=false
+04:43:26 builder t30-p6-k30 done: turns=24 out=5956 exit=0 err=false
+04:48:18 consolidator done: turns=106 out=22829 exit=0
+04:48:18 all builders finished; final pass
+04:48:44 evidence under /private/tmp/claude-501/-Users-mh-dev/048af72c-2611-4d7c-a274-83bf5096a17c/scratchpad/sw-flat2/runs/flat

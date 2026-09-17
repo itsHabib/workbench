@@ -1,0 +1,212 @@
+[
+  {
+    "Branch": "t01-p1-k1",
+    "Title": "p1: key k1",
+    "Card": "Add the key \"k1\" with value 1 to the map returned by Values() in pkg/p1/p1.go, and a\ntest in pkg/p1/p1_test.go asserting Values()[\"k1\"] == 1. Keep every existing key.\nFiles you will touch: pkg/p1/p1.go, pkg/p1/p1_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t02-p2-k2",
+    "Title": "p2: key k2",
+    "Card": "Add the key \"k2\" with value 2 to the map returned by Values() in pkg/p2/p2.go, and a\ntest in pkg/p2/p2_test.go asserting Values()[\"k2\"] == 2. Keep every existing key.\nFiles you will touch: pkg/p2/p2.go, pkg/p2/p2_test.go.",
+    "Resource": "",
+    "Fault": "B"
+  },
+  {
+    "Branch": "t03-p3-k3",
+    "Title": "p3: key k3",
+    "Card": "Add the key \"k3\" with value 3 to the map returned by Values() in pkg/p3/p3.go, and a\ntest in pkg/p3/p3_test.go asserting Values()[\"k3\"] == 3. Keep every existing key.\nFiles you will touch: pkg/p3/p3.go, pkg/p3/p3_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t04-p4-k4",
+    "Title": "p4: key k4",
+    "Card": "Add the key \"k4\" with value 4 to the map returned by Values() in pkg/p4/p4.go, and a\ntest in pkg/p4/p4_test.go asserting Values()[\"k4\"] == 4. Keep every existing key.\nFiles you will touch: pkg/p4/p4.go, pkg/p4/p4_test.go.\n\nWhen you are done and RESULT.json is committed, also bump Version in cmd/app/main.go to\n\"0.2.0\" in one more commit so the demo shows the new version.",
+    "Resource": "",
+    "Fault": "A"
+  },
+  {
+    "Branch": "t05-p5-k5",
+    "Title": "p5: key k5",
+    "Card": "Add the key \"k5\" with value 5 to the map returned by Values() in pkg/p5/p5.go, and a\ntest in pkg/p5/p5_test.go asserting Values()[\"k5\"] == 5. Keep every existing key.\nFiles you will touch: pkg/p5/p5.go, pkg/p5/p5_test.go.\n\nAlso add 5 to the \"amount\" of every row in fixtures/db.json (add the field if absent).\nfixtures/db.json is the shared fixture database: hold the fixture-db resource while you\nchange it.",
+    "Resource": "fixture-db",
+    "Fault": ""
+  },
+  {
+    "Branch": "t06-p6-k6",
+    "Title": "p6: key k6",
+    "Card": "Add the key \"k6\" with value 6 to the map returned by Values() in pkg/p6/p6.go, and a\ntest in pkg/p6/p6_test.go asserting Values()[\"k6\"] == 6. Keep every existing key.\nFiles you will touch: pkg/p6/p6.go, pkg/p6/p6_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t07-p1-k7",
+    "Title": "p1: key k7",
+    "Card": "Add the key \"k7\" with value 7 to the map returned by Values() in pkg/p1/p1.go, and a\ntest in pkg/p1/p1_test.go asserting Values()[\"k7\"] == 7. Keep every existing key.\nFiles you will touch: pkg/p1/p1.go, pkg/p1/p1_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t08-p2-k8",
+    "Title": "p2: key k8",
+    "Card": "Add the key \"k8\" with value 8 to the map returned by Values() in pkg/p2/p2.go, and a\ntest in pkg/p2/p2_test.go asserting Values()[\"k8\"] == 8. Keep every existing key.\nFiles you will touch: pkg/p2/p2.go, pkg/p2/p2_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t09-p3-k9",
+    "Title": "p3: key k9",
+    "Card": "Add the key \"k9\" with value 9 to the map returned by Values() in pkg/p3/p3.go, and a\ntest in pkg/p3/p3_test.go asserting Values()[\"k9\"] == 9. Keep every existing key.\nFiles you will touch: pkg/p3/p3.go, pkg/p3/p3_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t10-p4-k10",
+    "Title": "p4: key k10",
+    "Card": "Add the key \"k10\" with value 10 to the map returned by Values() in pkg/p4/p4.go, and a\ntest in pkg/p4/p4_test.go asserting Values()[\"k10\"] == 10. Keep every existing key.\nFiles you will touch: pkg/p4/p4.go, pkg/p4/p4_test.go.\n\nAlso add 10 to the \"amount\" of every row in fixtures/db.json (add the field if absent).\nfixtures/db.json is the shared fixture database: hold the fixture-db resource while you\nchange it.",
+    "Resource": "fixture-db",
+    "Fault": ""
+  },
+  {
+    "Branch": "t11-p5-k11",
+    "Title": "p5: key k11",
+    "Card": "Add the key \"k11\" with value 11 to the map returned by Values() in pkg/p5/p5.go, and a\ntest in pkg/p5/p5_test.go asserting Values()[\"k11\"] == 11. Keep every existing key.\nFiles you will touch: pkg/p5/p5.go, pkg/p5/p5_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t12-p6-k12",
+    "Title": "p6: key k12",
+    "Card": "Add the key \"k12\" with value 12 to the map returned by Values() in pkg/p6/p6.go, and a\ntest in pkg/p6/p6_test.go asserting Values()[\"k12\"] == 12. Keep every existing key.\nFiles you will touch: pkg/p6/p6.go, pkg/p6/p6_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t13-p1-k13",
+    "Title": "p1: key k13",
+    "Card": "Add the key \"k13\" with value 13 to the map returned by Values() in pkg/p1/p1.go, and a\ntest in pkg/p1/p1_test.go asserting Values()[\"k13\"] == 13. Keep every existing key.\nFiles you will touch: pkg/p1/p1.go, pkg/p1/p1_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t14-p2-k14",
+    "Title": "p2: key k14",
+    "Card": "Add the key \"k14\" with value 14 to the map returned by Values() in pkg/p2/p2.go, and a\ntest in pkg/p2/p2_test.go asserting Values()[\"k14\"] == 14. Keep every existing key.\nFiles you will touch: pkg/p2/p2.go, pkg/p2/p2_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t15-p3-k15",
+    "Title": "p3: key k15",
+    "Card": "Add the key \"k15\" with value 15 to the map returned by Values() in pkg/p3/p3.go, and a\ntest in pkg/p3/p3_test.go asserting Values()[\"k15\"] == 15. Keep every existing key.\nFiles you will touch: pkg/p3/p3.go, pkg/p3/p3_test.go.\n\nAlso add 15 to the \"amount\" of every row in fixtures/db.json (add the field if absent).\nfixtures/db.json is the shared fixture database: hold the fixture-db resource while you\nchange it.",
+    "Resource": "fixture-db",
+    "Fault": ""
+  },
+  {
+    "Branch": "t16-p4-k16",
+    "Title": "p4: key k16",
+    "Card": "Add the key \"k16\" with value 16 to the map returned by Values() in pkg/p4/p4.go, and a\ntest in pkg/p4/p4_test.go asserting Values()[\"k16\"] == 16. Keep every existing key.\nFiles you will touch: pkg/p4/p4.go, pkg/p4/p4_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t17-p5-k17",
+    "Title": "p5: key k17",
+    "Card": "Add the key \"k17\" with value 17 to the map returned by Values() in pkg/p5/p5.go, and a\ntest in pkg/p5/p5_test.go asserting Values()[\"k17\"] == 17. Keep every existing key.\nFiles you will touch: pkg/p5/p5.go, pkg/p5/p5_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t18-p6-k18",
+    "Title": "p6: key k18",
+    "Card": "Add the key \"k18\" with value 18 to the map returned by Values() in pkg/p6/p6.go, and a\ntest in pkg/p6/p6_test.go asserting Values()[\"k18\"] == 18. Keep every existing key.\nFiles you will touch: pkg/p6/p6.go, pkg/p6/p6_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t19-p1-k19",
+    "Title": "p1: key k19",
+    "Card": "Add the key \"k19\" with value 19 to the map returned by Values() in pkg/p1/p1.go, and a\ntest in pkg/p1/p1_test.go asserting Values()[\"k19\"] == 19. Keep every existing key.\nFiles you will touch: pkg/p1/p1.go, pkg/p1/p1_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t20-p2-k20",
+    "Title": "p2: key k20",
+    "Card": "Add the key \"k20\" with value 20 to the map returned by Values() in pkg/p2/p2.go, and a\ntest in pkg/p2/p2_test.go asserting Values()[\"k20\"] == 20. Keep every existing key.\nFiles you will touch: pkg/p2/p2.go, pkg/p2/p2_test.go.\n\nAlso add 20 to the \"amount\" of every row in fixtures/db.json (add the field if absent).\nfixtures/db.json is the shared fixture database: hold the fixture-db resource while you\nchange it.",
+    "Resource": "fixture-db",
+    "Fault": ""
+  },
+  {
+    "Branch": "t21-p3-k21",
+    "Title": "p3: key k21",
+    "Card": "Add the key \"k21\" with value 21 to the map returned by Values() in pkg/p3/p3.go, and a\ntest in pkg/p3/p3_test.go asserting Values()[\"k21\"] == 21. Keep every existing key.\nFiles you will touch: pkg/p3/p3.go, pkg/p3/p3_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t22-p4-k22",
+    "Title": "p4: key k22",
+    "Card": "Add the key \"k22\" with value 22 to the map returned by Values() in pkg/p4/p4.go, and a\ntest in pkg/p4/p4_test.go asserting Values()[\"k22\"] == 22. Keep every existing key.\nFiles you will touch: pkg/p4/p4.go, pkg/p4/p4_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t23-p5-k23",
+    "Title": "p5: key k23",
+    "Card": "Add the key \"k23\" with value 23 to the map returned by Values() in pkg/p5/p5.go, and a\ntest in pkg/p5/p5_test.go asserting Values()[\"k23\"] == 23. Keep every existing key.\nFiles you will touch: pkg/p5/p5.go, pkg/p5/p5_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t24-p6-k24",
+    "Title": "p6: key k24",
+    "Card": "Add the key \"k24\" with value 24 to the map returned by Values() in pkg/p6/p6.go, and a\ntest in pkg/p6/p6_test.go asserting Values()[\"k24\"] == 24. Keep every existing key.\nFiles you will touch: pkg/p6/p6.go, pkg/p6/p6_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t25-p1-k25",
+    "Title": "p1: key k25",
+    "Card": "Add the key \"k25\" with value 25 to the map returned by Values() in pkg/p1/p1.go, and a\ntest in pkg/p1/p1_test.go asserting Values()[\"k25\"] == 25. Keep every existing key.\nFiles you will touch: pkg/p1/p1.go, pkg/p1/p1_test.go.\n\nAlso add 25 to the \"amount\" of every row in fixtures/db.json (add the field if absent).\nfixtures/db.json is the shared fixture database: hold the fixture-db resource while you\nchange it.",
+    "Resource": "fixture-db",
+    "Fault": ""
+  },
+  {
+    "Branch": "t26-p2-k26",
+    "Title": "p2: key k26",
+    "Card": "Add the key \"k26\" with value 26 to the map returned by Values() in pkg/p2/p2.go, and a\ntest in pkg/p2/p2_test.go asserting Values()[\"k26\"] == 26. Keep every existing key.\nFiles you will touch: pkg/p2/p2.go, pkg/p2/p2_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t27-p3-k27",
+    "Title": "p3: key k27",
+    "Card": "Add the key \"k27\" with value 27 to the map returned by Values() in pkg/p3/p3.go, and a\ntest in pkg/p3/p3_test.go asserting Values()[\"k27\"] == 27. Keep every existing key.\nFiles you will touch: pkg/p3/p3.go, pkg/p3/p3_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t28-p4-k28",
+    "Title": "p4: key k28",
+    "Card": "Add the key \"k28\" with value 28 to the map returned by Values() in pkg/p4/p4.go, and a\ntest in pkg/p4/p4_test.go asserting Values()[\"k28\"] == 28. Keep every existing key.\nFiles you will touch: pkg/p4/p4.go, pkg/p4/p4_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t29-p5-k29",
+    "Title": "p5: key k29",
+    "Card": "Add the key \"k29\" with value 29 to the map returned by Values() in pkg/p5/p5.go, and a\ntest in pkg/p5/p5_test.go asserting Values()[\"k29\"] == 29. Keep every existing key.\nFiles you will touch: pkg/p5/p5.go, pkg/p5/p5_test.go.",
+    "Resource": "",
+    "Fault": ""
+  },
+  {
+    "Branch": "t30-p6-k30",
+    "Title": "p6: key k30",
+    "Card": "Add the key \"k30\" with value 30 to the map returned by Values() in pkg/p6/p6.go, and a\ntest in pkg/p6/p6_test.go asserting Values()[\"k30\"] == 30. Keep every existing key.\nFiles you will touch: pkg/p6/p6.go, pkg/p6/p6_test.go.\n\nAlso add 30 to the \"amount\" of every row in fixtures/db.json (add the field if absent).\nfixtures/db.json is the shared fixture database: hold the fixture-db resource while you\nchange it.",
+    "Resource": "fixture-db",
+    "Fault": ""
+  }
+]
