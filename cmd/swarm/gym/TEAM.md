@@ -94,3 +94,7 @@ reach yet: a goal too large for one context, work that outlives a session, a spe
 wrong or vague so that decisions have to be made and remembered, and a person who answers
 partway through. Those are the next goals to build, not a bigger copy of this one.
 
+## What this does not say yet
+
+One attempt per cell. No vague or wrong spec, no goal beyond one context, no work that spans
+sessions, no person in the loop. Wall times were taken with all four shapes sharing one machine.
