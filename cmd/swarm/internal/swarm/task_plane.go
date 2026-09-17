@@ -27,6 +27,7 @@ type Work struct {
 	Until   time.Time `json:"until,omitempty"`
 	Result  string    `json:"result,omitempty"`
 	DoneBy  string    `json:"done_by,omitempty"`
+	Head    string    `json:"head,omitempty"` // the commit the finisher says carries the unit
 }
 
 const kindWork = "work"
@@ -37,7 +38,8 @@ func workFromItem(it plane.Item) Work {
 	w.ID, w.State, w.Epoch = it.ID, "open", int(it.Epoch)
 	switch {
 	case it.State == plane.Done:
-		w.State, w.Result, w.DoneBy = "done", it.Result, seatOf(it.DoneBy)
+		w.State, w.DoneBy = "done", seatOf(it.DoneBy)
+		w.Head, w.Result = splitHead(it.Result)
 	case it.Owner != "" && Now().Before(it.Until):
 		w.State, w.Holder, w.Until = "claimed", seatOf(it.Owner), it.Until
 	}
@@ -129,7 +131,10 @@ func (s *State) WorkClaim(id, seat string, ttl time.Duration) (*Work, error) {
 
 // WorkDone commits a unit under the caller's lease. A seat whose lease
 // lapsed and was taken over is refused: its result is not the accepted one.
-func (s *State) WorkDone(id, seat, result string) (*Work, error) {
+func (s *State) WorkDone(id, seat, result, head string) (*Work, error) {
+	if head != "" {
+		result = "head:" + head + "\n" + result
+	}
 	st, err := s.Plane()
 	if err != nil {
 		return nil, err
@@ -153,7 +158,8 @@ func (s *State) WorkDone(id, seat, result string) (*Work, error) {
 	}
 	s.appendEvent(Event{Kind: "work_done", Seat: seat, Detail: id})
 	w := workFromItem(it)
-	w.State, w.Result, w.DoneBy = "done", result, seat
+	w.State, w.DoneBy = "done", seat
+	w.Head, w.Result = splitHead(result)
 	return &w, nil
 }
 
@@ -228,4 +234,14 @@ func (s *State) Idle(seat string, timeout time.Duration) string {
 		}
 		time.Sleep(3 * time.Second)
 	}
+}
+
+// splitHead separates the commit a result names from its prose. The head
+// rides inside the committed result so it is fenced by the same epoch.
+func splitHead(result string) (head, rest string) {
+	line, after, _ := strings.Cut(result, "\n")
+	if sha, ok := strings.CutPrefix(line, "head:"); ok {
+		return sha, after
+	}
+	return "", result
 }

@@ -97,7 +97,7 @@ type cli struct {
 	s    *swarm.State
 	seat string
 
-	title, files, result string
+	title, files, result, head string
 
 	as, scope, question, options, needs, ruling, evidence, supersedes, to, why        string
 	operator, lead, verifier, diskMin, resource, dir, cmd, wakeModel, wakeTools, base string
@@ -154,6 +154,7 @@ func parse(verb string, args []string) (*cli, error) {
 	fs.DurationVar(&c.window, "window", time.Hour, "load window")
 	fs.StringVar(&c.title, "title", "", "work title")
 	fs.StringVar(&c.files, "files", "", "comma-separated paths the work touches")
+	fs.StringVar(&c.head, "head", "", "commit that carries the finished unit")
 	fs.StringVar(&c.result, "result", "", "what was done")
 	fs.StringVar(&c.into, "into", "", "split children as branch:title|branch:title")
 	fs.StringVar(&c.forBranch, "for", "", "admit: the branch this seat is for; reserves the seat until it is on the board")
@@ -588,7 +589,7 @@ func (c *cli) work() error {
 	case "drop":
 		w, err = c.s.WorkDrop(c.arg(1), c.seat)
 	case "done":
-		w, err = c.s.WorkDone(c.arg(1), c.seat, c.result)
+		w, err = c.s.WorkDone(c.arg(1), c.seat, c.result, c.head)
 	case "list", "":
 		return c.workList()
 	default:

@@ -19,7 +19,7 @@ func TestWorkClaimFencesAndIdleWakes(t *testing.T) {
 	}
 	_, err = s.WorkClaim("parse", "alice", time.Minute)
 	refused(t, err, "held_by_other")
-	_, err = s.WorkDone("parse", "alice", "x")
+	_, err = s.WorkDone("parse", "alice", "x", "")
 	refused(t, err, "not_yours")
 	if _, err := s.WorkDrop("parse", "bob"); err != nil {
 		t.Fatal(err)
@@ -31,16 +31,16 @@ func TestWorkClaimFencesAndIdleWakes(t *testing.T) {
 	if err != nil || w.Epoch < 2 {
 		t.Fatalf("reclaim: %+v %v", w, err)
 	}
-	_, err = s.WorkDone("parse", "bob", "late")
+	_, err = s.WorkDone("parse", "bob", "late", "")
 	refused(t, err, "not_yours")
-	if _, err := s.WorkDone("parse", "alice", "done"); err != nil {
+	if _, err := s.WorkDone("parse", "alice", "done", "abc123"); err != nil {
 		t.Fatal(err)
 	}
 	if got := s.Idle("bob", time.Second); got != "every unit of work is done" {
 		t.Fatalf("idle said %q", got)
 	}
 	ws, _ := s.WorkList()
-	if len(ws) != 1 || ws[0].State != "done" || ws[0].DoneBy != "alice" {
+	if len(ws) != 1 || ws[0].State != "done" || ws[0].DoneBy != "alice" || ws[0].Head != "abc123" || ws[0].Result != "done" {
 		t.Fatalf("%+v", ws)
 	}
 }

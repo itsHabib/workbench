@@ -76,7 +76,7 @@ How the team coordinates. The only shared things are the git remote "origin" and
   swarm work list                                    every unit of work and who holds it
   swarm work add <id> --title "..." --files a,b      add a unit (short kebab-case id). Refused "exists" means someone already added it.
   swarm work claim <id>                              take a unit. Refused "held_by_other" means it is taken: pick another.
-  swarm work done <id> --result "..."                after your commit for it is on origin main
+  swarm work done <id> --head <sha> --result "..."   after your commit for it is on origin main
   swarm work drop <id>                               give a unit back if you cannot finish it
   swarm ask --scope <pkg> --question "..." --options "a|b"    a decision more than one seat depends on
   swarm requests                                     open questions. Answer one with: swarm claim <req-id>  then  swarm rule <req-id> --ruling "..."
