@@ -25,7 +25,7 @@ func (s *State) Intend(worktree, seat string, paths []string) ([]string, error) 
 	for _, p := range append(in.Paths, paths...) {
 		seen[filepath.ToSlash(p)] = true
 	}
-	in.Paths = in.Paths[:0]
+	in.Paths = make([]string, 0, len(seen))
 	for p := range seen {
 		in.Paths = append(in.Paths, p)
 	}

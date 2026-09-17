@@ -16,6 +16,8 @@ type Consolidation struct {
 	Skipped    []string `json:"skipped,omitempty"`    // already contained
 }
 
+// verify commands are split on spaces; quoted arguments are not supported.
+
 // Consolidate merges every landed branch into the branch checked out at
 // worktree, in the ledger's order. A merge that applies cleanly and
 // verifies costs no session a turn; a conflict or a red merge is undone
@@ -28,6 +30,9 @@ func (s *State) Consolidate(worktree, verify string, opts BoardOptions) (*Consol
 	seq, err := s.Order(opts)
 	if err != nil {
 		return nil, err
+	}
+	if seq.Conflict != "" {
+		return nil, refuse("order_cycle", "%s; supersede one of the order rulings before consolidating", seq.Conflict)
 	}
 	c := &Consolidation{Into: into}
 	for _, br := range seq.Order {

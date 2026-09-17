@@ -665,6 +665,9 @@ func TestOrderFromLedger(t *testing.T) {
 	if q, _ = s.Order(BoardOptions{}); q.Conflict == "" {
 		t.Fatalf("cycle not reported: %+v", q)
 	}
+	if _, err := s.Consolidate(a, "", BoardOptions{}); err == nil || !strings.Contains(err.Error(), "order_cycle") {
+		t.Fatalf("consolidate ran over a contradictory ledger: %v", err)
+	}
 }
 
 func TestVerifyReceipts(t *testing.T) {
@@ -817,6 +820,10 @@ func TestIntentContendsBeforeAnyEdit(t *testing.T) {
 	}
 	if len(b.Contended) != 1 || b.Contended[0].File != "pkg/x/x.go" {
 		t.Fatalf("intent did not contend: %+v", b.Contended)
+	}
+	// check must agree with the board: p sees q on the package from intent alone.
+	if got := b.Touching("pkg/x", "p"); len(got) != 1 || !strings.HasPrefix(got[0], "q ") {
+		t.Fatalf("Touching from intent = %v", got)
 	}
 	for _, c := range b.Contended {
 		if strings.HasPrefix(c.File, "briefs/out/") {

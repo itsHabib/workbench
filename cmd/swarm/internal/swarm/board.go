@@ -293,6 +293,27 @@ func contendingPaths(row *Row) []string {
 	return out
 }
 
+// Touching lists the other branches that changed, or declared they will
+// change, p or something under it. check and the board must agree, so both
+// read the same union of commits and intent.
+func (b *Board) Touching(p, seat string) []string {
+	var out []string
+	dir := strings.TrimSuffix(p, "/") + "/"
+	for i := range b.Rows {
+		r := &b.Rows[i]
+		if r.Branch == seat {
+			continue
+		}
+		for _, f := range contendingPaths(r) {
+			if f == p || strings.HasPrefix(f, dir) {
+				out = append(out, r.Branch+" ("+r.State+")")
+				break
+			}
+		}
+	}
+	return out
+}
+
 // inherited lists the other tips this branch is built on top of. Only a tip
 // that is an ancestor of this one is inherited; a branch built on top of
 // this one must not erase it.

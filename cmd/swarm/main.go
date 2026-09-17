@@ -317,7 +317,7 @@ func (c *cli) check() error {
 	// counts, because a ruling on one file rarely leaves its test alone.
 	// Coverage is judged at file scope: the ruling must reach this path.
 	pkg := packageOf(p)
-	others := touching(b, pkg, c.seat)
+	others := b.Touching(pkg, c.seat)
 	ds, err := c.s.Lookup([]string{p})
 	if err != nil {
 		return err
@@ -419,24 +419,6 @@ func (c *cli) order() error {
 	}
 	fmt.Println(seq.Text())
 	return nil
-}
-
-// touching lists the other branches that changed p or something under it.
-func touching(b *swarm.Board, p, seat string) []string {
-	var out []string
-	dir := strings.TrimSuffix(p, "/") + "/"
-	for _, r := range b.Rows {
-		if r.Branch == seat {
-			continue
-		}
-		for _, f := range r.Files {
-			if f == p || strings.HasPrefix(f, dir) {
-				out = append(out, r.Branch+" ("+r.State+")")
-				break
-			}
-		}
-	}
-	return out
 }
 
 func (c *cli) ask() error {

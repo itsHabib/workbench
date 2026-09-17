@@ -16,7 +16,7 @@ type SeatLoad struct {
 	PendingNotes  int     `json:"pending_notes"`   // in the inbox, not yet delivered
 	OpenRequests  int     `json:"open_requests"`   // routed here and still open
 	OldestOpenMin float64 `json:"oldest_open_min"` // age of the oldest of those
-	ClaimP50Min   float64 `json:"claim_p50_min"`   // over the window, requests this seat claimed
+	ClaimAvgMin   float64 `json:"claim_avg_min"`   // mean wait over the window, requests this seat claimed
 	ClaimMaxMin   float64 `json:"claim_max_min"`
 	RuledInWindow int     `json:"ruled_in_window"`
 }
@@ -93,7 +93,7 @@ func (s *State) foldLoadEvents(events []Event, since time.Time, get func(string)
 		case "claim":
 			if at, ok := asked[e.Request]; ok && e.At.After(since) {
 				l := get(e.By)
-				l.ClaimP50Min, l.ClaimMaxMin = accumulate(l, e.At.Sub(at).Minutes())
+				l.ClaimAvgMin, l.ClaimMaxMin = accumulate(l, e.At.Sub(at).Minutes())
 			}
 		case "rule":
 			if e.At.After(since) {
@@ -104,17 +104,15 @@ func (s *State) foldLoadEvents(events []Event, since time.Time, get func(string)
 	return asked, routedTo
 }
 
-// accumulate keeps a running median approximation and max without storing
-// every sample: the max is exact; the p50 is the mean of samples so far,
-// which is what an operator reads at a glance.
-func accumulate(l *SeatLoad, wait float64) (p50, hi float64) {
+// accumulate keeps a running mean and max without storing every sample.
+func accumulate(l *SeatLoad, wait float64) (avg, hi float64) {
 	n := float64(l.RuledInWindow + 1)
-	p50 = l.ClaimP50Min + (wait-l.ClaimP50Min)/n
+	avg = l.ClaimAvgMin + (wait-l.ClaimAvgMin)/n
 	hi = l.ClaimMaxMin
 	if wait > hi {
 		hi = wait
 	}
-	return p50, hi
+	return avg, hi
 }
 
 // LoadText renders the load table.
@@ -123,9 +121,9 @@ func LoadText(ls []SeatLoad) string {
 		return "no load recorded"
 	}
 	var sb strings.Builder
-	sb.WriteString("seat                 open  oldest  notes  claim p50/max (min)  ruled\n")
+	sb.WriteString("seat                 open  oldest  notes  claim avg/max (min)  ruled\n")
 	for _, l := range ls {
-		fmt.Fprintf(&sb, "%-20s %4d  %5.1fm  %5d  %6.1f / %-6.1f       %d\n", trunc(l.Seat, 20), l.OpenRequests, l.OldestOpenMin, l.PendingNotes, l.ClaimP50Min, l.ClaimMaxMin, l.RuledInWindow)
+		fmt.Fprintf(&sb, "%-20s %4d  %5.1fm  %5d  %6.1f / %-6.1f       %d\n", trunc(l.Seat, 20), l.OpenRequests, l.OldestOpenMin, l.PendingNotes, l.ClaimAvgMin, l.ClaimMaxMin, l.RuledInWindow)
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }
