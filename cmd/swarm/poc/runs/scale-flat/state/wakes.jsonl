@@ -1,0 +1,4 @@
+{"seat":"t02-p2-k2","session_id":"c2ca64eb-e42c-4579-bf90-3de874c2fad5","notes":3,"started":"2026-09-17T04:34:02.154503Z","ended":"2026-09-17T04:34:17.457426Z","exit":0,"num_turns":3,"output_tokens":420,"cost_usd":0.0639258}
+{"seat":"t01-p1-k1","session_id":"1202c105-0ebd-4689-a6ae-be6496550fa5","notes":3,"started":"2026-09-17T04:34:02.152514Z","ended":"2026-09-17T04:34:18.397185Z","exit":0,"num_turns":3,"output_tokens":366,"cost_usd":0.058161000000000004}
+{"seat":"t03-p3-k3","session_id":"998b9bb4-20ad-4021-a75f-6d3400dacc5e","notes":3,"started":"2026-09-17T04:34:19.957473Z","ended":"2026-09-17T04:34:33.741694Z","exit":0,"num_turns":2,"output_tokens":432,"cost_usd":0.0373318}
+{"seat":"t04-p4-k4","session_id":"c99d5fe5-0323-43c7-9c88-1191ef79d2ce","notes":2,"started":"2026-09-17T04:34:19.958173Z","ended":"2026-09-17T04:34:37.232454Z","exit":0,"num_turns":4,"output_tokens":430,"cost_usd":0.0737674}

@@ -1,0 +1,100 @@
+04:15:38 run flat mode=flat model=claude-sonnet-5 seats=8 out=/private/tmp/claude-501/-Users-mh-dev/048af72c-2611-4d7c-a274-83bf5096a17c/scratchpad/sw-flat/runs/flat
+04:15:38 admitted t01-p1-k1 (0 working)
+04:15:39 admitted t02-p2-k2 (0 working)
+04:15:39 admitted t03-p3-k3 (0 working)
+04:15:39 admitted t04-p4-k4 (2 working)
+04:15:39 fault D: disk reported as 1 byte free for 1m0s
+04:15:39 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:15:49 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:16:00 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:16:04 fault B: killed t02-p2-k2 after 25s (turns=0); resuming the seat in a fresh session
+04:16:10 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:16:15 builder t03-p3-k3 done: turns=16 out=1945 exit=0 err=false
+04:16:20 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:16:23 builder t01-p1-k1 done: turns=16 out=1924 exit=0 err=false
+04:16:31 waiting to admit t05-p5-k5: disk_low: 0M free, floor 2.0G
+04:16:33 builder t04-p4-k4 done: turns=21 out=2689 exit=0 err=false
+04:16:39 watch alerts: pin:t04-p4-k4
+04:16:41 fault D: disk floor met again
+04:16:41 admitted t05-p5-k5 (0 working)
+04:16:41 admitted t06-p6-k6 (0 working)
+04:16:42 admitted t07-p1-k7 (1 working)
+04:16:44 admitted t08-p2-k8 (2 working)
+04:16:45 admitted t09-p3-k9 (3 working)
+04:16:47 admitted t10-p4-k10 (4 working)
+04:16:48 builder t02-p2-k2 (resumed) done: turns=18 out=1729 exit=0
+04:16:49 admitted t11-p5-k11 (5 working)
+04:16:51 admitted t12-p6-k12 (6 working)
+04:16:55 waiting to admit t13-p1-k13: runner: 8 running
+04:17:07 waiting to admit t13-p1-k13: seats_full: 8 working, 8 seats
+04:17:19 waiting to admit t13-p1-k13: seats_full: 8 working, 8 seats
+04:17:31 waiting to admit t13-p1-k13: seats_full: 8 working, 8 seats
+04:17:38 builder t12-p6-k12 done: turns=19 out=2410 exit=0 err=false
+04:17:43 admitted t13-p1-k13 (5 working)
+04:17:44 watch alerts: overlap:pkg/p5/p5.go overlap:pkg/p5/p5_test.go overlap:pkg/p6/p6.go overlap:pkg/p6/p6_test.go
+04:17:45 builder t11-p5-k11 done: turns=16 out=1906 exit=0 err=false
+04:17:48 builder t05-p5-k5 done: turns=22 out=2636 exit=0 err=false
+04:17:48 waiting to admit t14-p2-k14: runner: 8 running
+04:18:01 builder t07-p1-k7 done: turns=28 out=3482 exit=0 err=false
+04:18:01 admitted t14-p2-k14 (3 working)
+04:18:02 builder t08-p2-k8 done: turns=23 out=2906 exit=0 err=false
+04:18:07 admitted t15-p3-k15 (3 working)
+04:18:11 watch alerts: overlap:pkg/p5/p5.go overlap:pkg/p5/p5_test.go overlap:pkg/p6/p6.go overlap:pkg/p6/p6_test.go
+04:18:14 admitted t16-p4-k16 (4 working)
+04:18:21 builder t09-p3-k9 done: turns=29 out=3769 exit=0 err=false
+04:18:24 admitted t17-p5-k17 (4 working)
+04:18:31 watch alerts: overlap:pkg/p5/p5.go overlap:pkg/p5/p5_test.go overlap:pkg/p6/p6.go overlap:pkg/p6/p6_test.go
+04:18:34 admitted t18-p6-k18 (5 working)
+04:18:36 builder t06-p6-k6 done: turns=20 out=3399 exit=0 err=false
+04:18:44 waiting to admit t19-p1-k19: runner: 8 running
+04:18:49 watch alerts: overlap:briefs/out/t04-p4-k4/START.md overlap:cmd/app/main.go
+04:18:58 builder t10-p4-k10 done: turns=35 out=4892 exit=0 err=false
+04:19:04 admitted t19-p1-k19 (6 working)
+04:19:12 watch alerts: overlap:briefs/out/t04-p4-k4/START.md overlap:cmd/app/main.go
+04:19:15 builder t16-p4-k16 done: turns=22 out=2735 exit=0 err=false
+04:19:17 admitted t20-p2-k20 (6 working)
+04:19:17 builder t17-p5-k17 done: turns=18 out=2249 exit=0 err=false
+04:19:18 builder t13-p1-k13 done: turns=24 out=3110 exit=0 err=false
+04:19:30 admitted t21-p3-k21 (4 working)
+04:19:31 builder t21-p3-k21 done: turns=0 out=0 exit=-1 err=false
+04:19:37 builder t14-p2-k14 done: turns=25 out=3159 exit=0 err=false
+04:19:42 watch alerts: overlap:briefs/out/t04-p4-k4/START.md overlap:cmd/app/main.go
+04:19:43 admitted t22-p4-k22 (4 working)
+04:19:53 admitted t23-p5-k23 (5 working)
+04:19:56 watch alerts: overlap:briefs/out/t04-p4-k4/START.md overlap:briefs/out/t05-p5-k5/START.md
+04:20:02 builder t18-p6-k18 done: turns=17 out=2330 exit=0 err=false
+04:20:06 builder t15-p3-k15 done: turns=38 out=5579 exit=0 err=false
+04:20:10 admitted t24-p6-k24 (6 working)
+04:20:18 watch alerts: overlap:briefs/out/t04-p4-k4/START.md overlap:briefs/out/t05-p5-k5/START.md
+04:20:27 admitted t25-p1-k25 (5 working)
+04:20:31 builder t19-p1-k19 done: turns=26 out=3956 exit=0 err=false
+04:20:37 watch alerts: overlap:briefs/out/t04-p4-k4/START.md overlap:briefs/out/t05-p5-k5/START.md
+04:20:44 admitted t26-p2-k26 (5 working)
+04:21:01 watch alerts: overlap:briefs/out/t04-p4-k4/START.md
+04:21:03 admitted t27-p3-k27 (6 working)
+04:21:16 builder t20-p2-k20 done: turns=29 out=3737 exit=0 err=false
+04:21:21 watch alerts: overlap:briefs/out/t04-p4-k4/START.md
+04:21:27 admitted t28-p4-k28 (7 working)
+04:21:40 builder t24-p6-k24 done: turns=22 out=3257 exit=0 err=false
+04:21:44 watch alerts: overlap:briefs/out/t04-p4-k4/START.md
+04:21:46 admitted t29-p5-k29 (7 working)
+04:21:57 builder t22-p4-k22 done: turns=28 out=4339 exit=0 err=false
+04:22:05 watch alerts: overlap:briefs/out/t04-p4-k4/START.md
+04:22:06 admitted t30-p6-k30 (7 working)
+04:22:11 builder t26-p2-k26 done: turns=21 out=2896 exit=0 err=false
+04:22:17 builder t27-p3-k27 done: turns=18 out=2407 exit=0 err=false
+04:22:20 builder t23-p5-k23 done: turns=22 out=3324 exit=0 err=false
+04:22:23 watch alerts: overlap:briefs/out/t04-p4-k4/START.md overlap:briefs/out/t11-p5-k11/START.md pininvalid:t05-p5-k5
+04:22:32 builder t28-p4-k28 done: turns=16 out=2119 exit=0 err=false
+04:22:44 watch alerts: overlap:briefs/out/t04-p4-k4/START.md overlap:briefs/out/t11-p5-k11/START.md
+04:22:57 builder t29-p5-k29 done: turns=16 out=2081 exit=0 err=false
+04:23:02 watch alerts: overlap:briefs/out/t04-p4-k4/START.md overlap:briefs/out/t11-p5-k11/START.md
+04:23:16 watch alerts: overlap:briefs/out/t04-p4-k4/START.md overlap:briefs/out/t11-p5-k11/START.md
+04:23:19 builder t30-p6-k30 done: turns=18 out=2541 exit=0 err=false
+04:23:31 watch alerts: overlap:briefs/out/t04-p4-k4/START.md
+04:23:48 watch alerts: overlap:briefs/out/t04-p4-k4/START.md
+04:24:08 watch alerts: overlap:briefs/out/t04-p4-k4/START.md
+04:24:54 builder t25-p1-k25 done: turns=42 out=10867 exit=0 err=false
+04:28:46 consolidator done: turns=81 out=17700 exit=1
+04:28:46 all builders finished; final pass
+04:28:59 evidence under /private/tmp/claude-501/-Users-mh-dev/048af72c-2611-4d7c-a274-83bf5096a17c/scratchpad/sw-flat/runs/flat

@@ -1,0 +1,291 @@
+{"at":"2026-09-17T04:49:29.222819Z","kind":"admit"}
+{"at":"2026-09-17T04:49:29.26318Z","kind":"admit"}
+{"at":"2026-09-17T04:49:29.382579Z","kind":"admit"}
+{"at":"2026-09-17T04:49:29.678067Z","kind":"admit"}
+{"at":"2026-09-17T04:49:29.961491Z","kind":"session_start","seat":"lead","session":"0c3e55c0-5c61-473c-ac9f-3a020ef130b1"}
+{"at":"2026-09-17T04:49:30.139434Z","kind":"session_start","seat":"t02-p2-k2","session":"218fd4c4-db65-44ae-aa9a-45f140e113fa"}
+{"at":"2026-09-17T04:49:30.141852Z","kind":"session_start","seat":"t01-p1-k1","session":"14893861-04a6-480c-a065-bc22f986e874"}
+{"at":"2026-09-17T04:49:30.589518Z","kind":"session_start","seat":"t03-p3-k3","session":"5484c3c7-69db-4466-884c-d94e958ab862"}
+{"at":"2026-09-17T04:49:30.951573Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T04:49:31.393849Z","kind":"session_start","seat":"t04-p4-k4","session":"412d75e6-8761-4ffa-8009-9550ce88ae29"}
+{"at":"2026-09-17T04:49:36.337431Z","kind":"decide","by":"t03-p3-k3","detail":"dec_dlhbjqzp87xk_daa8108e","tier":"peer"}
+{"at":"2026-09-17T04:49:36.337777Z","kind":"split","seat":"t03-p3-k3","detail":"t03b-p3-k3b,t03c-p3-k3c","tier":"peer"}
+{"at":"2026-09-17T04:49:36.338186Z","kind":"nudge","seat":"operator","detail":"split: t03-p3-k3 split its task into t03b-p3-k3b, t03c-p3-k3c: scoped wrong: three keys. the children are queued for admission."}
+{"at":"2026-09-17T04:49:41.293208Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T04:49:51.773308Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T04:49:54.860598Z","kind":"session_start","seat":"t02-p2-k2","session":"c29a803c-41e6-4c91-8fa1-b89fe88bf6c4"}
+{"at":"2026-09-17T04:50:02.339745Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T04:50:04.43136Z","kind":"intend","seat":"t04-p4-k4","detail":"cmd/app/main.go,pkg/p4/p4.go,pkg/p4/p4_test.go"}
+{"at":"2026-09-17T04:50:11.413393Z","kind":"verify","seat":"t01-p1-k1","detail":"pass 3f9229c2"}
+{"at":"2026-09-17T04:50:12.786311Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T04:50:13.112114Z","kind":"verify","seat":"t03-p3-k3","detail":"pass bdf199e7"}
+{"at":"2026-09-17T04:50:13.127448Z","kind":"nudge","seat":"t04-p4-k4","detail":"pin_violation: branch t04-p4-k4 changed after RESULT.json (briefs/out/t04-p4-k4/INTENT.json). a landing is a commit whose RESULT.json pins its own head; either revert those commits or rewrite RESULT.json with the new head_sha as the last commit."}
+{"at":"2026-09-17T04:50:23.308435Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T04:50:31.653224Z","kind":"verify","seat":"t04-p4-k4","detail":"pass 513eb8f2"}
+{"at":"2026-09-17T04:50:33.75446Z","kind":"admit"}
+{"at":"2026-09-17T04:50:34.127695Z","kind":"session_start","seat":"t05-p5-k5","session":"6a37519b-c88b-4b2b-b5a8-687aad342e4c"}
+{"at":"2026-09-17T04:50:34.466901Z","kind":"admit"}
+{"at":"2026-09-17T04:50:35.007617Z","kind":"session_start","seat":"t06-p6-k6","session":"b8777f14-6089-4ca3-8b24-b0c63a40d769"}
+{"at":"2026-09-17T04:50:35.848724Z","kind":"admit"}
+{"at":"2026-09-17T04:50:36.413947Z","kind":"session_start","seat":"t07-p1-k7","session":"d52d77cf-09ef-4cfa-a4e5-ed12d8338a1f"}
+{"at":"2026-09-17T04:50:37.592604Z","kind":"admit"}
+{"at":"2026-09-17T04:50:38.177683Z","kind":"session_start","seat":"t08-p2-k8","session":"e045f0b1-c4e0-4f14-9657-1dcde5b90600"}
+{"at":"2026-09-17T04:50:39.831354Z","kind":"admit"}
+{"at":"2026-09-17T04:50:40.591528Z","kind":"session_start","seat":"t09-p3-k9","session":"7c0265ea-7b67-4906-b765-71b420dee7b2"}
+{"at":"2026-09-17T04:50:42.848808Z","kind":"admit"}
+{"at":"2026-09-17T04:50:43.570301Z","kind":"session_start","seat":"t10-p4-k10","session":"f30576e7-ba8a-477e-8d79-e12115c03f52"}
+{"at":"2026-09-17T04:50:44.498415Z","kind":"refusal","by":"check","seat":"t07-p1-k7","detail":"contended_unruled"}
+{"at":"2026-09-17T04:50:45.843856Z","kind":"admit"}
+{"at":"2026-09-17T04:50:46.18709Z","kind":"take","seat":"t05-p5-k5","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T04:50:46.480624Z","kind":"session_start","seat":"t11-p5-k11","session":"418a7738-d1bd-4c3a-998c-badedb848625"}
+{"at":"2026-09-17T04:50:47.840019Z","kind":"ask","request":"req_dlhbknu7shs0_52f5e32d","by":"t07-p1-k7","seat":"t07-p1-k7","detail":"pkg/p1","tier":"peer"}
+{"at":"2026-09-17T04:50:48.481269Z","kind":"refusal","by":"check","seat":"t08-p2-k8","detail":"contended_unruled"}
+{"at":"2026-09-17T04:50:50.248515Z","kind":"admit"}
+{"at":"2026-09-17T04:50:51.195523Z","kind":"session_start","seat":"t12-p6-k12","session":"bb37c48d-dd6f-4a7f-8b5f-1a717d23d37b"}
+{"at":"2026-09-17T04:50:51.714115Z","kind":"refusal","by":"check","seat":"t09-p3-k9","detail":"contended_unruled"}
+{"at":"2026-09-17T04:50:51.912652Z","kind":"ask","request":"req_dlhbkppkkdhs_ab927789","by":"t08-p2-k8","seat":"t08-p2-k8","detail":"pkg/p2","tier":"peer"}
+{"at":"2026-09-17T04:50:53.037433Z","kind":"refusal","by":"check","seat":"t10-p4-k10","detail":"contended_unruled"}
+{"at":"2026-09-17T04:50:53.402007Z","kind":"ask","request":"req_dlhbkqe73yww_bb3dce68","by":"t09-p3-k9","seat":"t09-p3-k9","detail":"pkg/p3","tier":"peer"}
+{"at":"2026-09-17T04:50:53.478249Z","kind":"nudge","seat":"t01-p1-k1","detail":"request: request req_dlhbknu7shs0_52f5e32d from t07-p1-k7 on pkg/p1 needs peer: \"who lands first on pkg/p1?\". rule it if the evidence is yours: `flat rule req_dlhbknu7shs0_52f5e32d --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlhbknu7shs0_52f5e32d --to operator --why '...'`."}
+{"at":"2026-09-17T04:50:53.478328Z","kind":"route","request":"req_dlhbknu7shs0_52f5e32d","seat":"t07-p1-k7","detail":"t01-p1-k1"}
+{"at":"2026-09-17T04:50:55.047633Z","kind":"ask","request":"req_dlhbkr5f1ma8_cee73a7b","by":"t10-p4-k10","seat":"t10-p4-k10","detail":"pkg/p4","tier":"peer"}
+{"at":"2026-09-17T04:50:57.837574Z","kind":"admit"}
+{"at":"2026-09-17T04:50:58.337213Z","kind":"verify","seat":"t02-p2-k2","detail":"pass edc2219d"}
+{"at":"2026-09-17T04:50:58.379794Z","kind":"nudge","seat":"t01-p1-k1","detail":"overlap_unruled: pkg/p1/p1.go is changed by t01-p1-k1 and t07-p1-k7 with no ruling on order. one of you: `flat ask --scope pkg/p1/p1.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.380176Z","kind":"nudge","seat":"t07-p1-k7","detail":"overlap_unruled: pkg/p1/p1.go is changed by t01-p1-k1 and t07-p1-k7 with no ruling on order. one of you: `flat ask --scope pkg/p1/p1.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.380623Z","kind":"nudge","seat":"t01-p1-k1","detail":"overlap_unruled: pkg/p1/p1_test.go is changed by t01-p1-k1 and t07-p1-k7 with no ruling on order. one of you: `flat ask --scope pkg/p1/p1_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.381136Z","kind":"nudge","seat":"t07-p1-k7","detail":"overlap_unruled: pkg/p1/p1_test.go is changed by t01-p1-k1 and t07-p1-k7 with no ruling on order. one of you: `flat ask --scope pkg/p1/p1_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.381664Z","kind":"nudge","seat":"t03-p3-k3","detail":"overlap_unruled: pkg/p3/p3_test.go is changed by t03-p3-k3 and t09-p3-k9 with no ruling on order. one of you: `flat ask --scope pkg/p3/p3_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.382177Z","kind":"nudge","seat":"t09-p3-k9","detail":"overlap_unruled: pkg/p3/p3_test.go is changed by t03-p3-k3 and t09-p3-k9 with no ruling on order. one of you: `flat ask --scope pkg/p3/p3_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.382782Z","kind":"nudge","seat":"t05-p5-k5","detail":"overlap_unruled: pkg/p5/p5.go is changed by t05-p5-k5 and t11-p5-k11 with no ruling on order. one of you: `flat ask --scope pkg/p5/p5.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.383367Z","kind":"nudge","seat":"t11-p5-k11","detail":"overlap_unruled: pkg/p5/p5.go is changed by t05-p5-k5 and t11-p5-k11 with no ruling on order. one of you: `flat ask --scope pkg/p5/p5.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.383733Z","kind":"nudge","seat":"t05-p5-k5","detail":"overlap_unruled: fixtures/db.json is changed by t05-p5-k5 and t10-p4-k10 with no ruling on order. one of you: `flat ask --scope fixtures/db.json --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.384124Z","kind":"nudge","seat":"t10-p4-k10","detail":"overlap_unruled: fixtures/db.json is changed by t05-p5-k5 and t10-p4-k10 with no ruling on order. one of you: `flat ask --scope fixtures/db.json --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.384565Z","kind":"nudge","seat":"t02-p2-k2","detail":"overlap_unruled: pkg/p2/p2.go is changed by t02-p2-k2 and t08-p2-k8 with no ruling on order. one of you: `flat ask --scope pkg/p2/p2.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.384963Z","kind":"nudge","seat":"t08-p2-k8","detail":"overlap_unruled: pkg/p2/p2.go is changed by t02-p2-k2 and t08-p2-k8 with no ruling on order. one of you: `flat ask --scope pkg/p2/p2.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.385374Z","kind":"nudge","seat":"t02-p2-k2","detail":"overlap_unruled: pkg/p2/p2_test.go is changed by t02-p2-k2 and t08-p2-k8 with no ruling on order. one of you: `flat ask --scope pkg/p2/p2_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.385733Z","kind":"nudge","seat":"t08-p2-k8","detail":"overlap_unruled: pkg/p2/p2_test.go is changed by t02-p2-k2 and t08-p2-k8 with no ruling on order. one of you: `flat ask --scope pkg/p2/p2_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.386107Z","kind":"nudge","seat":"t03-p3-k3","detail":"overlap_unruled: pkg/p3/p3.go is changed by t03-p3-k3 and t09-p3-k9 with no ruling on order. one of you: `flat ask --scope pkg/p3/p3.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.386419Z","kind":"nudge","seat":"t09-p3-k9","detail":"overlap_unruled: pkg/p3/p3.go is changed by t03-p3-k3 and t09-p3-k9 with no ruling on order. one of you: `flat ask --scope pkg/p3/p3.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.386782Z","kind":"nudge","seat":"t04-p4-k4","detail":"overlap_unruled: pkg/p4/p4.go is changed by t04-p4-k4 and t10-p4-k10 with no ruling on order. one of you: `flat ask --scope pkg/p4/p4.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.387293Z","kind":"nudge","seat":"t10-p4-k10","detail":"overlap_unruled: pkg/p4/p4.go is changed by t04-p4-k4 and t10-p4-k10 with no ruling on order. one of you: `flat ask --scope pkg/p4/p4.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.388011Z","kind":"nudge","seat":"t04-p4-k4","detail":"overlap_unruled: pkg/p4/p4_test.go is changed by t04-p4-k4 and t10-p4-k10 with no ruling on order. one of you: `flat ask --scope pkg/p4/p4_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.388373Z","kind":"nudge","seat":"t10-p4-k10","detail":"overlap_unruled: pkg/p4/p4_test.go is changed by t04-p4-k4 and t10-p4-k10 with no ruling on order. one of you: `flat ask --scope pkg/p4/p4_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.388781Z","kind":"nudge","seat":"t05-p5-k5","detail":"overlap_unruled: pkg/p5/p5_test.go is changed by t05-p5-k5 and t11-p5-k11 with no ruling on order. one of you: `flat ask --scope pkg/p5/p5_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.389105Z","kind":"nudge","seat":"t11-p5-k11","detail":"overlap_unruled: pkg/p5/p5_test.go is changed by t05-p5-k5 and t11-p5-k11 with no ruling on order. one of you: `flat ask --scope pkg/p5/p5_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:50:58.392638Z","kind":"wake","seat":"t01-p1-k1","detail":"3 notes","session":"14893861-04a6-480c-a065-bc22f986e874"}
+{"at":"2026-09-17T04:50:58.394674Z","kind":"wake","seat":"t02-p2-k2","detail":"2 notes","session":"c29a803c-41e6-4c91-8fa1-b89fe88bf6c4"}
+{"at":"2026-09-17T04:50:59.635465Z","kind":"nudge","seat":"t02-p2-k2","detail":"request: request req_dlhbkppkkdhs_ab927789 from t08-p2-k8 on pkg/p2 needs peer: \"who lands first on pkg/p2? t02-p2-k2 shows as landed already\". rule it if the evidence is yours: `flat rule req_dlhbkppkkdhs_ab927789 --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlhbkppkkdhs_ab927789 --to operator --why '...'`."}
+{"at":"2026-09-17T04:50:59.636128Z","kind":"route","request":"req_dlhbkppkkdhs_ab927789","seat":"t08-p2-k8","detail":"t02-p2-k2"}
+{"at":"2026-09-17T04:51:00.650938Z","kind":"session_start","seat":"t02-p2-k2","session":"c29a803c-41e6-4c91-8fa1-b89fe88bf6c4"}
+{"at":"2026-09-17T04:51:00.657597Z","kind":"session_start","seat":"t01-p1-k1","session":"14893861-04a6-480c-a065-bc22f986e874"}
+{"at":"2026-09-17T04:51:01.296995Z","kind":"nudge","seat":"t03-p3-k3","detail":"request: request req_dlhbkqe73yww_bb3dce68 from t09-p3-k9 on pkg/p3 needs peer: \"who lands first on pkg/p3?\". rule it if the evidence is yours: `flat rule req_dlhbkqe73yww_bb3dce68 --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlhbkqe73yww_bb3dce68 --to operator --why '...'`."}
+{"at":"2026-09-17T04:51:01.297113Z","kind":"route","request":"req_dlhbkqe73yww_bb3dce68","seat":"t09-p3-k9","detail":"t03-p3-k3"}
+{"at":"2026-09-17T04:51:03.555977Z","kind":"nudge","seat":"t04-p4-k4","detail":"request: request req_dlhbkr5f1ma8_cee73a7b from t10-p4-k10 on pkg/p4 needs peer: \"who lands first on pkg/p4 - t04-p4-k4 (landed) or me (t10-p4-k10)?\". rule it if the evidence is yours: `flat rule req_dlhbkr5f1ma8_cee73a7b --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlhbkr5f1ma8_cee73a7b --to operator --why '...'`."}
+{"at":"2026-09-17T04:51:03.556401Z","kind":"route","request":"req_dlhbkr5f1ma8_cee73a7b","seat":"t10-p4-k10","detail":"t04-p4-k4"}
+{"at":"2026-09-17T04:51:05.651348Z","kind":"ask","request":"req_dlhbkw0s4ga8_95090d4a","by":"t10-p4-k10","seat":"t10-p4-k10","detail":"fixtures/db.json","tier":"peer"}
+{"at":"2026-09-17T04:51:06.255921Z","kind":"claim","request":"req_dlhbknu7shs0_52f5e32d","by":"t01-p1-k1","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:51:06.256683Z","kind":"rule","request":"req_dlhbknu7shs0_52f5e32d","by":"t01-p1-k1","detail":"dec_dlhbkwasmva0_2126552e","tier":"peer","epoch":1}
+{"at":"2026-09-17T04:51:06.257046Z","kind":"nudge","seat":"t07-p1-k7","detail":"ruling: ruled req_dlhbknu7shs0_52f5e32d by t01-p1-k1 (peer): t01-p1-k1 already committed and pushed its k1 change to pkg/p1/p1.go and p1_test.go (HEAD 3f9229c on t01-p1-k1); t07-p1-k7 should rebase onto that and add its own key on top"}
+{"at":"2026-09-17T04:51:06.367976Z","kind":"claim","request":"req_dlhbkppkkdhs_ab927789","by":"t02-p2-k2","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:51:06.369144Z","kind":"rule","request":"req_dlhbkppkkdhs_ab927789","by":"t02-p2-k2","detail":"dec_dlhbkwcndxb4_747f2e0d","tier":"peer","epoch":1}
+{"at":"2026-09-17T04:51:06.369408Z","kind":"nudge","seat":"t08-p2-k8","detail":"ruling: ruled req_dlhbkppkkdhs_ab927789 by t02-p2-k2 (peer): t02-p2-k2 landed first (already committed and pushed edc2219); t08-p2-k8 should rebase onto it"}
+{"at":"2026-09-17T04:51:07.284548Z","kind":"ask","request":"req_dlhbkwrsjtps_d0318c43","by":"t11-p5-k11","seat":"t11-p5-k11","detail":"pkg/p5","tier":"peer"}
+{"at":"2026-09-17T04:51:08.451411Z","kind":"ask","request":"req_dlhbkxb31th4_23c1fe71","by":"t05-p5-k5","seat":"t05-p5-k5","detail":"pkg/p5","tier":"peer"}
+{"at":"2026-09-17T04:51:10.865368Z","kind":"route","request":"req_dlhbkw0s4ga8_95090d4a","seat":"t10-p4-k10"}
+{"at":"2026-09-17T04:51:12.690373Z","kind":"route","request":"req_dlhbkwrsjtps_d0318c43","seat":"t11-p5-k11"}
+{"at":"2026-09-17T04:51:13.32493Z","kind":"admit"}
+{"at":"2026-09-17T04:51:13.887531Z","kind":"route","request":"req_dlhbkxb31th4_23c1fe71","seat":"t05-p5-k5"}
+{"at":"2026-09-17T04:51:13.99786Z","kind":"ask","request":"req_dlhbkzutjvww_aef1ade9","by":"t05-p5-k5","seat":"t05-p5-k5","detail":"fixtures/db.json","tier":"peer"}
+{"at":"2026-09-17T04:51:18.22447Z","kind":"route","request":"req_dlhbkzutjvww_aef1ade9","seat":"t05-p5-k5"}
+{"at":"2026-09-17T04:51:19.002386Z","kind":"verify","seat":"t06-p6-k6","detail":"pass f4867dfc"}
+{"at":"2026-09-17T04:51:19.025391Z","kind":"nudge","seat":"t06-p6-k6","detail":"overlap_unruled: pkg/p6/p6_test.go is changed by t06-p6-k6 and t12-p6-k12 with no ruling on order. one of you: `flat ask --scope pkg/p6/p6_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:51:19.025601Z","kind":"nudge","seat":"t12-p6-k12","detail":"overlap_unruled: pkg/p6/p6_test.go is changed by t06-p6-k6 and t12-p6-k12 with no ruling on order. one of you: `flat ask --scope pkg/p6/p6_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:51:19.025858Z","kind":"nudge","seat":"t06-p6-k6","detail":"overlap_unruled: pkg/p6/p6.go is changed by t06-p6-k6 and t12-p6-k12 with no ruling on order. one of you: `flat ask --scope pkg/p6/p6.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:51:19.026007Z","kind":"nudge","seat":"t12-p6-k12","detail":"overlap_unruled: pkg/p6/p6.go is changed by t06-p6-k6 and t12-p6-k12 with no ruling on order. one of you: `flat ask --scope pkg/p6/p6.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T04:51:19.027474Z","kind":"wake","seat":"t03-p3-k3","detail":"3 notes","session":"5484c3c7-69db-4466-884c-d94e958ab862"}
+{"at":"2026-09-17T04:51:19.028358Z","kind":"wake","seat":"t04-p4-k4","detail":"3 notes","session":"412d75e6-8761-4ffa-8009-9550ce88ae29"}
+{"at":"2026-09-17T04:51:20.038457Z","kind":"session_start","seat":"t04-p4-k4","session":"412d75e6-8761-4ffa-8009-9550ce88ae29"}
+{"at":"2026-09-17T04:51:20.106279Z","kind":"session_start","seat":"t03-p3-k3","session":"5484c3c7-69db-4466-884c-d94e958ab862"}
+{"at":"2026-09-17T04:51:22.030608Z","kind":"ask","request":"req_dlhbl3jngrhc_46d85581","by":"t12-p6-k12","seat":"t12-p6-k12","detail":"pkg/p6","tier":"peer"}
+{"at":"2026-09-17T04:51:25.508447Z","kind":"claim","request":"req_dlhbkr5f1ma8_cee73a7b","by":"t04-p4-k4","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:51:25.509522Z","kind":"rule","request":"req_dlhbkr5f1ma8_cee73a7b","by":"t04-p4-k4","detail":"dec_dlhbl5575z3c_a798672f","tier":"peer","epoch":1}
+{"at":"2026-09-17T04:51:25.509894Z","kind":"nudge","seat":"t10-p4-k10","detail":"ruling: ruled req_dlhbkr5f1ma8_cee73a7b by t04-p4-k4 (peer): t04-p4-k4 lands first"}
+{"at":"2026-09-17T04:51:26.020433Z","kind":"session_start","seat":"lead","session":"6b98a1ce-51d7-46f3-9aa9-35b1b99528fe"}
+{"at":"2026-09-17T04:51:26.600306Z","kind":"claim","request":"req_dlhbkqe73yww_bb3dce68","by":"t03-p3-k3","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:51:26.601439Z","kind":"rule","request":"req_dlhbkqe73yww_bb3dce68","by":"t03-p3-k3","detail":"dec_dlhbl5n969l4_67e9e828","tier":"peer","epoch":1}
+{"at":"2026-09-17T04:51:26.602184Z","kind":"nudge","seat":"t09-p3-k9","detail":"ruling: ruled req_dlhbkqe73yww_bb3dce68 by t03-p3-k3 (peer): t03-p3-k3 already committed and pushed (bdf199e) before t09-p3-k9 raised the conflict; t09-p3-k9 should rebase onto it"}
+{"at":"2026-09-17T04:51:29.329003Z","kind":"nudge","seat":"t06-p6-k6","detail":"request: request req_dlhbl3jngrhc_46d85581 from t12-p6-k12 on pkg/p6 needs peer: \"order for landing p6.go/p6_test.go edits: t06-p6-k6 vs t12-p6-k12?\". rule it if the evidence is yours: `flat rule req_dlhbl3jngrhc_46d85581 --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlhbl3jngrhc_46d85581 --to operator --why '...'`."}
+{"at":"2026-09-17T04:51:29.329089Z","kind":"route","request":"req_dlhbl3jngrhc_46d85581","seat":"t12-p6-k12","detail":"t06-p6-k6"}
+{"at":"2026-09-17T04:51:30.158794Z","kind":"admit"}
+{"at":"2026-09-17T04:51:31.140451Z","kind":"session_start","seat":"t13-p1-k13","session":"75317271-7462-4bf7-b2dc-83b0b62320bd"}
+{"at":"2026-09-17T04:51:36.41778Z","kind":"wake","seat":"t06-p6-k6","detail":"3 notes","session":"b8777f14-6089-4ca3-8b24-b0c63a40d769"}
+{"at":"2026-09-17T04:51:38.200013Z","kind":"session_start","seat":"t06-p6-k6","session":"b8777f14-6089-4ca3-8b24-b0c63a40d769"}
+{"at":"2026-09-17T04:51:39.06592Z","kind":"admit"}
+{"at":"2026-09-17T04:51:44.954063Z","kind":"claim","request":"req_dlhbl3jngrhc_46d85581","by":"t06-p6-k6","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:51:44.95491Z","kind":"rule","request":"req_dlhbl3jngrhc_46d85581","by":"t06-p6-k6","detail":"dec_dlhble2sjkq8_dacf5595","tier":"peer","epoch":1}
+{"at":"2026-09-17T04:51:44.955181Z","kind":"nudge","seat":"t12-p6-k12","detail":"ruling: ruled req_dlhbl3jngrhc_46d85581 by t06-p6-k6 (peer): t06-p6-k6 lands first"}
+{"at":"2026-09-17T04:51:51.488316Z","kind":"claim","request":"req_dlhbkw0s4ga8_95090d4a","by":"lead","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:51:51.489296Z","kind":"rule","request":"req_dlhbkw0s4ga8_95090d4a","by":"lead","detail":"dec_dlhblh2uty00_36649ed5","tier":"lead","epoch":1}
+{"at":"2026-09-17T04:51:51.489789Z","kind":"nudge","seat":"t10-p4-k10","detail":"ruling: ruled req_dlhbkw0s4ga8_95090d4a by lead (lead): t05-p5-k5 lands first on fixtures/db.json; t10-p4-k10 rebases its amount edit onto t05's commit"}
+{"at":"2026-09-17T04:51:53.688767Z","kind":"claim","request":"req_dlhbkzutjvww_aef1ade9","by":"lead","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:51:53.689345Z","kind":"refusal","by":"rule","seat":"lead","detail":"must_supersede"}
+{"at":"2026-09-17T04:51:55.277323Z","kind":"refuse_admit","detail":"seats_full: 8 working, 8 seats"}
+{"at":"2026-09-17T04:51:58.379081Z","kind":"claim","request":"req_dlhbkzutjvww_aef1ade9","by":"lead","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:51:58.379614Z","kind":"rule","request":"req_dlhbkzutjvww_aef1ade9","by":"lead","detail":"dec_dlhblk8tcqts_93757474","tier":"lead","epoch":1}
+{"at":"2026-09-17T04:51:58.379813Z","kind":"nudge","seat":"t05-p5-k5","detail":"ruling: ruled req_dlhbkzutjvww_aef1ade9 by lead (lead): t05-p5-k5 first: it holds the fixture-db resource lock until 05:20; t10-p4-k10 rebases its amount edit on top"}
+{"at":"2026-09-17T04:52:00.932479Z","kind":"claim","request":"req_dlhbkwrsjtps_d0318c43","by":"lead","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:52:00.933486Z","kind":"rule","request":"req_dlhbkwrsjtps_d0318c43","by":"lead","detail":"dec_dlhbllf1rwvk_6703f5cb","tier":"lead","epoch":1}
+{"at":"2026-09-17T04:52:00.933951Z","kind":"nudge","seat":"t11-p5-k11","detail":"ruling: ruled req_dlhbkwrsjtps_d0318c43 by lead (lead): t05-p5-k5 lands first on pkg/p5 (adds k5); t11-p5-k11 rebases its k11 addition on top"}
+{"at":"2026-09-17T04:52:03.166682Z","kind":"claim","request":"req_dlhbkxb31th4_23c1fe71","by":"lead","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:52:03.167871Z","kind":"rule","request":"req_dlhbkxb31th4_23c1fe71","by":"lead","detail":"dec_dlhblmfzv9sw_17b5533b","tier":"lead","epoch":1}
+{"at":"2026-09-17T04:52:03.168229Z","kind":"nudge","seat":"t05-p5-k5","detail":"ruling: ruled req_dlhbkxb31th4_23c1fe71 by lead (lead): t05-p5-k5 lands first on pkg/p5 (adds k5); t11-p5-k11 rebases its k11 addition on top"}
+{"at":"2026-09-17T04:52:05.564332Z","kind":"refusal","by":"rule","seat":"lead","detail":"already_ruled"}
+{"at":"2026-09-17T04:52:09.086442Z","kind":"nudge","seat":"t10-p4-k10","detail":"manual: Ruling: t05-p5-k5 lands first on fixtures/db.json (holds fixture-db lock until 05:20). Rebase your amount edit onto t05's commit once it lands."}
+{"at":"2026-09-17T04:52:10.637458Z","kind":"admit"}
+{"at":"2026-09-17T04:52:10.732007Z","kind":"nudge","seat":"t11-p5-k11","detail":"manual: Ruling: t05-p5-k5 lands first on pkg/p5 (adds k5). Rebase your k11 addition onto t05's commit once it lands."}
+{"at":"2026-09-17T04:52:11.718734Z","kind":"session_start","seat":"t14-p2-k14","session":"61f92898-c849-42dd-b199-cffbfe27f860"}
+{"at":"2026-09-17T04:52:12.415804Z","kind":"nudge","seat":"t12-p6-k12","detail":"manual: Ruling: t06-p6-k6 already landed (f4867df). Rebase your k12 addition onto t06's landed commit before pushing."}
+{"at":"2026-09-17T04:52:21.181473Z","kind":"admit"}
+{"at":"2026-09-17T04:52:22.277417Z","kind":"session_start","seat":"t15-p3-k15","session":"63ead065-4800-4f13-8117-e9d451a1c913"}
+{"at":"2026-09-17T04:52:25.779274Z","kind":"verify","seat":"t07-p1-k7","detail":"pass d1b02570"}
+{"at":"2026-09-17T04:52:26.778643Z","kind":"drop","seat":"t05-p5-k5","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T04:52:29.481099Z","kind":"verify","seat":"t08-p2-k8","detail":"pass a30d56a6"}
+{"at":"2026-09-17T04:52:31.269903Z","kind":"admit"}
+{"at":"2026-09-17T04:52:32.224878Z","kind":"session_start","seat":"t16-p4-k16","session":"fb122fba-6fea-4981-a3cf-6648f676cb4d"}
+{"at":"2026-09-17T04:52:36.181029Z","kind":"take","seat":"t10-p4-k10","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T04:52:41.406846Z","kind":"admit"}
+{"at":"2026-09-17T04:52:41.860125Z","kind":"verify","seat":"t09-p3-k9","detail":"pass 88a86027"}
+{"at":"2026-09-17T04:52:42.845837Z","kind":"session_start","seat":"t17-p5-k17","session":"0f0938af-d0be-4249-9dcb-83244c9b1147"}
+{"at":"2026-09-17T04:52:45.393419Z","kind":"verify","seat":"t12-p6-k12","detail":"pass 62c4fd65"}
+{"at":"2026-09-17T04:52:52.097896Z","kind":"admit"}
+{"at":"2026-09-17T04:52:52.801611Z","kind":"drop","seat":"t10-p4-k10","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T04:53:05.300119Z","kind":"verify","seat":"t05-p5-k5","detail":"pass 0e704e2f"}
+{"at":"2026-09-17T04:53:09.558224Z","kind":"verify","seat":"t13-p1-k13","detail":"pass 1d42bf86"}
+{"at":"2026-09-17T04:53:14.468155Z","kind":"admit"}
+{"at":"2026-09-17T04:53:15.692041Z","kind":"session_start","seat":"t18-p6-k18","session":"a64461e3-6181-44aa-b13a-394c918b3724"}
+{"at":"2026-09-17T04:53:23.309924Z","kind":"verify","seat":"t10-p4-k10","detail":"pass 16cb07db"}
+{"at":"2026-09-17T04:53:25.210257Z","kind":"ask","request":"req_dlhbmo4tx2ig_8698028e","by":"t16-p4-k16","seat":"t16-p4-k16","detail":"pkg/p4","tier":"peer"}
+{"at":"2026-09-17T04:53:25.780064Z","kind":"admit"}
+{"at":"2026-09-17T04:53:26.797795Z","kind":"session_start","seat":"t19-p1-k19","session":"7c053d21-e6af-40ee-8142-1e20719ab8a8"}
+{"at":"2026-09-17T04:53:28.642654Z","kind":"take","seat":"t15-p3-k15","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T04:53:38.744713Z","kind":"nudge","seat":"t04-p4-k4","detail":"request: request req_dlhbmo4tx2ig_8698028e from t16-p4-k16 on pkg/p4 needs peer: \"t04-p4-k4 has landed. What order should t10-p4-k10 and t16-p4-k16 land in on pkg/p4?\". rule it if the evidence is yours: `flat rule req_dlhbmo4tx2ig_8698028e --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlhbmo4tx2ig_8698028e --to operator --why '...'`."}
+{"at":"2026-09-17T04:53:38.745158Z","kind":"nudge","seat":"t10-p4-k10","detail":"request: request req_dlhbmo4tx2ig_8698028e from t16-p4-k16 on pkg/p4 needs peer: \"t04-p4-k4 has landed. What order should t10-p4-k10 and t16-p4-k16 land in on pkg/p4?\". rule it if the evidence is yours: `flat rule req_dlhbmo4tx2ig_8698028e --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlhbmo4tx2ig_8698028e --to operator --why '...'`."}
+{"at":"2026-09-17T04:53:38.745243Z","kind":"route","request":"req_dlhbmo4tx2ig_8698028e","seat":"t16-p4-k16","detail":"t04-p4-k4,t10-p4-k10"}
+{"at":"2026-09-17T04:53:39.869066Z","kind":"admit"}
+{"at":"2026-09-17T04:53:40.609123Z","kind":"session_start","seat":"t20-p2-k20","session":"6eb03a11-e433-49fe-87cf-6aa557453dc6"}
+{"at":"2026-09-17T04:53:45.836685Z","kind":"verify","seat":"t14-p2-k14","detail":"pass 063b86b7"}
+{"at":"2026-09-17T04:53:45.876499Z","kind":"wake","seat":"t04-p4-k4","detail":"1 notes","session":"412d75e6-8761-4ffa-8009-9550ce88ae29"}
+{"at":"2026-09-17T04:53:45.877601Z","kind":"wake","seat":"t10-p4-k10","detail":"1 notes","session":"f30576e7-ba8a-477e-8d79-e12115c03f52"}
+{"at":"2026-09-17T04:53:47.210009Z","kind":"session_start","seat":"t10-p4-k10","session":"f30576e7-ba8a-477e-8d79-e12115c03f52"}
+{"at":"2026-09-17T04:53:47.305667Z","kind":"session_start","seat":"t04-p4-k4","session":"412d75e6-8761-4ffa-8009-9550ce88ae29"}
+{"at":"2026-09-17T04:53:52.061334Z","kind":"escalate","request":"req_dlhbmo4tx2ig_8698028e","by":"t04-p4-k4","detail":"ordering between t10-p4-k10 and t16-p4-k16 on pkg/p4; t04-p4-k4 has no standing to rule on peers' order and holds no evidence of their relative intent","tier":"operator"}
+{"at":"2026-09-17T04:53:52.758833Z","kind":"refusal","by":"rule","seat":"t10-p4-k10","detail":"tier_too_low"}
+{"at":"2026-09-17T04:53:54.603476Z","kind":"admit"}
+{"at":"2026-09-17T04:53:55.346994Z","kind":"session_start","seat":"t21-p3-k21","session":"a6378bae-dffb-4464-aed6-783d6845f07a"}
+{"at":"2026-09-17T04:54:01.658971Z","kind":"session_start","seat":"lead","session":"6c31bb1b-79d0-4a46-991b-f7da250f218c"}
+{"at":"2026-09-17T04:54:06.560273Z","kind":"verify","seat":"t11-p5-k11","detail":"pass ba248e06"}
+{"at":"2026-09-17T04:54:08.671737Z","kind":"admit"}
+{"at":"2026-09-17T04:54:09.20019Z","kind":"claim","request":"req_dlhbmo4tx2ig_8698028e","by":"operator","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:54:09.202682Z","kind":"rule","request":"req_dlhbmo4tx2ig_8698028e","by":"operator","detail":"dec_dlhbn8cdeqkw_e64badfe","tier":"operator","epoch":1}
+{"at":"2026-09-17T04:54:09.203306Z","kind":"nudge","seat":"t16-p4-k16","detail":"ruling: ruled req_dlhbmo4tx2ig_8698028e by operator (operator): No product preference here. This is an engineering question; rule it on evidence: the branch whose start commit is earlier lands first, the later one rebases after it lands."}
+{"at":"2026-09-17T04:54:09.548092Z","kind":"session_start","seat":"t22-p4-k22","session":"f5a446e0-0786-40b0-88ad-0fd4d910d7ce"}
+{"at":"2026-09-17T04:54:11.234619Z","kind":"verify","seat":"t17-p5-k17","detail":"pass 0f4823bb"}
+{"at":"2026-09-17T04:54:12.819215Z","kind":"refusal","by":"take","seat":"t20-p2-k20","detail":"held_by_other"}
+{"at":"2026-09-17T04:54:22.549552Z","kind":"refusal","by":"rule","seat":"t16-p4-k16","detail":"already_ruled"}
+{"at":"2026-09-17T04:54:25.448727Z","kind":"admit"}
+{"at":"2026-09-17T04:54:26.425444Z","kind":"session_start","seat":"t23-p5-k23","session":"2df1e598-570b-4ff2-8b82-57b343f9f6f1"}
+{"at":"2026-09-17T04:54:28.974572Z","kind":"drop","seat":"t15-p3-k15","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T04:54:30.086556Z","kind":"take","seat":"t20-p2-k20","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T04:54:44.548403Z","kind":"admit"}
+{"at":"2026-09-17T04:54:45.78234Z","kind":"session_start","seat":"t24-p6-k24","session":"90f066f4-46ca-4ca0-985c-e48de1a55876"}
+{"at":"2026-09-17T04:54:52.203898Z","kind":"verify","seat":"t18-p6-k18","detail":"pass ed3c0e4e"}
+{"at":"2026-09-17T04:55:04.416163Z","kind":"admit"}
+{"at":"2026-09-17T04:55:05.389208Z","kind":"session_start","seat":"t25-p1-k25","session":"b289644c-e2d0-4196-a118-671360c57926"}
+{"at":"2026-09-17T04:55:15.739861Z","kind":"verify","seat":"t15-p3-k15","detail":"pass 11494c34"}
+{"at":"2026-09-17T04:55:20.454212Z","kind":"drop","seat":"t20-p2-k20","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T04:55:21.729802Z","kind":"verify","seat":"t19-p1-k19","detail":"pass 201c79ed"}
+{"at":"2026-09-17T04:55:25.065409Z","kind":"admit"}
+{"at":"2026-09-17T04:55:25.88139Z","kind":"session_start","seat":"t26-p2-k26","session":"b86d4d9c-0dfd-44c5-9b65-818ad27add89"}
+{"at":"2026-09-17T04:55:37.253634Z","kind":"ask","request":"req_dlhbocsl87vc_4d4333b3","by":"t23-p5-k23","seat":"t23-p5-k23","detail":"pkg/p5","tier":"lead"}
+{"at":"2026-09-17T04:55:37.25456Z","kind":"nudge","seat":"lead","detail":"request: request req_dlhbocsl87vc_4d4333b3 from t23-p5-k23 on pkg/p5 needs lead: \"t11-p5-k11 and t17-p5-k17 both show landed but neither branch contains the other's key (t11 has k5+k11, t17 has k5+k17) — no combined branch exists. What should t23-p5-k23 rebase onto to keep all of k5,k11,k17,k23?\". rule it if the evidence is yours: `flat rule req_dlhbocsl87vc_4d4333b3 --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlhbocsl87vc_4d4333b3 --to operator --why '...'`."}
+{"at":"2026-09-17T04:55:37.254616Z","kind":"route","request":"req_dlhbocsl87vc_4d4333b3","seat":"t23-p5-k23","detail":"lead"}
+{"at":"2026-09-17T04:55:41.695317Z","kind":"verify","seat":"t21-p3-k21","detail":"pass a8114aff"}
+{"at":"2026-09-17T04:55:41.729602Z","kind":"wake","seat":"lead","detail":"1 notes","session":"6c31bb1b-79d0-4a46-991b-f7da250f218c"}
+{"at":"2026-09-17T04:55:42.570689Z","kind":"session_start","seat":"lead","session":"6c31bb1b-79d0-4a46-991b-f7da250f218c"}
+{"at":"2026-09-17T04:55:44.100153Z","kind":"admit"}
+{"at":"2026-09-17T04:55:45.03538Z","kind":"session_start","seat":"t27-p3-k27","session":"dfd3c02a-46f5-4bbc-9bb1-5dbb11f29b71"}
+{"at":"2026-09-17T04:56:03.951334Z","kind":"claim","request":"req_dlhbocsl87vc_4d4333b3","by":"lead","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:56:03.951817Z","kind":"refusal","by":"rule","seat":"lead","detail":"must_supersede"}
+{"at":"2026-09-17T04:56:04.002115Z","kind":"verify","seat":"t16-p4-k16","detail":"pass 6610aa11"}
+{"at":"2026-09-17T04:56:04.116214Z","kind":"admit"}
+{"at":"2026-09-17T04:56:05.023723Z","kind":"session_start","seat":"t28-p4-k28","session":"7a9cd177-e843-4939-8ba3-c674c29265ae"}
+{"at":"2026-09-17T04:56:05.512015Z","kind":"take","seat":"t25-p1-k25","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T04:56:06.697985Z","kind":"verify","seat":"t20-p2-k20","detail":"pass 939225c5"}
+{"at":"2026-09-17T04:56:07.940898Z","kind":"claim","request":"req_dlhbocsl87vc_4d4333b3","by":"lead","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:56:07.941726Z","kind":"rule","request":"req_dlhbocsl87vc_4d4333b3","by":"lead","detail":"dec_dlhboqw42io8_e99acfd6","tier":"lead","epoch":1}
+{"at":"2026-09-17T04:56:07.942064Z","kind":"nudge","seat":"t23-p5-k23","detail":"ruling: ruled req_dlhbocsl87vc_4d4333b3 by lead (lead): t23-p5-k23 rebases onto t17-p5-k17, then cherry-picks t11-p5-k11's k11 commit (32d57d9) on top, then adds its own k23 key -- final order k5 -\u003e k17 -\u003e k11 -\u003e k23 (k11/k17 touch disjoint map entries so order between them doesn't matter, but one must be replayed onto the other since neither branch contains the other's commit)"}
+{"at":"2026-09-17T04:56:25.831202Z","kind":"session_start","seat":"lead","session":"c27ac4b3-ebe3-4c4a-b757-9327253fc20e"}
+{"at":"2026-09-17T04:56:27.388838Z","kind":"admit"}
+{"at":"2026-09-17T04:56:28.567275Z","kind":"session_start","seat":"t29-p5-k29","session":"cb0f383b-27a6-44a0-bc72-daa9f18a3057"}
+{"at":"2026-09-17T04:56:33.928606Z","kind":"verify","seat":"t22-p4-k22","detail":"pass 28f47cdd"}
+{"at":"2026-09-17T04:56:36.713127Z","kind":"verify","seat":"t24-p6-k24","detail":"pass 537fc1bd"}
+{"at":"2026-09-17T04:56:55.636123Z","kind":"admit"}
+{"at":"2026-09-17T04:56:56.434254Z","kind":"session_start","seat":"t30-p6-k30","session":"3627ac65-f10a-4972-993b-e9c510f77eba"}
+{"at":"2026-09-17T04:57:09.65108Z","kind":"drop","seat":"t25-p1-k25","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T04:57:09.806864Z","kind":"ask","request":"req_dlhbpjb8ym54_9d352bfd","by":"t29-p5-k29","seat":"t29-p5-k29","detail":"pkg/p5","tier":"peer"}
+{"at":"2026-09-17T04:57:19.542663Z","kind":"admit"}
+{"at":"2026-09-17T04:57:20.357855Z","kind":"session_start","seat":"t03b-p3-k3b","session":"197c52a7-a7d2-43e8-b997-19182a7ab803"}
+{"at":"2026-09-17T04:57:30.578614Z","kind":"verify","seat":"t23-p5-k23","detail":"pass 9e201886"}
+{"at":"2026-09-17T04:57:33.181951Z","kind":"verify","seat":"t26-p2-k26","detail":"pass c5c2ae13"}
+{"at":"2026-09-17T04:57:35.453047Z","kind":"nudge","seat":"t05-p5-k5","detail":"request: request req_dlhbpjb8ym54_9d352bfd from t29-p5-k29 on pkg/p5 needs peer: \"Where does t29-p5-k29 fit in the pkg/p5 merge order (existing ruling: k5 -\u003e k17 -\u003e k11 -\u003e k23)? Should k29 rebase onto k23 and land last?\". rule it if the evidence is yours: `flat rule req_dlhbpjb8ym54_9d352bfd --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlhbpjb8ym54_9d352bfd --to operator --why '...'`."}
+{"at":"2026-09-17T04:57:35.453428Z","kind":"nudge","seat":"t11-p5-k11","detail":"request: request req_dlhbpjb8ym54_9d352bfd from t29-p5-k29 on pkg/p5 needs peer: \"Where does t29-p5-k29 fit in the pkg/p5 merge order (existing ruling: k5 -\u003e k17 -\u003e k11 -\u003e k23)? Should k29 rebase onto k23 and land last?\". rule it if the evidence is yours: `flat rule req_dlhbpjb8ym54_9d352bfd --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlhbpjb8ym54_9d352bfd --to operator --why '...'`."}
+{"at":"2026-09-17T04:57:35.453951Z","kind":"nudge","seat":"t17-p5-k17","detail":"request: request req_dlhbpjb8ym54_9d352bfd from t29-p5-k29 on pkg/p5 needs peer: \"Where does t29-p5-k29 fit in the pkg/p5 merge order (existing ruling: k5 -\u003e k17 -\u003e k11 -\u003e k23)? Should k29 rebase onto k23 and land last?\". rule it if the evidence is yours: `flat rule req_dlhbpjb8ym54_9d352bfd --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlhbpjb8ym54_9d352bfd --to operator --why '...'`."}
+{"at":"2026-09-17T04:57:35.454277Z","kind":"nudge","seat":"t23-p5-k23","detail":"request: request req_dlhbpjb8ym54_9d352bfd from t29-p5-k29 on pkg/p5 needs peer: \"Where does t29-p5-k29 fit in the pkg/p5 merge order (existing ruling: k5 -\u003e k17 -\u003e k11 -\u003e k23)? Should k29 rebase onto k23 and land last?\". rule it if the evidence is yours: `flat rule req_dlhbpjb8ym54_9d352bfd --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlhbpjb8ym54_9d352bfd --to operator --why '...'`."}
+{"at":"2026-09-17T04:57:35.45461Z","kind":"nudge","seat":"lead","detail":"request: request req_dlhbpjb8ym54_9d352bfd from t29-p5-k29 on pkg/p5 needs peer: \"Where does t29-p5-k29 fit in the pkg/p5 merge order (existing ruling: k5 -\u003e k17 -\u003e k11 -\u003e k23)? Should k29 rebase onto k23 and land last?\". rule it if the evidence is yours: `flat rule req_dlhbpjb8ym54_9d352bfd --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlhbpjb8ym54_9d352bfd --to operator --why '...'`."}
+{"at":"2026-09-17T04:57:35.454687Z","kind":"route","request":"req_dlhbpjb8ym54_9d352bfd","seat":"t29-p5-k29","detail":"t05-p5-k5,t11-p5-k11,t17-p5-k17,t23-p5-k23,lead"}
+{"at":"2026-09-17T04:57:35.700538Z","kind":"verify","seat":"t27-p3-k27","detail":"pass 3fdc4acf"}
+{"at":"2026-09-17T04:57:35.733968Z","kind":"wake","seat":"lead","detail":"1 notes","session":"c27ac4b3-ebe3-4c4a-b757-9327253fc20e"}
+{"at":"2026-09-17T04:57:35.73577Z","kind":"wake","seat":"t05-p5-k5","detail":"1 notes","session":"6a37519b-c88b-4b2b-b5a8-687aad342e4c"}
+{"at":"2026-09-17T04:57:36.790943Z","kind":"session_start","seat":"lead","session":"c27ac4b3-ebe3-4c4a-b757-9327253fc20e"}
+{"at":"2026-09-17T04:57:37.03914Z","kind":"ask","request":"req_dlhbpvtmd8zk_66e73a50","by":"t28-p4-k28","seat":"t28-p4-k28","detail":"pkg/p4","tier":"lead"}
+{"at":"2026-09-17T04:57:37.039529Z","kind":"nudge","seat":"lead","detail":"request: request req_dlhbpvtmd8zk_66e73a50 from t28-p4-k28 on pkg/p4 needs lead: \"t16-p4-k16 and t22-p4-k22 both landed but diverge (t16 has k4,k10,k16; t22 has k4,k10,k22 without k16) - main is still at sandbox base with none merged. What is the correct current key set for pkg/p4/p4.go that I should build k28 on top of: k4,k10,k16,k22 combined, or something else?\". rule it if the evidence is yours: `flat rule req_dlhbpvtmd8zk_66e73a50 --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlhbpvtmd8zk_66e73a50 --to operator --why '...'`."}
+{"at":"2026-09-17T04:57:37.039606Z","kind":"route","request":"req_dlhbpvtmd8zk_66e73a50","seat":"t28-p4-k28","detail":"lead"}
+{"at":"2026-09-17T04:57:37.119417Z","kind":"session_start","seat":"t05-p5-k5","session":"6a37519b-c88b-4b2b-b5a8-687aad342e4c"}
+{"at":"2026-09-17T04:57:43.497019Z","kind":"claim","request":"req_dlhbpjb8ym54_9d352bfd","by":"t05-p5-k5","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:57:43.49743Z","kind":"refusal","by":"rule","seat":"t05-p5-k5","detail":"outranked"}
+{"at":"2026-09-17T04:57:44.923752Z","kind":"claim","request":"req_dlhbpjb8ym54_9d352bfd","by":"lead","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:57:44.924044Z","kind":"refusal","by":"rule","seat":"lead","detail":"must_supersede"}
+{"at":"2026-09-17T04:57:46.165881Z","kind":"admit"}
+{"at":"2026-09-17T04:57:46.839722Z","kind":"session_start","seat":"t03c-p3-k3c","session":"77b20d90-d513-495c-bacd-fd029fc269db"}
+{"at":"2026-09-17T04:57:47.154125Z","kind":"escalate","request":"req_dlhbpjb8ym54_9d352bfd","by":"t05-p5-k5","detail":"lead already ruled pkg/p5 order (dec_dlhboqw42io8_e99acfd6); need lead to confirm k29 placement, a peer cannot override","tier":"lead"}
+{"at":"2026-09-17T04:57:48.283604Z","kind":"claim","request":"req_dlhbpjb8ym54_9d352bfd","by":"lead","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:57:48.284724Z","kind":"rule","request":"req_dlhbpjb8ym54_9d352bfd","by":"lead","detail":"dec_dlhbq0zlq8hk_af2e2460","tier":"lead","epoch":1}
+{"at":"2026-09-17T04:57:48.285007Z","kind":"nudge","seat":"t29-p5-k29","detail":"ruling: ruled req_dlhbpjb8ym54_9d352bfd by lead (lead): t29-p5-k29 lands last in the pkg/p5 chain: rebase onto t23-p5-k23 (which already carries k5 -\u003e k17 -\u003e k11 -\u003e k23), then add k29 on top. Final order: k5 -\u003e k17 -\u003e k11 -\u003e k23 -\u003e k29."}
+{"at":"2026-09-17T04:57:54.742334Z","kind":"claim","request":"req_dlhbpvtmd8zk_66e73a50","by":"lead","detail":"implicit","epoch":1}
+{"at":"2026-09-17T04:57:54.742896Z","kind":"rule","request":"req_dlhbpvtmd8zk_66e73a50","by":"lead","detail":"dec_dlhbq3yeuviw_a0b8c255","tier":"lead","epoch":1}
+{"at":"2026-09-17T04:57:54.743104Z","kind":"nudge","seat":"t28-p4-k28","detail":"ruling: ruled req_dlhbpvtmd8zk_66e73a50 by lead (lead): The correct current key set for pkg/p4/p4.go is the union k4, k10, k16, k22 combined. t28-p4-k28 should rebase onto whichever of t16-p4-k16 / t22-p4-k22 lands last (or merge both), so all four keys are present, then add k28 on top."}
+{"at":"2026-09-17T04:57:55.677993Z","kind":"take","seat":"t30-p6-k30","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T04:57:59.991004Z","kind":"verify","seat":"t25-p1-k25","detail":"pass 1e1dacc3"}
+{"at":"2026-09-17T04:58:00.024926Z","kind":"wake","seat":"t11-p5-k11","detail":"1 notes","session":"418a7738-d1bd-4c3a-998c-badedb848625"}
+{"at":"2026-09-17T04:58:00.025856Z","kind":"wake","seat":"t17-p5-k17","detail":"1 notes","session":"0f0938af-d0be-4249-9dcb-83244c9b1147"}
+{"at":"2026-09-17T04:58:01.319397Z","kind":"session_start","seat":"t17-p5-k17","session":"0f0938af-d0be-4249-9dcb-83244c9b1147"}
+{"at":"2026-09-17T04:58:01.375732Z","kind":"session_start","seat":"t11-p5-k11","session":"418a7738-d1bd-4c3a-998c-badedb848625"}
+{"at":"2026-09-17T04:58:06.566339Z","kind":"refusal","by":"rule","seat":"t17-p5-k17","detail":"already_ruled"}
+{"at":"2026-09-17T04:58:09.162308Z","kind":"refusal","by":"escalate","seat":"t11-p5-k11","detail":"already_ruled"}
+{"at":"2026-09-17T04:58:26.705802Z","kind":"wake","seat":"t23-p5-k23","detail":"1 notes","session":"2df1e598-570b-4ff2-8b82-57b343f9f6f1"}
+{"at":"2026-09-17T04:58:27.554727Z","kind":"session_start","seat":"t23-p5-k23","session":"2df1e598-570b-4ff2-8b82-57b343f9f6f1"}
+{"at":"2026-09-17T04:58:33.162907Z","kind":"refusal","by":"rule","seat":"t23-p5-k23","detail":"already_ruled"}
+{"at":"2026-09-17T04:58:46.209994Z","kind":"verify","seat":"t29-p5-k29","detail":"pass 1e432e2d"}
+{"at":"2026-09-17T04:58:51.872708Z","kind":"drop","seat":"t30-p6-k30","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T04:59:01.23779Z","kind":"session_start","seat":"lead","session":"78b4c923-a855-47d6-9e95-232112272947"}
+{"at":"2026-09-17T04:59:08.605634Z","kind":"verify","seat":"t03b-p3-k3b","detail":"pass fefcb2de"}
+{"at":"2026-09-17T04:59:10.8549Z","kind":"verify","seat":"t03c-p3-k3c","detail":"pass e1ba8672"}
+{"at":"2026-09-17T04:59:33.989199Z","kind":"verify","seat":"t30-p6-k30","detail":"pass 1b308b45"}
+{"at":"2026-09-17T04:59:46.541952Z","kind":"session_start","seat":"theme","session":"eac05191-17a3-4418-a7eb-85055edcbf5f"}
+{"at":"2026-09-17T04:59:53.855551Z","kind":"verify","seat":"t28-p4-k28","detail":"pass da4ca1a7"}
+{"at":"2026-09-17T05:00:39.485712Z","kind":"consolidate","seat":"theme","detail":"merged t01-p1-k1,t02-p2-k2,t03-p3-k3,t04-p4-k4,t05-p5-k5,t06-p6-k6,t08-p2-k8,t07-p1-k7,t09-p3-k9,t12-p6-k12,t13-p1-k13,t14-p2-k14,t11-p5-k11,t18-p6-k18,t15-p3-k15,t21-p3-k21,t19-p1-k19,t24-p6-k24 conflicted t10-p4-k10,t17-p5-k17,t20-p2-k20,t22-p4-k22,t16-p4-k16,t25-p1-k25,t27-p3-k27,t28-p4-k28,t26-p2-k26,t23-p5-k23,t30-p6-k30,t03b-p3-k3b,t03c-p3-k3c,t29-p5-k29"}
+{"at":"2026-09-17T05:01:20.868605Z","kind":"session_start","seat":"lead","session":"54db91f1-a841-46c8-87ac-fa58c79d8fcb"}
+{"at":"2026-09-17T05:03:46.270766Z","kind":"session_start","seat":"lead","session":"e2e16078-91a0-43f4-829a-b0039fa4e5c1"}
+{"at":"2026-09-17T05:06:03.876232Z","kind":"session_start","seat":"lead","session":"69e0343e-a730-4552-b11e-21b90b7f1250"}
+{"at":"2026-09-17T05:06:51.115018Z","kind":"verify","seat":"theme","detail":"pass 54b168b9"}
