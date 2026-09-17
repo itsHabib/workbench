@@ -48,6 +48,14 @@ fixtures/db.json is the shared fixture database: hold the fixture-db resource wh
 change it.`, i)
 		case i == 2:
 			t.Fault = "B"
+		case i == 3 && spec.Tasks >= 6:
+			t.Fault = "E"
+			t.Card += fmt.Sprintf(`
+
+Scoping note discovered on the way in: this task is really three keys, k%d, k%db and k%dc, all
+in pkg/%s. Do not do all three yourself. Keep k%d, and queue the other two as their own tasks:
+flat split --into "t%02db-%s-k%db:add key k%db=%d0 to pkg/%s Values() with a test|t%02dc-%s-k%dc:add key k%dc=%d00 to pkg/%s Values() with a test" --why "scoped wrong: three keys"
+Then land k%d as usual.`, i, i, i, pkg, i, i, pkg, i, i, i, pkg, i, pkg, i, i, i, pkg, i)
 		case i == 4:
 			t.Fault = "A"
 			t.Card += `
@@ -103,6 +111,7 @@ type Task struct {
 	Card     string
 	Resource string
 	Fault    string
+	Parent   string `json:",omitempty"`
 }
 
 // Tasks is the workload, in start order.
@@ -149,6 +158,8 @@ decision. Do not choose one yourself.`, Fault: "C"},
 const Rules = `# Rules for every builder
 
 1. One worktree, one branch: the ones you were given. Never edit outside your worktree.
+   If your task turns out to be several, do not do them all: keep one, and queue the rest with
+   flat split --into "<branch>:<title>|<branch>:<title>" --why "..."
 2. Commit and push WIP within 5 minutes of starting and every 10 minutes after:
    git push origin <your branch>
 3. Before editing any file, run: flat check <path>

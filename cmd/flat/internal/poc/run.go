@@ -199,10 +199,13 @@ func selectTasks(tasks []Task, only []string) []Task {
 	return sub
 }
 
-// runBuilders admits and runs every task, in order, and waits for all.
+// runBuilders admits and runs every task, in order, then keeps admitting
+// tasks that seats add to tasks.json (a split) while any builder is alive.
 func (r *runner) runBuilders(tasks []Task) {
 	var builders sync.WaitGroup
-	for i, t := range tasks {
+	started := map[string]bool{}
+	start := func(i int, t Task) {
+		started[t.Branch] = true
 		r.admit(i, t)
 		builders.Add(1)
 		r.mu.Lock()
@@ -218,7 +221,39 @@ func (r *runner) runBuilders(tasks []Task) {
 			r.mu.Unlock()
 		}(t)
 	}
+	for i, t := range tasks {
+		start(i, t)
+	}
+	for {
+		r.mu.Lock()
+		alive := r.alive
+		r.mu.Unlock()
+		for i, t := range r.addedTasks(started) {
+			r.logf("split child admitted: %s (parent %s)", t.Branch, t.Parent)
+			start(len(started)+i, t)
+		}
+		if alive == 0 {
+			break
+		}
+		time.Sleep(15 * time.Second)
+	}
 	builders.Wait()
+}
+
+// addedTasks reads tasks.json for rows no seat has started yet.
+func (r *runner) addedTasks(started map[string]bool) []Task {
+	rows, err := flat.ReadTasks(r.main)
+	if err != nil {
+		return nil
+	}
+	var out []Task
+	for _, row := range rows {
+		if started[row.Branch] || len(r.o.Only) > 0 {
+			continue
+		}
+		out = append(out, Task{Branch: row.Branch, Title: row.Title, Card: row.Card, Resource: row.Resource, Fault: row.Fault, Parent: row.Parent})
+	}
+	return out
 }
 
 func (r *runner) watchOptions() flat.WatchOptions {

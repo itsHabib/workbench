@@ -765,3 +765,30 @@ func TestConsolidationMergeIsInherited(t *testing.T) {
 		t.Fatalf("order = %+v", q2)
 	}
 }
+
+func TestSplitQueuesChildren(t *testing.T) {
+	main := repo(t)
+	s := open(t, main)
+	write(t, main, "briefs/tasks.json", `[{"Branch":"t1","Title":"one","Card":"do one"}]`)
+	kids := ParseChildren("t1b:key b|t1c:key c")
+	d, err := s.Split("t1", main, kids, "scoped wrong")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := ReadTasks(main)
+	if err != nil || len(rows) != 3 || rows[1].Parent != "t1" || rows[2].Branch != "t1c" {
+		t.Fatalf("tasks after split: %v %+v", err, rows)
+	}
+	if _, err := os.Stat(filepath.Join(main, "briefs", "tasks", "t1b.md")); err != nil {
+		t.Fatal("child card not written")
+	}
+	if d.Scope[0] != "task:t1" || !strings.Contains(d.Ruling, "t1b, t1c") {
+		t.Fatalf("decision = %+v", d)
+	}
+	if n := mustInbox(t, s, "operator"); len(n) != 1 || n[0].Kind != "split" {
+		t.Fatalf("operator not told: %+v", n)
+	}
+	if _, err := s.Split("t1", main, ParseChildren("t1b:again"), "dup"); err == nil {
+		t.Fatal("duplicate child accepted")
+	}
+}

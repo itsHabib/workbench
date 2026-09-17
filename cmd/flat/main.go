@@ -35,6 +35,7 @@ decide      ask --scope a,b --question Q [--options "x|y"] [--needs peer|lead|op
             who SCOPE[,SCOPE]        which seats hold context on a scope (the routing index)
             order                    landing order of landed branches from the ledger (the theme map)
             load [--window 1h]       queue wait per address: the number behind "too many messages"
+            split --into "b1:title|b2:title" --why W    this task is really several; queue the rest
 resource    take NAME [--ttl 30m] · drop NAME
 admit       admit [--seats N] [--disk-min 10G] [--resource NAME] [--wait] [--json]
 watch       watch [--interval 30s] [--once] [--fetch] [--idle 20m] [--unclaimed 10m] [--disk-min 10G]
@@ -87,7 +88,7 @@ type cli struct {
 
 	as, scope, question, options, needs, ruling, evidence, supersedes, to, why        string
 	operator, lead, verifier, diskMin, resource, dir, cmd, wakeModel, wakeTools, base string
-	orderFlag, verifyCmd                                                              string
+	orderFlag, verifyCmd, into                                                        string
 	jsonOut, md, phone, fetch, all, keep, wait, once, wake                            bool
 	epoch, seats, wakeMax                                                             int
 	ttl, timeout, idle, interval, unclaimed, threshold, window                        time.Duration
@@ -138,6 +139,7 @@ func parse(verb string, args []string) (*cli, error) {
 	fs.StringVar(&c.orderFlag, "order", "", "branches in landing order, comma-separated, when ruling on order")
 	fs.StringVar(&c.verifyCmd, "verify", "", "watch: command to run at each landed head, e.g. 'go test ./...'")
 	fs.DurationVar(&c.window, "window", time.Hour, "load window")
+	fs.StringVar(&c.into, "into", "", "split children as branch:title|branch:title")
 
 	// Positional args may precede flags: `flat rule ID --ruling ...`.
 	for len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -165,6 +167,7 @@ var verbs = map[string]func(*cli) error{
 	"decisions":    (*cli).decisions,
 	"order":        (*cli).order,
 	"load":         (*cli).load,
+	"split":        (*cli).split,
 	"who":          (*cli).who,
 	"take":         (*cli).take,
 	"drop":         (*cli).drop,
@@ -347,6 +350,31 @@ func (c *cli) load() error {
 		return c.emit(ls)
 	}
 	fmt.Println(flat.LoadText(ls))
+	return nil
+}
+
+func (c *cli) split() error {
+	top, err := flat.Git(c.dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return err
+	}
+	// tasks.json lives in the shared checkout: the main worktree of the repo.
+	common, err := flat.Git(c.dir, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return err
+	}
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(c.dir, common)
+	}
+	repo := filepath.Dir(filepath.Clean(common))
+	if _, err := os.Stat(filepath.Join(repo, "briefs")); err != nil {
+		repo = top
+	}
+	d, err := c.s.Split(c.seat, repo, flat.ParseChildren(c.into), c.why)
+	if err != nil {
+		return c.record(err)
+	}
+	fmt.Printf("split recorded as %s; children queued in %s\n", d.ID, filepath.Join(repo, "briefs", "tasks.json"))
 	return nil
 }
 

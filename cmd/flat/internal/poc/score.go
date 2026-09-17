@@ -92,6 +92,9 @@ func ScoreRun(sandboxDir, runDir string) (*Score, error) {
 	sc.Faults["B"] = faultB(sessions, rows, byFault["B"])
 	sc.Consolidation = consolidation(rows)
 	sc.Faults["D"] = faultD(events)
+	if parent := byFault["E"]; parent != "" {
+		sc.Faults["E"] = faultE(tasks, rows, parent)
+	}
 	sc.Kills = append(sc.Kills, KillCheck{ID: 5, Name: "operator requests (compared across modes)", Passed: true,
 		Detail: fmt.Sprintf("operator_requests=%d unmatched=%d", sc.OperatorRequests, sc.OperatorUnmatched)})
 	return sc, nil
@@ -280,6 +283,25 @@ func faultD(events []flat.Event) string {
 	return fmt.Sprintf("disk_low refusals=%d", refusals)
 }
 
+// faultE: did the seat split, and did the children get admitted and land.
+func faultE(tasks []Task, rows map[string]flat.Row, parent string) string {
+	var children []string
+	landed := 0
+	for _, t := range tasks {
+		if t.Parent != parent {
+			continue
+		}
+		children = append(children, t.Branch)
+		if rows[t.Branch].State == "landed" {
+			landed++
+		}
+	}
+	if len(children) == 0 {
+		return fmt.Sprintf("%s did not split (final=%s)", parent, rows[parent].State)
+	}
+	return fmt.Sprintf("%s split into %d (%d landed); parent final=%s", parent, len(children), landed, rows[parent].State)
+}
+
 func scopeCovers(scope []string, file string) bool {
 	for _, sc := range scope {
 		sc = strings.TrimSuffix(sc, "/")
@@ -308,8 +330,10 @@ func (sc *Score) Markdown() string {
 		fmt.Fprintf(&sb, "| %s | %s |\n", n, sc.Tasks[n])
 	}
 	sb.WriteString("\n## Faults\n\n| fault | outcome |\n|---|---|\n")
-	for _, f := range []string{"A", "B", "C", "D"} {
-		fmt.Fprintf(&sb, "| %s | %s |\n", f, sc.Faults[f])
+	for _, f := range []string{"A", "B", "C", "D", "E"} {
+		if sc.Faults[f] != "" {
+			fmt.Fprintf(&sb, "| %s | %s |\n", f, sc.Faults[f])
+		}
 	}
 	if sc.Consolidation != "" {
 		fmt.Fprintf(&sb, "\nConsolidation: %s\n", sc.Consolidation)
