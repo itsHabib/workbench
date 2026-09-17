@@ -59,6 +59,9 @@ func main() {
 	if verb == "poc" {
 		os.Exit(poc.Main(args))
 	}
+	if verb == "plane" {
+		os.Exit(planeMain(args))
+	}
 	if verb == "hook" {
 		_ = swarm.Hook(os.Stdin, os.Stdout)
 		return

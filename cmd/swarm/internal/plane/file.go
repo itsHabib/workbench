@@ -1,6 +1,7 @@
 package plane
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -55,22 +56,24 @@ func (f *File) step(op string, mutate bool, fn func(d *Data, now time.Time) erro
 		time.Sleep(2 * time.Millisecond)
 	}
 	defer unlock(lf)
-	d := NewData()
-	data, err := os.ReadFile(f.path("plane.json"))
-	switch {
-	case err == nil:
-		if err := json.Unmarshal(data, d); err != nil {
-			return fmt.Errorf("plane: state unreadable: %w", err)
-		}
-	case !errors.Is(err, os.ErrNotExist):
+	d, logged, err := f.load()
+	if err != nil {
 		return err
 	}
 	ferr := fn(d, time.Now().UTC())
 	if !mutate {
 		return ferr
 	}
-	// A refusal is logged too, so the state is written either way.
-	out, err := json.Marshal(d)
+	// Two durable writes, in an order that makes a crash between them
+	// recoverable: history lines first, state second. State is the commit
+	// point. History lines beyond the state's sequence number belong to a
+	// step that never committed, and load trims them.
+	if err := appendSynced(f.path("plane.log.jsonl"), d.Log[logged:]); err != nil {
+		return err
+	}
+	state := *d
+	state.Log = nil // the history lives in its own append-only file
+	out, err := json.Marshal(&state)
 	if err != nil {
 		return err
 	}
@@ -81,6 +84,61 @@ func (f *File) step(op string, mutate bool, fn func(d *Data, now time.Time) erro
 		f.CrashAfterWrite(op)
 	}
 	return ferr
+}
+
+// load reads the state and its history, dropping history a crashed step
+// wrote but never committed. It returns how many events are already on disk.
+func (f *File) load() (*Data, int, error) {
+	d := NewData()
+	data, err := os.ReadFile(f.path("plane.json"))
+	switch {
+	case err == nil:
+		if err := json.Unmarshal(data, d); err != nil {
+			return nil, 0, fmt.Errorf("plane: state unreadable: %w", err)
+		}
+	case !errors.Is(err, os.ErrNotExist):
+		return nil, 0, err
+	}
+	raw, err := os.ReadFile(f.path("plane.log.jsonl"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, 0, err
+	}
+	keep := 0
+	for _, line := range bytes.SplitAfter(raw, []byte("\n")) {
+		var e Event
+		if len(line) == 0 || line[len(line)-1] != '\n' || json.Unmarshal(line, &e) != nil || e.Seq > d.Seq {
+			break // torn, or past the committed state
+		}
+		d.Log = append(d.Log, e)
+		keep += len(line)
+	}
+	if keep < len(raw) {
+		if err := os.Truncate(f.path("plane.log.jsonl"), int64(keep)); err != nil {
+			return nil, 0, err
+		}
+	}
+	return d, len(d.Log), nil
+}
+
+func appendSynced(path string, events []Event) error {
+	if len(events) == 0 {
+		return nil
+	}
+	w, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer w.Close()
+	for _, e := range events {
+		line, err := json.Marshal(e)
+		if err != nil {
+			return err
+		}
+		if _, err := w.Write(append(line, '\n')); err != nil {
+			return err
+		}
+	}
+	return w.Sync()
 }
 
 func writeSynced(path string, data []byte) error {

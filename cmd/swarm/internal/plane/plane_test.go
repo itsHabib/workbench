@@ -223,3 +223,31 @@ func TestCheckerCatchesBrokenStores(t *testing.T) {
 		})
 	}
 }
+
+// TestFileCrashBetweenHistoryAndState: a step that wrote its history lines
+// and died before its state must leave no trace, and the next step must
+// not inherit its sequence numbers.
+func TestFileCrashBetweenHistoryAndState(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	f, err := OpenFile(dir)
+	must(t, err)
+	must(t, f.Put(ctx, Item{Kind: "task", ID: "a"}))
+	before, _ := f.History(ctx)
+	// The durable state of a crash after the history append: an orphan line.
+	orphan := Event{Seq: int64(len(before)) + 1, Op: "commit", Kind: "task", ID: "a", OK: true, By: "ghost", Epoch: 9}
+	must(t, appendSynced(f.path("plane.log.jsonl"), []Event{orphan}))
+	g, err := f.Claim(ctx, "task", "a", "w1", time.Minute, "")
+	must(t, err)
+	_, err = f.Commit(ctx, g, "real", "", nil)
+	must(t, err)
+	h, _ := f.History(ctx)
+	for _, e := range h {
+		if e.By == "ghost" {
+			t.Fatalf("uncommitted history survived: %+v", e)
+		}
+	}
+	if rep := Check(h, "task"); !rep.OK() || rep.Accepted != 1 {
+		t.Fatalf("after recovery: %+v", rep)
+	}
+}
