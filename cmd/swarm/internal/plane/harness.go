@@ -49,6 +49,7 @@ type WorkerOptions struct {
 	SplitEvery  int     // every Nth task commits two children with it; 0 = never
 	StopWhenDry bool    // exit when nothing of Kind is left pending
 	Seats       bool    // hold a seat from the shared pool around each task, and release it
+	Roles       bool    // take the primary kind from the store: the first peers to commit a "role" item are watchers
 	Broken      Broken  // file store only: run deliberately wrong
 }
 
@@ -74,6 +75,23 @@ func RunWorker(o WorkerOptions) error {
 	}
 	rng := rand.New(rand.NewSource(o.Seed))
 	ctx := context.Background()
+	// Clones of one snapshot are identical until they talk to the store, so
+	// the store is what tells them apart: whoever commits a role item is a
+	// watcher, everyone else builds. Deterministic, unlike a coin per clone.
+	if o.Roles {
+		o.Kind = "task"
+		if g, err := s.ClaimNext(ctx, "role", o.Incarnation, o.TTL, o.Incarnation+":role"); err == nil {
+			if r, err := s.Commit(ctx, g, o.Incarnation, o.Incarnation+":role:commit", nil); err == nil && r.Accepted {
+				o.Kind = "event"
+			}
+		}
+	}
+	fmt.Fprintf(os.Stderr, "peer %s up: primary kind %s, store %s\n", o.Incarnation, o.Kind, o.Store)
+	accepted, refused := 0, 0
+	defer func() {
+		fmt.Fprintf(os.Stderr, "peer %s done: %d accepted, %d refused\n", o.Incarnation, accepted, refused)
+	}()
+	primary := o.Kind
 	dice := func(where string) {
 		if rng.Float64() < o.CrashProb {
 			crash(where)
@@ -102,10 +120,16 @@ func RunWorker(o WorkerOptions) error {
 		g, err := s.ClaimNext(ctx, o.Kind, o.Incarnation, o.TTL, fmt.Sprintf("%s:c%d", o.Incarnation, n))
 		if errors.Is(err, ErrNone) {
 			release()
-			if o.StopWhenDry && dry(ctx, s, o.Kind) {
-				return nil
+			// Nothing of this kind is claimable. A role is a preference, not a
+			// wall: help with the other kind, so a dead watcher cannot strand
+			// deliveries and idle watchers do not leave tasks waiting.
+			o.Kind = otherKind(o.Kind)
+			if o.Kind == primary {
+				if o.StopWhenDry && dry(ctx, s, "task") && dry(ctx, s, "event") {
+					return nil
+				}
+				time.Sleep(o.Poll)
 			}
-			time.Sleep(o.Poll)
 			continue
 		}
 		if err != nil {
@@ -128,9 +152,21 @@ func RunWorker(o WorkerOptions) error {
 		// lost to a dropped connection is answered from the record.
 		_, err = s.Commit(ctx, g, o.Incarnation, fmt.Sprintf("%s/%s:e%d:%s", g.Kind, g.ID, g.Epoch, o.Incarnation), emit)
 		dice("after-commit")
-		_ = err // fenced or done: the work is discarded, which is the point
+		if err == nil {
+			accepted++
+		} else {
+			refused++ // fenced or done: the work is discarded, which is the point
+		}
 		release()
+		o.Kind = primary
 	}
+}
+
+func otherKind(kind string) string {
+	if kind == "task" {
+		return "event"
+	}
+	return "task"
 }
 
 func dry(ctx context.Context, s Store, kind string) bool {

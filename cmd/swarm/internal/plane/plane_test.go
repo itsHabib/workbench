@@ -251,3 +251,25 @@ func TestFileCrashBetweenHistoryAndState(t *testing.T) {
 		t.Fatalf("after recovery: %+v", rep)
 	}
 }
+
+// TestRolesComeFromTheStore: identical peers tell themselves apart only by
+// what the store grants them, and every run has builders however few peers
+// there are.
+func TestRolesComeFromTheStore(t *testing.T) {
+	ctx := context.Background()
+	m := NewMem()
+	must(t, m.Put(ctx, Item{Kind: "role", ID: "watcher0"}))
+	must(t, m.Put(ctx, Item{Kind: "role", ID: "watcher1"}))
+	watchers := 0
+	for i := 0; i < 5; i++ {
+		inc := fmt.Sprintf("p%d", i)
+		if g, err := m.ClaimNext(ctx, "role", inc, time.Minute, inc+":role"); err == nil {
+			if r, err := m.Commit(ctx, g, inc, inc+":role:commit", nil); err == nil && r.Accepted {
+				watchers++
+			}
+		}
+	}
+	if watchers != 2 {
+		t.Fatalf("%d of 5 peers became watchers, want exactly 2", watchers)
+	}
+}

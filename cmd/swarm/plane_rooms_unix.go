@@ -78,12 +78,14 @@ func planeRooms(args []string) int {
 	for i := 0; i < *tasks; i++ {
 		_ = s.Put(ctx, plane.Item{Kind: "task", ID: fmt.Sprintf("t%03d", i)})
 	}
-	// Every clone runs the same command. Which kind a peer works is decided
-	// inside the guest from its random uuid, since nothing else tells clones
-	// apart: the first hex digit below the watcher share makes it a watcher.
-	base := plane.WorkerOptions{Store: spec, TTL: *ttl, Poll: 100 * time.Millisecond, WorkMin: *work, WorkMax: *work, SplitEvery: 7, StopWhenDry: true}
+	// Every clone runs the same command. Which kind a peer prefers is decided
+	// through the store (WorkerOptions.Roles), the one thing clones do not
+	// share; a peer with nothing of its own kind to do helps with the other.
+	for i := 0; i < *watchers; i++ {
+		_ = s.Put(ctx, plane.Item{Kind: "role", ID: fmt.Sprintf("watcher%d", i)})
+	}
+	base := plane.WorkerOptions{Store: spec, Kind: "task", TTL: *ttl, Poll: 100 * time.Millisecond, WorkMin: *work, WorkMax: *work, SplitEvery: 7, StopWhenDry: true, Roles: true}
 	wj, _ := json.Marshal(base)
-	share := 16 * *watchers / max(*clones, 1)
 	guest := fmt.Sprintf(`set -eu
 export PATH=/nix/var/rooms/env/bin:$PATH
 mkdir -p /tmp/swarm /workspace/out
@@ -91,10 +93,8 @@ cd /tmp/swarm
 python3 -c "import urllib.request;urllib.request.urlretrieve('http://%s:%d/swarm','swarm')"
 chmod +x swarm
 ID=$(cat /proc/sys/kernel/random/uuid)
-KIND=task
-if [ $((0x$(printf %%s "$ID" | cut -c1))) -lt %d ]; then KIND=event; fi
-./swarm plane worker '%s' --incarnation "$ID" --kind "$KIND" > /workspace/out/peer.log 2>&1
-`, *hostIP, binPort, share, string(wj))
+./swarm plane worker '%s' --incarnation "$ID" > /workspace/out/peer.log 2>&1
+`, *hostIP, binPort, string(wj))
 
 	argv := []string{"clone", *snapshot, "-n", fmt.Sprint(*clones), "--command", guest, "--max-wall", fmt.Sprintf("%ds", int(wall.Seconds())),
 		"--out", filepath.Join(*out, "out"), "--json"}
