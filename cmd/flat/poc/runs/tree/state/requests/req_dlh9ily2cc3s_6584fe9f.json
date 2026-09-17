@@ -1,0 +1,24 @@
+{
+  "id": "req_dlh9ily2cc3s_6584fe9f",
+  "at": "2026-09-17T03:14:04.770502Z",
+  "from": "t6-export-command",
+  "scope": [
+    "cmd/app/main.go"
+  ],
+  "question": "who lands first on cmd/app/main.go? t4-report-header is already landed",
+  "options": [
+    "t4-report-header",
+    "me"
+  ],
+  "needs": "lead",
+  "status": "ruled",
+  "claim": {
+    "holder": "lead",
+    "epoch": 1,
+    "at": "2026-09-17T03:14:16.313125Z",
+    "until": "2026-09-17T03:15:16.313125Z"
+  },
+  "epoch": 1,
+  "decision": "dec_dlh9ir8yq4wg_6d5c6b74",
+  "ruled_at": "2026-09-17T03:14:16.313125Z"
+}

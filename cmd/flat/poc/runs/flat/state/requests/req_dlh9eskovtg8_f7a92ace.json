@@ -1,0 +1,24 @@
+{
+  "id": "req_dlh9eskovtg8_f7a92ace",
+  "at": "2026-09-17T03:09:05.742657Z",
+  "from": "t1-config-timeout",
+  "scope": [
+    "pkg/config/config.go"
+  ],
+  "question": "which lands first, t1-config-timeout or t2-config-retries?",
+  "options": [
+    "t1-config-timeout",
+    "t2-config-retries"
+  ],
+  "needs": "peer",
+  "status": "ruled",
+  "claim": {
+    "holder": "t2-config-retries",
+    "epoch": 1,
+    "at": "2026-09-17T03:09:16.806962Z",
+    "until": "2026-09-17T03:10:16.806962Z"
+  },
+  "epoch": 1,
+  "decision": "dec_dlh9exnocwqg_764005da",
+  "ruled_at": "2026-09-17T03:09:16.806962Z"
+}

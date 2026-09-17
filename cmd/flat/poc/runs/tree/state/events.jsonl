@@ -1,0 +1,112 @@
+{"at":"2026-09-17T03:11:40.641132Z","kind":"admit"}
+{"at":"2026-09-17T03:11:40.67104Z","kind":"admit"}
+{"at":"2026-09-17T03:11:40.710012Z","kind":"admit"}
+{"at":"2026-09-17T03:11:40.902029Z","kind":"session_start","seat":"lead","session":"02a3ce30-fbd9-439c-bc51-5ffb1996ee04"}
+{"at":"2026-09-17T03:11:40.922173Z","kind":"admit"}
+{"at":"2026-09-17T03:11:41.226256Z","kind":"session_start","seat":"t1-config-timeout","session":"ab842d30-c479-464d-8f4c-803cfa919c45"}
+{"at":"2026-09-17T03:11:41.282914Z","kind":"session_start","seat":"t2-config-retries","session":"f68abb9b-9c14-4fed-872a-7742bb972a4b"}
+{"at":"2026-09-17T03:11:41.379431Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T03:11:41.462203Z","kind":"session_start","seat":"t3-report-totals","session":"23ea5297-eacc-405c-a774-9f119900762c"}
+{"at":"2026-09-17T03:11:41.774276Z","kind":"session_start","seat":"t4-report-header","session":"f5511e50-f203-4ada-b375-13a109c6ed6d"}
+{"at":"2026-09-17T03:11:51.616649Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G; seats_full: 4 working, 4 seats"}
+{"at":"2026-09-17T03:11:59.244447Z","kind":"take","seat":"t3-report-totals","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T03:12:01.851562Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G; seats_full: 4 working, 4 seats"}
+{"at":"2026-09-17T03:12:06.03179Z","kind":"session_start","seat":"t2-config-retries","session":"921cf09d-70f0-47ad-8fa2-02a42a1751b5"}
+{"at":"2026-09-17T03:12:12.111Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T03:12:20.885899Z","kind":"nudge","seat":"t1-config-timeout","detail":"overlap_unruled: pkg/config/config_test.go is changed by t1-config-timeout and t2-config-retries with no ruling on order. one of you: `flat ask --scope pkg/config/config_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T03:12:20.886047Z","kind":"nudge","seat":"t2-config-retries","detail":"overlap_unruled: pkg/config/config_test.go is changed by t1-config-timeout and t2-config-retries with no ruling on order. one of you: `flat ask --scope pkg/config/config_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T03:12:20.886353Z","kind":"nudge","seat":"t4-report-header","detail":"pin_violation: branch t4-report-header changed after RESULT.json (cmd/app/main.go). a landing is a commit whose RESULT.json pins its own head; either revert those commits or rewrite RESULT.json with the new head_sha as the last commit."}
+{"at":"2026-09-17T03:12:20.886658Z","kind":"nudge","seat":"t1-config-timeout","detail":"overlap_unruled: pkg/config/config.go is changed by t1-config-timeout and t2-config-retries with no ruling on order. one of you: `flat ask --scope pkg/config/config.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T03:12:20.886766Z","kind":"nudge","seat":"t2-config-retries","detail":"overlap_unruled: pkg/config/config.go is changed by t1-config-timeout and t2-config-retries with no ruling on order. one of you: `flat ask --scope pkg/config/config.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T03:12:20.887228Z","kind":"wake","seat":"t4-report-header","detail":"1 notes","session":"f5511e50-f203-4ada-b375-13a109c6ed6d"}
+{"at":"2026-09-17T03:12:21.526227Z","kind":"session_start","seat":"t4-report-header","session":"f5511e50-f203-4ada-b375-13a109c6ed6d"}
+{"at":"2026-09-17T03:12:22.422677Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T03:12:26.789152Z","kind":"ask","request":"req_dlh9hcxmlj3s_c79ed325","by":"t2-config-retries","seat":"t2-config-retries","detail":"pkg/config/config.go","tier":"peer"}
+{"at":"2026-09-17T03:12:27.023753Z","kind":"ask","request":"req_dlh9hd1iauns_2475d4b3","by":"t1-config-timeout","seat":"t1-config-timeout","detail":"pkg/config/config.go","tier":"lead"}
+{"at":"2026-09-17T03:12:27.024118Z","kind":"nudge","seat":"lead","detail":"request: request req_dlh9hd1iauns_2475d4b3 from t1-config-timeout on pkg/config/config.go needs lead: \"t1-config-timeout and t2-config-retries both touch pkg/config/config.go and config_test.go; which lands first?\". rule it if the evidence is yours: `flat rule req_dlh9hd1iauns_2475d4b3 --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlh9hd1iauns_2475d4b3 --to operator --why '...'`."}
+{"at":"2026-09-17T03:12:27.024165Z","kind":"route","request":"req_dlh9hd1iauns_2475d4b3","seat":"t1-config-timeout","detail":"lead"}
+{"at":"2026-09-17T03:12:27.054614Z","kind":"nudge","seat":"t1-config-timeout","detail":"request: request req_dlh9hcxmlj3s_c79ed325 from t2-config-retries on pkg/config/config.go needs peer: \"t1-config-timeout and t2-config-retries both change pkg/config/config.go and config_test.go with no ruling on order - which lands first?\". rule it if the evidence is yours: `flat rule req_dlh9hcxmlj3s_c79ed325 --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlh9hcxmlj3s_c79ed325 --to operator --why '...'`."}
+{"at":"2026-09-17T03:12:27.054645Z","kind":"route","request":"req_dlh9hcxmlj3s_c79ed325","seat":"t2-config-retries","detail":"t1-config-timeout"}
+{"at":"2026-09-17T03:12:32.711518Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T03:12:40.889781Z","kind":"wake","seat":"lead","detail":"1 notes","session":"02a3ce30-fbd9-439c-bc51-5ffb1996ee04"}
+{"at":"2026-09-17T03:12:41.471288Z","kind":"session_start","seat":"lead","session":"02a3ce30-fbd9-439c-bc51-5ffb1996ee04"}
+{"at":"2026-09-17T03:12:42.995443Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T03:12:53.279224Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T03:12:53.319746Z","kind":"claim","request":"req_dlh9hd1iauns_2475d4b3","by":"lead","detail":"implicit","epoch":1}
+{"at":"2026-09-17T03:12:53.320051Z","kind":"rule","request":"req_dlh9hd1iauns_2475d4b3","by":"lead","detail":"dec_dlh9hp4eg0jk_7e0070f5","tier":"lead","epoch":1}
+{"at":"2026-09-17T03:12:53.320172Z","kind":"nudge","seat":"t1-config-timeout","detail":"ruling: ruled req_dlh9hd1iauns_2475d4b3 by lead (lead): t2-config-retries lands first, then t1-config-timeout rebases on it"}
+{"at":"2026-09-17T03:13:03.579019Z","kind":"refuse_admit","detail":"disk_low: 0M free, floor 2.0G"}
+{"at":"2026-09-17T03:13:06.476249Z","kind":"drop","seat":"t3-report-totals","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T03:13:13.863524Z","kind":"admit"}
+{"at":"2026-09-17T03:13:14.205322Z","kind":"session_start","seat":"t5-fixture-title","session":"7110076a-c881-4c82-bd7a-3b078d556bfd"}
+{"at":"2026-09-17T03:13:14.279133Z","kind":"admit"}
+{"at":"2026-09-17T03:13:18.821467Z","kind":"refusal","by":"check","seat":"t5-fixture-title","detail":"contended_unruled"}
+{"at":"2026-09-17T03:13:21.005592Z","kind":"nudge","seat":"t3-report-totals","detail":"overlap_unruled: pkg/report/report.go is changed by t3-report-totals and t4-report-header with no ruling on order. one of you: `flat ask --scope pkg/report/report.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T03:13:21.005716Z","kind":"nudge","seat":"t4-report-header","detail":"overlap_unruled: pkg/report/report.go is changed by t3-report-totals and t4-report-header with no ruling on order. one of you: `flat ask --scope pkg/report/report.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T03:13:21.005932Z","kind":"nudge","seat":"t3-report-totals","detail":"overlap_unruled: pkg/report/report_test.go is changed by t3-report-totals and t4-report-header with no ruling on order. one of you: `flat ask --scope pkg/report/report_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T03:13:21.006058Z","kind":"nudge","seat":"t4-report-header","detail":"overlap_unruled: pkg/report/report_test.go is changed by t3-report-totals and t4-report-header with no ruling on order. one of you: `flat ask --scope pkg/report/report_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T03:13:21.006767Z","kind":"wake","seat":"t4-report-header","detail":"2 notes","session":"f5511e50-f203-4ada-b375-13a109c6ed6d"}
+{"at":"2026-09-17T03:13:21.532561Z","kind":"ask","request":"req_dlh9i22zf8sw_bfc7fcc4","by":"t5-fixture-title","seat":"t5-fixture-title","detail":"fixtures/db.json","tier":"lead"}
+{"at":"2026-09-17T03:13:21.53276Z","kind":"nudge","seat":"lead","detail":"request: request req_dlh9i22zf8sw_bfc7fcc4 from t5-fixture-title on fixtures/db.json needs lead: \"name-\u003etitle rename touches fixtures/db.json; who lands first, t3-report-totals or me (t5-fixture-title)?\". rule it if the evidence is yours: `flat rule req_dlh9i22zf8sw_bfc7fcc4 --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlh9i22zf8sw_bfc7fcc4 --to operator --why '...'`."}
+{"at":"2026-09-17T03:13:21.532781Z","kind":"route","request":"req_dlh9i22zf8sw_bfc7fcc4","seat":"t5-fixture-title","detail":"lead"}
+{"at":"2026-09-17T03:13:21.650337Z","kind":"session_start","seat":"t4-report-header","session":"f5511e50-f203-4ada-b375-13a109c6ed6d"}
+{"at":"2026-09-17T03:13:24.709817Z","kind":"admit"}
+{"at":"2026-09-17T03:13:26.743895Z","kind":"ask","request":"req_dlh9i4h63q3s_b06cab67","by":"t3-report-totals","seat":"t3-report-totals","detail":"pkg/report/report.go","tier":"peer"}
+{"at":"2026-09-17T03:13:27.137814Z","kind":"nudge","seat":"t4-report-header","detail":"request: request req_dlh9i4h63q3s_b06cab67 from t3-report-totals on pkg/report/report.go needs peer: \"t3-report-totals and t4-report-header both change pkg/report/report.go and report_test.go; which lands first?\". rule it if the evidence is yours: `flat rule req_dlh9i4h63q3s_b06cab67 --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlh9i4h63q3s_b06cab67 --to operator --why '...'`."}
+{"at":"2026-09-17T03:13:27.137884Z","kind":"route","request":"req_dlh9i4h63q3s_b06cab67","seat":"t3-report-totals","detail":"t4-report-header"}
+{"at":"2026-09-17T03:13:33.97145Z","kind":"session_start","seat":"lead","session":"8da46820-3dce-48a9-875e-9d6a24ba0f32"}
+{"at":"2026-09-17T03:13:34.173076Z","kind":"claim","request":"req_dlh9i4h63q3s_b06cab67","by":"t4-report-header","detail":"implicit","epoch":1}
+{"at":"2026-09-17T03:13:34.173382Z","kind":"rule","request":"req_dlh9i4h63q3s_b06cab67","by":"t4-report-header","detail":"dec_dlh9i7w1hru8_2f529fc0","tier":"peer","epoch":1}
+{"at":"2026-09-17T03:13:34.173503Z","kind":"nudge","seat":"t3-report-totals","detail":"ruling: ruled req_dlh9i4h63q3s_b06cab67 by t4-report-header (peer): t4-report-header"}
+{"at":"2026-09-17T03:13:35.246638Z","kind":"admit"}
+{"at":"2026-09-17T03:13:45.672678Z","kind":"admit"}
+{"at":"2026-09-17T03:13:46.019905Z","kind":"session_start","seat":"t6-export-command","session":"73c3d4a5-7c6c-4d4d-96a0-c4aad672de89"}
+{"at":"2026-09-17T03:13:59.954561Z","kind":"refusal","by":"check","seat":"t6-export-command","detail":"contended_unruled"}
+{"at":"2026-09-17T03:14:04.770796Z","kind":"ask","request":"req_dlh9ily2cc3s_6584fe9f","by":"t6-export-command","seat":"t6-export-command","detail":"cmd/app/main.go","tier":"lead"}
+{"at":"2026-09-17T03:14:04.771023Z","kind":"nudge","seat":"lead","detail":"request: request req_dlh9ily2cc3s_6584fe9f from t6-export-command on cmd/app/main.go needs lead: \"who lands first on cmd/app/main.go? t4-report-header is already landed\". rule it if the evidence is yours: `flat rule req_dlh9ily2cc3s_6584fe9f --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlh9ily2cc3s_6584fe9f --to operator --why '...'`."}
+{"at":"2026-09-17T03:14:04.771052Z","kind":"route","request":"req_dlh9ily2cc3s_6584fe9f","seat":"t6-export-command","detail":"lead"}
+{"at":"2026-09-17T03:14:07.44072Z","kind":"ask","request":"req_dlh9in67ycog_7ba8b134","by":"t6-export-command","seat":"t6-export-command","detail":"pkg/export/export.go","tier":"operator"}
+{"at":"2026-09-17T03:14:07.441147Z","kind":"nudge","seat":"operator","detail":"request: request req_dlh9in67ycog_7ba8b134 from t6-export-command on pkg/export/export.go needs operator: \"What export format should the export subcommand write to stdout (e.g. CSV, JSON, JSON Lines, TSV)? Which fixture fields are included?\". rule it if the evidence is yours: `flat rule req_dlh9in67ycog_7ba8b134 --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlh9in67ycog_7ba8b134 --to operator --why '...'`."}
+{"at":"2026-09-17T03:14:07.441179Z","kind":"route","request":"req_dlh9in67ycog_7ba8b134","seat":"t6-export-command","detail":"operator"}
+{"at":"2026-09-17T03:14:11.642217Z","kind":"claim","request":"req_dlh9i22zf8sw_bfc7fcc4","by":"lead","detail":"implicit","epoch":1}
+{"at":"2026-09-17T03:14:11.64254Z","kind":"rule","request":"req_dlh9i22zf8sw_bfc7fcc4","by":"lead","detail":"dec_dlh9ip3pnfr4_2c889707","tier":"lead","epoch":1}
+{"at":"2026-09-17T03:14:11.64271Z","kind":"nudge","seat":"t5-fixture-title","detail":"ruling: ruled req_dlh9i22zf8sw_bfc7fcc4 by lead (lead): t3-report-totals lands first (already landed at 2bf0e417); t5-fixture-title rebases onto it before landing"}
+{"at":"2026-09-17T03:14:16.313125Z","kind":"claim","request":"req_dlh9ily2cc3s_6584fe9f","by":"lead","detail":"implicit","epoch":1}
+{"at":"2026-09-17T03:14:16.31372Z","kind":"rule","request":"req_dlh9ily2cc3s_6584fe9f","by":"lead","detail":"dec_dlh9ir8yq4wg_6d5c6b74","tier":"lead","epoch":1}
+{"at":"2026-09-17T03:14:16.313915Z","kind":"nudge","seat":"t6-export-command","detail":"ruling: ruled req_dlh9ily2cc3s_6584fe9f by lead (lead): t4-report-header lands first (already landed at a1c17f6a); t6-export-command rebases onto it before landing"}
+{"at":"2026-09-17T03:14:18.98534Z","kind":"take","seat":"t5-fixture-title","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T03:14:20.603965Z","kind":"claim","request":"req_dlh9in67ycog_7ba8b134","by":"operator","detail":"implicit","epoch":1}
+{"at":"2026-09-17T03:14:20.6055Z","kind":"rule","request":"req_dlh9in67ycog_7ba8b134","by":"operator","detail":"dec_dlh9it7xnadc_fa9ede9f","tier":"operator","epoch":1}
+{"at":"2026-09-17T03:14:20.605803Z","kind":"nudge","seat":"t6-export-command","detail":"ruling: ruled req_dlh9in67ycog_7ba8b134 by operator (operator): Export format is JSON Lines: one JSON object per row, one row per line, on stdout. Keys are the fixture field names."}
+{"at":"2026-09-17T03:14:21.059869Z","kind":"nudge","seat":"t1-config-timeout","detail":"manual: rebase onto t2-config-retries per ruling dec_dlh9hp4eg0jk_7e0070f5; resolve pkg/config/config_test.go overlap in the rebase"}
+{"at":"2026-09-17T03:14:21.177837Z","kind":"wake","seat":"t1-config-timeout","detail":"1 notes","session":"ab842d30-c479-464d-8f4c-803cfa919c45"}
+{"at":"2026-09-17T03:14:21.869252Z","kind":"session_start","seat":"t1-config-timeout","session":"ab842d30-c479-464d-8f4c-803cfa919c45"}
+{"at":"2026-09-17T03:14:24.153222Z","kind":"nudge","seat":"t5-fixture-title","detail":"manual: land after t3-report-totals per ruling dec_dlh9ip3pnfr4_2c889707; rebase your fixtures/db.json change onto its landed tip 2bf0e417"}
+{"at":"2026-09-17T03:14:24.574497Z","kind":"refusal","by":"check","seat":"t5-fixture-title","detail":"contended_unruled"}
+{"at":"2026-09-17T03:14:27.377357Z","kind":"nudge","seat":"t6-export-command","detail":"manual: land after t4-report-header per ruling dec_dlh9ir8yq4wg_6d5c6b74; rebase your cmd/app/main.go change onto its landed tip a1c17f6a"}
+{"at":"2026-09-17T03:14:27.482017Z","kind":"ask","request":"req_dlh9iwdo1i0o_0e05e7fd","by":"t5-fixture-title","seat":"t5-fixture-title","detail":"pkg/fixture/fixture.go","tier":"lead"}
+{"at":"2026-09-17T03:14:27.482211Z","kind":"nudge","seat":"lead","detail":"request: request req_dlh9iwdo1i0o_0e05e7fd from t5-fixture-title on pkg/fixture/fixture.go needs lead: \"pkg/fixture/fixture.go also touched by t3-report-totals (landed at 2bf0e417); I rebased onto it, ok to proceed editing now?\". rule it if the evidence is yours: `flat rule req_dlh9iwdo1i0o_0e05e7fd --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlh9iwdo1i0o_0e05e7fd --to operator --why '...'`."}
+{"at":"2026-09-17T03:14:27.482259Z","kind":"route","request":"req_dlh9iwdo1i0o_0e05e7fd","seat":"t5-fixture-title","detail":"lead"}
+{"at":"2026-09-17T03:14:38.605018Z","kind":"claim","request":"req_dlh9iwdo1i0o_0e05e7fd","by":"lead","detail":"implicit","epoch":1}
+{"at":"2026-09-17T03:14:38.605643Z","kind":"rule","request":"req_dlh9iwdo1i0o_0e05e7fd","by":"lead","detail":"dec_dlh9j1hmqq2w_42f58ca5","tier":"lead","epoch":1}
+{"at":"2026-09-17T03:14:38.605793Z","kind":"nudge","seat":"t5-fixture-title","detail":"ruling: ruled req_dlh9iwdo1i0o_0e05e7fd by lead (lead): yes, proceed - rebasing onto landed t3-report-totals tip 2bf0e417 satisfies the prior ordering ruling dec_dlh9ip3pnfr4_2c889707"}
+{"at":"2026-09-17T03:14:41.859673Z","kind":"claim","request":"req_dlh9hcxmlj3s_c79ed325","by":"t1-config-timeout","detail":"implicit","epoch":1}
+{"at":"2026-09-17T03:14:41.859833Z","kind":"refusal","by":"rule","seat":"t1-config-timeout","detail":"outranked"}
+{"at":"2026-09-17T03:15:12.055293Z","kind":"drop","seat":"t5-fixture-title","detail":"fixture-db","epoch":1}
+{"at":"2026-09-17T03:15:21.20475Z","kind":"nudge","seat":"t3-report-totals","detail":"overlap_unruled: briefs/out/t3-report-totals/START.md is changed by t3-report-totals and t5-fixture-title with no ruling on order. one of you: `flat ask --scope briefs/out/t3-report-totals/START.md --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T03:15:21.204881Z","kind":"nudge","seat":"t5-fixture-title","detail":"overlap_unruled: briefs/out/t3-report-totals/START.md is changed by t3-report-totals and t5-fixture-title with no ruling on order. one of you: `flat ask --scope briefs/out/t3-report-totals/START.md --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T03:15:21.207408Z","kind":"wake","seat":"t3-report-totals","detail":"1 notes","session":"23ea5297-eacc-405c-a774-9f119900762c"}
+{"at":"2026-09-17T03:15:21.804327Z","kind":"session_start","seat":"t3-report-totals","session":"23ea5297-eacc-405c-a774-9f119900762c"}
+{"at":"2026-09-17T03:15:30.013625Z","kind":"refusal","by":"check","seat":"t3-report-totals","detail":"contended_unruled"}
+{"at":"2026-09-17T03:15:33.095317Z","kind":"ask","request":"req_dlh9jqisic68_665ae338","by":"t3-report-totals","seat":"t3-report-totals","detail":"briefs/out/t3-report-totals/START.md","tier":"peer"}
+{"at":"2026-09-17T03:15:33.717665Z","kind":"nudge","seat":"t5-fixture-title","detail":"request: request req_dlh9jqisic68_665ae338 from t3-report-totals on briefs/out/t3-report-totals/START.md needs peer: \"who lands first on briefs/out/t3-report-totals/START.md?\". rule it if the evidence is yours: `flat rule req_dlh9jqisic68_665ae338 --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlh9jqisic68_665ae338 --to operator --why '...'`."}
+{"at":"2026-09-17T03:15:33.717694Z","kind":"route","request":"req_dlh9jqisic68_665ae338","seat":"t3-report-totals","detail":"t5-fixture-title"}
+{"at":"2026-09-17T03:17:47.268919Z","kind":"nudge","seat":"t1-config-timeout","detail":"overlap_unruled: pkg/config/config_test.go is changed by t1-config-timeout and t2-config-retries with no ruling on order. one of you: `flat ask --scope pkg/config/config_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T03:17:47.26904Z","kind":"nudge","seat":"t2-config-retries","detail":"overlap_unruled: pkg/config/config_test.go is changed by t1-config-timeout and t2-config-retries with no ruling on order. one of you: `flat ask --scope pkg/config/config_test.go --question 'which lands first?' --options '\u003ca\u003e|\u003cb\u003e'`, then `flat wait`."}
+{"at":"2026-09-17T03:17:47.269463Z","kind":"wake","seat":"t1-config-timeout","detail":"1 notes","session":"ab842d30-c479-464d-8f4c-803cfa919c45"}
+{"at":"2026-09-17T03:17:47.269962Z","kind":"wake","seat":"t2-config-retries","detail":"1 notes","session":"921cf09d-70f0-47ad-8fa2-02a42a1751b5"}
+{"at":"2026-09-17T03:17:48.140419Z","kind":"session_start","seat":"t1-config-timeout","session":"ab842d30-c479-464d-8f4c-803cfa919c45"}
+{"at":"2026-09-17T03:17:48.453917Z","kind":"session_start","seat":"t2-config-retries","session":"921cf09d-70f0-47ad-8fa2-02a42a1751b5"}
+{"at":"2026-09-17T03:17:56.781707Z","kind":"ask","request":"req_dlh9lkj3ns74_e0a6cd96","by":"t1-config-timeout","seat":"t1-config-timeout","detail":"pkg/config/config_test.go","tier":"lead"}
+{"at":"2026-09-17T03:17:56.781928Z","kind":"nudge","seat":"lead","detail":"request: request req_dlh9lkj3ns74_e0a6cd96 from t1-config-timeout on pkg/config/config_test.go needs lead: \"t1-config-timeout and t2-config-retries both change pkg/config/config_test.go; which lands first?\". rule it if the evidence is yours: `flat rule req_dlh9lkj3ns74_e0a6cd96 --ruling '...' --evidence '...'`; escalate if it needs intent: `flat escalate req_dlh9lkj3ns74_e0a6cd96 --to operator --why '...'`."}
+{"at":"2026-09-17T03:17:56.781954Z","kind":"route","request":"req_dlh9lkj3ns74_e0a6cd96","seat":"t1-config-timeout","detail":"lead"}

@@ -1,0 +1,17 @@
+{
+  "id": "req_dlh9hcxmlj3s_c79ed325",
+  "at": "2026-09-17T03:12:26.788855Z",
+  "from": "t2-config-retries",
+  "scope": [
+    "pkg/config/config.go"
+  ],
+  "question": "t1-config-timeout and t2-config-retries both change pkg/config/config.go and config_test.go with no ruling on order - which lands first?",
+  "options": [
+    "t1-config-timeout",
+    "t2-config-retries"
+  ],
+  "needs": "peer",
+  "status": "open",
+  "epoch": 0,
+  "ruled_at": "0001-01-01T00:00:00Z"
+}

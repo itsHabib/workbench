@@ -1,0 +1,17 @@
+{
+  "id": "req_dlh9jqisic68_665ae338",
+  "at": "2026-09-17T03:15:33.095069Z",
+  "from": "t3-report-totals",
+  "scope": [
+    "briefs/out/t3-report-totals/START.md"
+  ],
+  "question": "who lands first on briefs/out/t3-report-totals/START.md?",
+  "options": [
+    "t5-fixture-title",
+    "me"
+  ],
+  "needs": "peer",
+  "status": "open",
+  "epoch": 0,
+  "ruled_at": "0001-01-01T00:00:00Z"
+}

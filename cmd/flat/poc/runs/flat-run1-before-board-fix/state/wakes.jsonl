@@ -1,0 +1,4 @@
+{"seat":"t1-config-timeout","session_id":"de12a7c3-6aa8-4fa4-9638-e3b80fe6ad88","notes":2,"started":"2026-09-17T02:57:53.391551Z","ended":"2026-09-17T02:58:12.425015Z","exit":0,"num_turns":4,"output_tokens":572,"cost_usd":0.0703022}
+{"seat":"t3-report-totals","session_id":"f4d0663c-2b6d-4f4f-9fb1-9eda1790022a","notes":2,"started":"2026-09-17T02:58:13.379597Z","ended":"2026-09-17T02:58:32.374602Z","exit":0,"num_turns":3,"output_tokens":268,"cost_usd":0.0531166}
+{"seat":"t4-report-header","session_id":"9797dbf9-96d0-4531-b34f-7df94854b7f1","notes":3,"started":"2026-09-17T02:57:53.392308Z","ended":"2026-09-17T02:59:09.504589Z","exit":0,"num_turns":24,"output_tokens":6051,"cost_usd":0.47165499999999994}
+{"seat":"t4-report-header","session_id":"9797dbf9-96d0-4531-b34f-7df94854b7f1","notes":1,"started":"2026-09-17T02:59:33.495772Z","ended":"2026-09-17T02:59:58.134451Z","exit":0,"num_turns":9,"output_tokens":1624,"cost_usd":0.18580080000000002}

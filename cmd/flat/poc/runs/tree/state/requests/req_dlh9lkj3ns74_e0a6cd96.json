@@ -1,0 +1,17 @@
+{
+  "id": "req_dlh9lkj3ns74_e0a6cd96",
+  "at": "2026-09-17T03:17:56.781433Z",
+  "from": "t1-config-timeout",
+  "scope": [
+    "pkg/config/config_test.go"
+  ],
+  "question": "t1-config-timeout and t2-config-retries both change pkg/config/config_test.go; which lands first?",
+  "options": [
+    "t1-config-timeout",
+    "t2-config-retries"
+  ],
+  "needs": "lead",
+  "status": "open",
+  "epoch": 0,
+  "ruled_at": "0001-01-01T00:00:00Z"
+}

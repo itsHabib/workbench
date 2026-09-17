@@ -1,0 +1,20 @@
+{
+  "id": "req_dlh9fav53euw_c6a2c224",
+  "at": "2026-09-17T03:09:45.556629Z",
+  "from": "t6-export-command",
+  "scope": [
+    "pkg/export/export.go"
+  ],
+  "question": "What export format do downstream tools expect (e.g. CSV, JSON lines, JSON array)? Which fixture fields/columns and in what order?",
+  "needs": "operator",
+  "status": "ruled",
+  "claim": {
+    "holder": "operator",
+    "epoch": 1,
+    "at": "2026-09-17T03:10:01.212931Z",
+    "until": "2026-09-17T03:11:01.212931Z"
+  },
+  "epoch": 1,
+  "decision": "dec_dlh9fi22y054_134dbaea",
+  "ruled_at": "2026-09-17T03:10:01.212931Z"
+}

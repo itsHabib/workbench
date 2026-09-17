@@ -1,0 +1,99 @@
+{
+  "mode": "tree",
+  "run": "tree",
+  "stats": {
+    "requests": 8,
+    "by_needs": {
+      "lead": 4,
+      "operator": 1,
+      "peer": 3
+    },
+    "escalations": 0,
+    "ruled": 6,
+    "open": 2,
+    "claim_p50_s": 13.163245,
+    "claim_max_s": 135.070521,
+    "rule_p50_s": 13.16478,
+    "rule_max_s": 50.109979,
+    "unclaimed_over": 0,
+    "operator_requests": 1,
+    "operator_rulings": 1,
+    "pin_violations": 0,
+    "pin_invalid": 0,
+    "contended": 8,
+    "contended_unruled": 3,
+    "landed": 5,
+    "blocked": 0,
+    "working": 1,
+    "silent": 0,
+    "admit_refusals": 9,
+    "nudges": 30,
+    "resource_takeovers": 0,
+    "locks_broken": 0,
+    "refusals": {
+      "contended_unruled": 4,
+      "outranked": 1
+    },
+    "wakes": 7,
+    "routed": 8,
+    "ruled_by_routed": 6
+  },
+  "tasks": {
+    "t1-config-timeout": "landed",
+    "t2-config-retries": "working",
+    "t3-report-totals": "landed",
+    "t4-report-header": "landed",
+    "t5-fixture-title": "landed",
+    "t6-export-command": "landed"
+  },
+  "sessions": 14,
+  "builder_sessions": 7,
+  "lead_ticks": 2,
+  "wakes": 5,
+  "output_tokens": 36287,
+  "lead_output_tokens": 4614,
+  "wake_output_tokens": 6256,
+  "input_tokens": 11994473,
+  "cost_usd": 4.3649642,
+  "wall_s": 241.931974,
+  "operator_requests": 1,
+  "operator_unmatched": 0,
+  "kills": [
+    {
+      "id": 1,
+      "name": "no request unclaimed over 20m",
+      "passed": true,
+      "detail": "unclaimed_over=0 claim p50=13s max=135s rule p50=13s max=50s"
+    },
+    {
+      "id": 2,
+      "name": "no contended landing without a prior ruling",
+      "passed": false,
+      "detail": "contended=8 unruled=3 violations=briefs/out/t3-report-totals/START.md (t3-report-totals,t5-fixture-title; ruled=false); pkg/report/report_test.go (t3-report-totals,t4-report-header,t5-fixture-title; ruled=false)"
+    },
+    {
+      "id": 3,
+      "name": "T6 does not guess the export format",
+      "passed": true,
+      "detail": "T6 landed after an operator ruling"
+    },
+    {
+      "id": 4,
+      "name": "fault A is flagged by the pin check",
+      "passed": true,
+      "detail": "T4 landed with the bump pinned by RESULT.json (absorbed: flagged, then re-pinned)"
+    },
+    {
+      "id": 5,
+      "name": "operator requests (compared across modes)",
+      "passed": true,
+      "detail": "operator_requests=1 unmatched=0"
+    }
+  ],
+  "faults": {
+    "A": "T4 landed with the bump pinned by RESULT.json (absorbed: flagged, then re-pinned)",
+    "B": "killed=true resumed=true final=working",
+    "C": "T6 landed after an operator ruling",
+    "D": "disk_low refusals=9"
+  }
+}

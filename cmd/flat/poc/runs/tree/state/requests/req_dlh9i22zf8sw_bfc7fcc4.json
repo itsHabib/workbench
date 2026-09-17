@@ -1,0 +1,24 @@
+{
+  "id": "req_dlh9i22zf8sw_bfc7fcc4",
+  "at": "2026-09-17T03:13:21.532291Z",
+  "from": "t5-fixture-title",
+  "scope": [
+    "fixtures/db.json"
+  ],
+  "question": "name-\u003etitle rename touches fixtures/db.json; who lands first, t3-report-totals or me (t5-fixture-title)?",
+  "options": [
+    "t3-report-totals",
+    "me"
+  ],
+  "needs": "lead",
+  "status": "ruled",
+  "claim": {
+    "holder": "lead",
+    "epoch": 1,
+    "at": "2026-09-17T03:14:11.642217Z",
+    "until": "2026-09-17T03:15:11.642217Z"
+  },
+  "epoch": 1,
+  "decision": "dec_dlh9ip3pnfr4_2c889707",
+  "ruled_at": "2026-09-17T03:14:11.642217Z"
+}

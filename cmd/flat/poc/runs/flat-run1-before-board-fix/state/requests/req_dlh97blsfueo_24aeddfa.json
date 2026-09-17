@@ -1,0 +1,26 @@
+{
+  "id": "req_dlh97blsfueo_24aeddfa",
+  "at": "2026-09-17T02:59:20.254649Z",
+  "from": "t6-export-command",
+  "scope": [
+    "pkg/export/export.go"
+  ],
+  "question": "What export format should downstream tools receive (e.g. CSV, JSON lines, JSON array, TSV)? Include field names/order if known.",
+  "options": [
+    "csv",
+    "json-lines",
+    "json-array",
+    "other"
+  ],
+  "needs": "operator",
+  "status": "ruled",
+  "claim": {
+    "holder": "operator",
+    "epoch": 1,
+    "at": "2026-09-17T02:59:33.112844Z",
+    "until": "2026-09-17T03:00:33.112844Z"
+  },
+  "epoch": 1,
+  "decision": "dec_dlh97higat08_e24f9d70",
+  "ruled_at": "2026-09-17T02:59:33.112844Z"
+}

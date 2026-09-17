@@ -1,0 +1,24 @@
+{
+  "id": "req_dlh9hd1iauns_2475d4b3",
+  "at": "2026-09-17T03:12:27.023502Z",
+  "from": "t1-config-timeout",
+  "scope": [
+    "pkg/config/config.go"
+  ],
+  "question": "t1-config-timeout and t2-config-retries both touch pkg/config/config.go and config_test.go; which lands first?",
+  "options": [
+    "t1-config-timeout",
+    "t2-config-retries"
+  ],
+  "needs": "lead",
+  "status": "ruled",
+  "claim": {
+    "holder": "lead",
+    "epoch": 1,
+    "at": "2026-09-17T03:12:53.319746Z",
+    "until": "2026-09-17T03:13:53.319746Z"
+  },
+  "epoch": 1,
+  "decision": "dec_dlh9hp4eg0jk_7e0070f5",
+  "ruled_at": "2026-09-17T03:12:53.319746Z"
+}

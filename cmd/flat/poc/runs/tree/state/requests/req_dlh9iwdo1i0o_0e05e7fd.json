@@ -1,0 +1,24 @@
+{
+  "id": "req_dlh9iwdo1i0o_0e05e7fd",
+  "at": "2026-09-17T03:14:27.481765Z",
+  "from": "t5-fixture-title",
+  "scope": [
+    "pkg/fixture/fixture.go"
+  ],
+  "question": "pkg/fixture/fixture.go also touched by t3-report-totals (landed at 2bf0e417); I rebased onto it, ok to proceed editing now?",
+  "options": [
+    "proceed",
+    "wait"
+  ],
+  "needs": "lead",
+  "status": "ruled",
+  "claim": {
+    "holder": "lead",
+    "epoch": 1,
+    "at": "2026-09-17T03:14:38.605017Z",
+    "until": "2026-09-17T03:15:38.605017Z"
+  },
+  "epoch": 1,
+  "decision": "dec_dlh9j1hmqq2w_42f58ca5",
+  "ruled_at": "2026-09-17T03:14:38.605017Z"
+}

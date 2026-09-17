@@ -1,0 +1,38 @@
+02:57:13 run flat mode=flat model=claude-sonnet-5 seats=4 out=/private/tmp/claude-501/-Users-mh-dev/048af72c-2611-4d7c-a274-83bf5096a17c/scratchpad/sb-flat/runs/flat
+02:57:13 admitted t1-config-timeout (0 working)
+02:57:13 admitted t2-config-retries (0 working)
+02:57:13 admitted t3-report-totals (0 working)
+02:57:13 admitted t4-report-header (2 working)
+02:57:13 fault D: disk reported as 1 byte free for 1m30s
+02:57:13 waiting to admit t5-fixture-title: disk_low: 0M free, floor 2.0G
+02:57:23 waiting to admit t5-fixture-title: disk_low: 0M free, floor 2.0G; seats_full: 4 working, 4 seats
+02:57:33 waiting to admit t5-fixture-title: disk_low: 0M free, floor 2.0G; seats_full: 4 working, 4 seats
+02:57:43 waiting to admit t5-fixture-title: disk_low: 0M free, floor 2.0G
+02:57:46 builder t1-config-timeout done: turns=15 out=2455 exit=0 err=false
+02:57:51 builder t4-report-header done: turns=21 out=2491 exit=0 err=false
+02:57:53 watch alerts: overlap:pkg/config/config.go overlap:pkg/config/config_test.go overlap:pkg/report/report.go overlap:pkg/report/report_test.go pin:t4-report-header
+02:57:54 waiting to admit t5-fixture-title: disk_low: 0M free, floor 2.0G
+02:57:57 fault B: killed t2-config-retries after 2m0s (turns=14); resuming the seat in a fresh session
+02:57:57 builder t3-report-totals done: turns=25 out=3385 exit=0 err=false
+02:58:04 waiting to admit t5-fixture-title: disk_low: 0M free, floor 2.0G
+02:58:13 watch alerts: overlap:pkg/config/config_test.go overlap:pkg/report/report.go overlap:pkg/report/report_test.go
+02:58:13 builder t2-config-retries (resumed) done: turns=4 out=583 exit=0
+02:58:14 waiting to admit t5-fixture-title: disk_low: 0M free, floor 2.0G
+02:58:25 waiting to admit t5-fixture-title: disk_low: 0M free, floor 2.0G
+02:58:33 watch alerts: overlap:pkg/config/config_test.go overlap:pkg/report/report_test.go
+02:58:35 waiting to admit t5-fixture-title: disk_low: 0M free, floor 2.0G
+02:58:45 fault D: disk floor met again
+02:58:45 admitted t5-fixture-title (0 working)
+02:58:46 admitted t6-export-command (0 working)
+02:58:53 watch alerts: overlap:pkg/config/config_test.go overlap:pkg/report/report_test.go
+02:59:13 watch alerts: overlap:pkg/config/config_test.go overlap:pkg/report/report_test.go
+02:59:33 operator ruled req_dlh97blsfueo_24aeddfa from t6-export-command matched=true
+02:59:33 watch alerts: overlap:briefs/out/t4-report-header/START.md overlap:pkg/config/config_test.go overlap:pkg/report/report_test.go pin:t6-export-command
+02:59:53 watch alerts: overlap:pkg/config/config_test.go pin:t6-export-command
+03:00:13 watch alerts: overlap:pkg/config/config_test.go pin:t6-export-command
+03:00:33 watch alerts: overlap:pkg/config/config_test.go pin:t6-export-command
+03:00:50 builder t6-export-command done: turns=40 out=6851 exit=0 err=false
+03:00:53 watch alerts: overlap:pkg/config/config_test.go pin:t6-export-command
+03:01:00 builder t5-fixture-title done: turns=36 out=6924 exit=0 err=false
+03:01:00 all builders finished; final pass
+03:01:00 evidence under /private/tmp/claude-501/-Users-mh-dev/048af72c-2611-4d7c-a274-83bf5096a17c/scratchpad/sb-flat/runs/flat
