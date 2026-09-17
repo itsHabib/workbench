@@ -44,6 +44,8 @@ const usage = `swarm gym: which model is good enough for which seat
   swarm gym run --models claude-haiku-4-5-20251001,claude-sonnet-5 [--tasks id,id] [--seat author]
                 [--reps 1] [--parallel 3] --out DIR
   swarm gym table --out DIR
+  swarm gym capacity [--threads 2,4,8,16] [--notes both] [--reps 1] --out DIR
+                how many interleaved threads one agent keeps straight, in its head and with a notes file
 `
 
 // Main is the gym subcommand.
@@ -60,6 +62,10 @@ func Main(args []string) int {
 		return 0
 	case "run":
 		return runCmd(args[1:])
+	case "capacity":
+		return capacityCmd(args[1:])
+	case "mail":
+		return mailMain(args[1:])
 	case "table":
 		fs := flag.NewFlagSet("gym table", flag.ContinueOnError)
 		out := fs.String("out", "", "results directory")
