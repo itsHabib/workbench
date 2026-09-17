@@ -29,7 +29,8 @@ type Row struct {
 	TipAt      time.Time `json:"tip_at"`
 	AgeSeconds int64     `json:"age_s"`
 	Files      []string  `json:"files"`
-	State      string    `json:"state"` // working | silent | landed | blocked | pin_violation | pin_invalid
+	Intent     []string  `json:"intent,omitempty"` // paths the seat declared before editing; they contend from the first commit
+	State      string    `json:"state"`            // working | silent | landed | blocked | pin_violation | pin_invalid
 	ResultPath string    `json:"result_path,omitempty"`
 	HeadSHA    string    `json:"head_sha,omitempty"`
 	Extra      []string  `json:"extra,omitempty"` // files changed after the pinned head, beyond RESULT.json
@@ -126,10 +127,9 @@ func (s *State) Board(opts BoardOptions) (*Board, error) {
 			continue // nothing of its own on this branch yet
 		}
 		s.classify(row, opts)
-		for _, f := range row.Files {
-			if !isResultFile(f) {
-				byFile[f] = append(byFile[f], name)
-			}
+		row.Intent = s.intentOf(name, row.Tip)
+		for _, f := range contendingPaths(row) {
+			byFile[f] = append(byFile[f], name)
 		}
 		b.Rows = append(b.Rows, *row)
 	}
@@ -225,7 +225,7 @@ func contentions(byFile map[string][]string, effective []Decision) []Contention 
 // their commits; those are inherited, not its own changes, and must not
 // count as contention or as its landing.
 func (s *State) ownFiles(name, tip, baseSHA string, tips map[string]string) []string {
-	lines, err := gitLines(s.Repo, append([]string{"log", "--format=", "--name-only", tip, "--not", baseSHA}, s.inherited(name, tip, tips)...)...)
+	lines, err := gitLines(s.Repo, append([]string{"log", "--format=", "--name-only", tip, "--not", s.ownFloor(name, tip, baseSHA)}, s.inherited(name, tip, tips)...)...)
 	if err != nil {
 		return nil
 	}
@@ -238,6 +238,58 @@ func (s *State) ownFiles(name, tip, baseSHA string, tips map[string]string) []st
 		}
 	}
 	sort.Strings(out)
+	return out
+}
+
+// markerDir is where a seat's own marker files live: START.md, INTENT.json,
+// RESULT.json. They identify the seat's range and never contend.
+func markerDir(branch string) string { return "briefs/out/" + branch + "/" }
+
+// ownFloor is the commit below a branch's own work. When the branch has a
+// start marker (the commit adding START.md under its marker dir, written
+// when the seat is seated) the floor is that commit's parent, so commits a rebase carried in from a peer
+// whose tip has since moved are still not counted as this branch's own.
+// Without a marker the floor is the base.
+func (s *State) ownFloor(name, tip, baseSHA string) string {
+	out, err := Git(s.Repo, "log", "--diff-filter=A", "--format=%H", "--reverse", tip, "--not", baseSHA, "--", markerDir(name)+"START.md")
+	if err != nil || out == "" {
+		return baseSHA
+	}
+	marker := strings.SplitN(out, "\n", 2)[0]
+	parent, err := Git(s.Repo, "rev-parse", marker+"^")
+	if err != nil {
+		return baseSHA
+	}
+	return parent
+}
+
+// intentOf reads the paths a seat declared in its INTENT.json.
+func (s *State) intentOf(name, tip string) []string {
+	raw, err := Git(s.Repo, "show", tip+":"+markerDir(name)+"INTENT.json")
+	if err != nil {
+		return nil
+	}
+	var in struct {
+		Paths []string `json:"paths"`
+	}
+	if json.Unmarshal([]byte(raw), &in) != nil {
+		return nil
+	}
+	return in.Paths
+}
+
+// contendingPaths is what a row contends on: what it changed plus what it
+// declared it will change, minus every seat's marker files.
+func contendingPaths(row *Row) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, f := range append(append([]string{}, row.Files...), row.Intent...) {
+		if f == "" || seen[f] || strings.HasPrefix(f, "briefs/out/") {
+			continue
+		}
+		seen[f] = true
+		out = append(out, f)
+	}
 	return out
 }
 

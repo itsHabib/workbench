@@ -36,6 +36,8 @@ decide      ask --scope a,b --question Q [--options "x|y"] [--needs peer|lead|op
             order                    landing order of landed branches from the ledger (the theme map)
             load [--window 1h]       queue wait per address: the number behind "too many messages"
             split --into "b1:title|b2:title" --why W    this task is really several; queue the rest
+            intend PATH...           declare what you are about to change, so it contends from now
+            consolidate [--verify CMD]   merge landed branches into this one in ledger order; list conflicts
 resource    take NAME [--ttl 30m] · drop NAME
 admit       admit [--seats N] [--disk-min 10G] [--resource NAME] [--wait] [--json]
 watch       watch [--interval 30s] [--once] [--fetch] [--idle 20m] [--unclaimed 10m] [--disk-min 10G]
@@ -168,6 +170,8 @@ var verbs = map[string]func(*cli) error{
 	"order":        (*cli).order,
 	"load":         (*cli).load,
 	"split":        (*cli).split,
+	"intend":       (*cli).intend,
+	"consolidate":  (*cli).consolidate,
 	"who":          (*cli).who,
 	"take":         (*cli).take,
 	"drop":         (*cli).drop,
@@ -350,6 +354,33 @@ func (c *cli) load() error {
 		return c.emit(ls)
 	}
 	fmt.Println(flat.LoadText(ls))
+	return nil
+}
+
+func (c *cli) intend() error {
+	paths, err := c.s.Intend(c.dir, c.seat, c.pos)
+	if err != nil {
+		return c.record(err)
+	}
+	fmt.Printf("intent recorded for %s: %s\n", c.seat, strings.Join(paths, ", "))
+	return nil
+}
+
+func (c *cli) consolidate() error {
+	res, err := c.s.Consolidate(c.dir, c.verifyCmd, c.boardOpts())
+	if err != nil {
+		return c.record(err)
+	}
+	if c.jsonOut {
+		return c.emit(res)
+	}
+	fmt.Printf("merged %d: %s\n", len(res.Merged), strings.Join(res.Merged, ", "))
+	if len(res.Conflicted) > 0 {
+		fmt.Printf("CONFLICTED %d (merge these by hand, in this order): %s\n", len(res.Conflicted), strings.Join(res.Conflicted, ", "))
+	}
+	if len(res.Failed) > 0 {
+		fmt.Printf("FAILED VERIFY %d (merged cleanly, tests red, undone): %s\n", len(res.Failed), strings.Join(res.Failed, ", "))
+	}
 	return nil
 }
 

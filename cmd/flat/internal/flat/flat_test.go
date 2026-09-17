@@ -792,3 +792,73 @@ func TestSplitQueuesChildren(t *testing.T) {
 		t.Fatal("duplicate child accepted")
 	}
 }
+
+func TestIntentContendsBeforeAnyEdit(t *testing.T) {
+	main := repo(t)
+	s := open(t, main)
+	seat := func(name string) string {
+		wt := filepath.Join(filepath.Dir(main), "wt", name)
+		must(t, main, "worktree", "add", "-q", wt, "-b", name, "main")
+		write(t, wt, "briefs/out/"+name+"/START.md", "start\n")
+		must(t, wt, "add", "-A")
+		must(t, wt, "commit", "-q", "-m", "start "+name)
+		return wt
+	}
+	p, q := seat("p"), seat("q")
+	if _, err := s.Intend(p, "p", []string{"pkg/x/x.go"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Intend(q, "q", []string{"pkg/x/x.go", "pkg/x/x_test.go"}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.Board(BoardOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.Contended) != 1 || b.Contended[0].File != "pkg/x/x.go" {
+		t.Fatalf("intent did not contend: %+v", b.Contended)
+	}
+	for _, c := range b.Contended {
+		if strings.HasPrefix(c.File, "briefs/out/") {
+			t.Fatalf("marker file contends: %+v", c)
+		}
+	}
+	// q rebases onto p, then p moves on: p's old commits are still not q's.
+	must(t, q, "rebase", "-q", "p")
+	write(t, p, "later.go", "package a\n")
+	must(t, p, "add", "-A")
+	must(t, p, "commit", "-q", "-m", "p moves")
+	b, _ = s.Board(BoardOptions{})
+	for _, f := range rowOf(t, b, "q").Files {
+		if strings.Contains(f, "/p/") {
+			t.Fatalf("q owns p's marker after p moved: %v", rowOf(t, b, "q").Files)
+		}
+	}
+}
+
+func TestConsolidateMergesCleanAndListsConflicts(t *testing.T) {
+	main := repo(t)
+	s := open(t, main)
+	a := branch(t, main, "a", "a2.go")
+	land(t, a, "a")
+	bb := branch(t, main, "b", "shared.go")
+	land(t, bb, "b")
+	c := branch(t, main, "c", "shared.go")
+	land(t, c, "c")
+	theme := filepath.Join(filepath.Dir(main), "wt", "theme")
+	must(t, main, "worktree", "add", "-q", theme, "-b", "theme", "main")
+	res, err := s.Consolidate(theme, "git --version", BoardOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(res.Merged, ",") != "a,b" || strings.Join(res.Conflicted, ",") != "c" {
+		t.Fatalf("consolidation = %+v", res)
+	}
+	if out := must(t, theme, "status", "--porcelain"); out != "" {
+		t.Fatalf("conflict left the tree dirty: %q", out)
+	}
+	res, _ = s.Consolidate(theme, "", BoardOptions{})
+	if len(res.Skipped) != 2 || len(res.Merged) != 0 {
+		t.Fatalf("rerun = %+v", res)
+	}
+}

@@ -90,7 +90,7 @@ func ScoreRun(sandboxDir, runDir string) (*Score, error) {
 	sc.Kills = append(sc.Kills, k4)
 	sc.Faults["A"] = k4.Detail
 	sc.Faults["B"] = faultB(sessions, rows, byFault["B"])
-	sc.Consolidation = consolidation(rows)
+	sc.Consolidation = consolidation(main, rows)
 	sc.Faults["D"] = faultD(events)
 	if parent := byFault["E"]; parent != "" {
 		sc.Faults["E"] = faultE(tasks, rows, parent)
@@ -257,14 +257,18 @@ func faultB(sessions []Session, rows map[string]flat.Row, branch string) string 
 
 // consolidation reads the theme branch: did the consolidator land, and did
 // its merged head verify.
-func consolidation(rows map[string]flat.Row) string {
-	t, ok := rows["theme"]
-	if !ok {
+func consolidation(main string, rows map[string]flat.Row) string {
+	merges, err := flat.Git(main, "log", "--merges", "--format=%s", "main..theme")
+	if err != nil {
 		return "no consolidator ran"
 	}
 	merged := 0
-	if t.Result != nil {
-		merged = len(t.Result.Claims)
+	if merges != "" {
+		merged = len(strings.Split(merges, "\n"))
+	}
+	t, ok := rows["theme"]
+	if !ok {
+		return fmt.Sprintf("theme did not land, %d branches merged", merged)
 	}
 	verified := "unverified"
 	if t.Receipt != nil {

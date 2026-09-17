@@ -13,13 +13,14 @@ import (
 // TaskRow is one entry of briefs/tasks.json: the unit admission starts a
 // seat for. Parent names the seat that split it off, if any.
 type TaskRow struct {
-	Branch   string `json:"Branch"`
-	Title    string `json:"Title"`
-	Card     string `json:"Card"`
-	Resource string `json:"Resource,omitempty"`
-	Fault    string `json:"Fault,omitempty"`
-	Parent   string `json:"Parent,omitempty"`
-	Added    string `json:"Added,omitempty"`
+	Branch   string   `json:"Branch"`
+	Title    string   `json:"Title"`
+	Card     string   `json:"Card"`
+	Resource string   `json:"Resource,omitempty"`
+	Fault    string   `json:"Fault,omitempty"`
+	Parent   string   `json:"Parent,omitempty"`
+	Files    []string `json:"Files,omitempty"`
+	Added    string   `json:"Added,omitempty"`
 }
 
 func tasksPath(repo string) string { return filepath.Join(repo, "briefs", "tasks.json") }

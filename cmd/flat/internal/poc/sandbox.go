@@ -38,9 +38,11 @@ func Generate(spec Spec) []Task {
 		t.Card = fmt.Sprintf(`Add the key "k%d" with value %d to the map returned by Values() in pkg/%s/%s.go, and a
 test in pkg/%s/%s_test.go asserting Values()["k%d"] == %d. Keep every existing key.
 Files you will touch: pkg/%s/%s.go, pkg/%s/%s_test.go.`, i, i, pkg, pkg, pkg, pkg, i, i, pkg, pkg, pkg, pkg)
+		t.Files = []string{fmt.Sprintf("pkg/%s/%s.go", pkg, pkg), fmt.Sprintf("pkg/%s/%s_test.go", pkg, pkg)}
 		switch {
 		case i%5 == 0:
 			t.Resource = "fixture-db"
+			t.Files = append(t.Files, "fixtures/db.json")
 			t.Card += fmt.Sprintf(`
 
 Also add %d to the "amount" of every row in fixtures/db.json (add the field if absent).
@@ -111,7 +113,8 @@ type Task struct {
 	Card     string
 	Resource string
 	Fault    string
-	Parent   string `json:",omitempty"`
+	Parent   string   `json:",omitempty"`
+	Files    []string `json:",omitempty"` // declared up front; the runner commits them as the seat's intent
 }
 
 // Tasks is the workload, in start order.
@@ -169,6 +172,8 @@ const Rules = `# Rules for every builder
    then: flat wait <id>
    Follow the ruling. Rebase on the other branch if the ruling says it lands first.
    When you rule on order, record it: flat rule <id> --order "<first>,<second>" --ruling "..." --evidence "..."
+   Your card's files are already declared as your intent. If you find you must change a path
+   your card did not list, declare it first: flat intend <path>
 4. To change anything under fixtures/, hold the resource first: flat take fixture-db
    If refused, someone holds it: retry every minute for up to 8 minutes. When done: flat drop fixture-db
 5. If the task is ambiguous about product behavior, never guess:

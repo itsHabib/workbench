@@ -416,6 +416,10 @@ func (r *runner) build(t Task) {
 	start := filepath.Join(wt, "briefs", "out", t.Branch, "START.md")
 	_ = os.MkdirAll(filepath.Dir(start), 0o755)
 	_ = os.WriteFile(start, []byte(fmt.Sprintf("# %s\n\nstarted %s\nbase %s\n\n%s\n", t.Branch, time.Now().UTC().Format(time.RFC3339), r.baseSHA, t.Card)), 0o644)
+	if len(t.Files) > 0 {
+		intent, _ := json.Marshal(map[string][]string{"paths": t.Files})
+		_ = os.WriteFile(filepath.Join(filepath.Dir(start), "INTENT.json"), append(intent, '\n'), 0o644)
+	}
 	for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "-m", "start " + t.Branch}, {"push", "-q", "-u", "origin", t.Branch}} {
 		if _, err := flat.Git(wt, args...); err != nil {
 			r.logf("start %s: %v", t.Branch, err)
@@ -436,6 +440,11 @@ func (r *runner) build(t Task) {
 		return
 	}
 	sess := r.claude(ctx, t.Branch, "builder", wt, prompt, r.o.MaxTurns, r.o.BuilderWall)
+	for try := 0; try < 2 && sess.NumTurns == 0 && sess.Exit != 0; try++ {
+		r.logf("builder %s did not start (exit=%d: %s); retrying", t.Branch, sess.Exit, sess.ResultTail)
+		time.Sleep(5 * time.Second)
+		sess = r.claude(ctx, t.Branch, "builder", wt, prompt, r.o.MaxTurns, r.o.BuilderWall)
+	}
 	r.logf("builder %s done: turns=%d out=%d exit=%d err=%v", t.Branch, sess.NumTurns, sess.OutputTok, sess.Exit, sess.IsError)
 }
 
@@ -461,12 +470,13 @@ func (r *runner) builderPrompt(t Task, wt string, resumed bool) string {
 	return sb.String()
 }
 
-const consolidatorPrompt = `You are seat theme, the consolidator. Run: flat order
-Merge every branch it lists, one at a time, in that order, into this branch with
-git merge --no-ff <branch> -m "merge <branch>". After each merge run: go test ./...
-Resolve conflicts so every merged branch's behavior survives (every key, every field, every
-test). If flat order reports an unruled pair, take the order it printed. Record anything you
-could not reconcile in CONFLICTS.md. Then write DEMO.md with one line per merged branch and the
+const consolidatorPrompt = `You are seat theme, the consolidator. First run:
+flat consolidate --verify "go test ./..."
+It merges every landed branch that merges cleanly and verifies, in the ledger's order, and
+lists the ones that CONFLICTED or FAILED VERIFY. Only those are yours. For each, in the order
+listed: git merge --no-ff <branch> -m "merge <branch>", resolve the conflict so every merged
+branch's behavior survives (every key, every field, every test), run go test ./..., commit.
+Record anything you could not reconcile in CONFLICTS.md. Then write DEMO.md with one line per merged branch and the
 demo command, run git rev-parse HEAD, write briefs/out/theme/RESULT.json with that head_sha and
 the list of merged branches as claims, commit only that file, and stop. One shell command per
 tool call; no && and no ;.`
@@ -482,7 +492,7 @@ func (r *runner) consolidate() {
 	r.mu.Lock()
 	r.alive++
 	r.mu.Unlock()
-	sess := r.claude(context.Background(), "theme", "consolidator", wt, consolidatorPrompt, r.o.MaxTurns, r.o.BuilderWall)
+	sess := r.claude(context.Background(), "theme", "consolidator", wt, consolidatorPrompt, 4*r.o.MaxTurns, 2*r.o.BuilderWall)
 	r.mu.Lock()
 	r.alive--
 	r.mu.Unlock()
@@ -524,6 +534,7 @@ func (r *runner) claude(ctx context.Context, seat, kind, cwd, prompt string, max
 		if wctx.Err() != nil {
 			sess.Killed = true
 		}
+		sess.ResultTail = runErr.Error()
 	}
 	var res cliResult
 	if err := json.Unmarshal(stdout.Bytes(), &res); err == nil {
