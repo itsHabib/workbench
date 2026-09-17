@@ -37,8 +37,8 @@ type Tiers struct {
 	Verifier []string `json:"verifier,omitempty"`
 }
 
-// TierOf resolves a name to its tier. FLAT_TIER overrides for the caller
-// only when it names a tier the map grants that name; it never elevates.
+// TierOf resolves a name to its tier from tiers.json; an unnamed caller is
+// a peer. Nothing in the environment can elevate a name.
 func (s *State) TierOf(name string) string {
 	var t Tiers
 	_ = readJSON(s.path("tiers.json"), &t)

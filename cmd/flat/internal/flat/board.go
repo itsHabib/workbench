@@ -48,10 +48,11 @@ type Overlap struct {
 
 // Contention is one file touched by two or more branches.
 type Contention struct {
-	File     string   `json:"file"`
-	Branches []string `json:"branches"`
-	Ruled    bool     `json:"ruled"`
-	Decision string   `json:"decision,omitempty"`
+	File       string    `json:"file"`
+	Branches   []string  `json:"branches"`
+	Ruled      bool      `json:"ruled"`
+	Decision   string    `json:"decision,omitempty"`
+	DecisionAt time.Time `json:"decision_at,omitempty"`
 }
 
 // Board is the whole fleet, derived from git and the ledger. Nobody reports
@@ -209,7 +210,7 @@ func contentions(byFile map[string][]string, effective []Decision) []Contention 
 	for _, f := range files {
 		c := Contention{File: f, Branches: byFile[f]}
 		if d := latestCovering(effective, f); d != nil {
-			c.Ruled, c.Decision = true, d.ID
+			c.Ruled, c.Decision, c.DecisionAt = true, d.ID, d.At
 		}
 		out = append(out, c)
 	}
@@ -297,8 +298,12 @@ func isResultFile(f string) bool {
 	return path.Base(f) == "RESULT.json"
 }
 
+// overlapsFor folds the contentions a branch is part of into one entry per
+// other branch. Ruled is false if any shared file is unruled; Decision is
+// the most recent ruling among the shared files.
 func overlapsFor(branch string, cs []Contention) []Overlap {
 	byWith := map[string]*Overlap{}
+	newest := map[string]time.Time{}
 	var order []string
 	for _, c := range cs {
 		mine := false
@@ -323,8 +328,10 @@ func overlapsFor(branch string, cs []Contention) []Overlap {
 			o.Files = append(o.Files, c.File)
 			if !c.Ruled {
 				o.Ruled = false
-			} else if o.Decision == "" {
-				o.Decision = c.Decision
+				continue
+			}
+			if o.Decision == "" || c.DecisionAt.After(newest[other]) {
+				o.Decision, newest[other] = c.Decision, c.DecisionAt
 			}
 		}
 	}
@@ -423,10 +430,11 @@ func short(sha string) string {
 }
 
 func trunc(s string, n int) string {
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n-1] + "…"
+	return string(r[:n-1]) + "…"
 }
 
 func ageString(secs int64) string {

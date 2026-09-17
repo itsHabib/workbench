@@ -584,3 +584,49 @@ func TestRebaseOntoPeerIsInherited(t *testing.T) {
 		t.Fatalf("p disturbed by q's rebase: %s", got)
 	}
 }
+
+func TestDecideProactive(t *testing.T) {
+	main := repo(t)
+	s := open(t, main)
+	if err := s.Init(Tiers{Operator: []string{"op"}}); err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.Decide("op", []string{"pkg/export"}, "json lines", "product", "")
+	if err != nil || d.Tier != TierOperator || d.Request != "" {
+		t.Fatalf("decide: %v %+v", err, d)
+	}
+	r, _ := s.Ask("a", []string{"pkg/export/export.go"}, "format?", nil, "")
+	if _, err := s.Rule(r.ID, "peer1", 0, "csv", "", ""); err == nil || !strings.Contains(err.Error(), "outranked") {
+		t.Fatalf("peer overrode a proactive operator ruling: %v", err)
+	}
+	if _, err := s.Decide("op", []string{"pkg/export"}, "json array", "", ""); err == nil || !strings.Contains(err.Error(), "must_supersede") {
+		t.Fatalf("same tier re-decided without superseding: %v", err)
+	}
+	if _, err := s.Decide("op", []string{"pkg/export"}, "json array", "changed", d.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := trunc("héllo wörld", 6); got != "héllo…" {
+		t.Fatalf("trunc = %q", got)
+	}
+}
+
+func TestLockStaleFromContent(t *testing.T) {
+	main := repo(t)
+	s := open(t, main)
+	path := s.path("stale.lock")
+	old := Now().Add(-time.Hour).Format(time.RFC3339Nano)
+	if err := os.WriteFile(path, []byte("1 "+old+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	release, err := s.lock("stale", 100*time.Millisecond, time.Minute)
+	if err != nil {
+		t.Fatalf("stale lock not broken: %v", err)
+	}
+	release()
+	if err := os.WriteFile(path, []byte("1 "+Now().Format(time.RFC3339Nano)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.lock("stale", 50*time.Millisecond, time.Minute); err == nil {
+		t.Fatal("fresh lock broken")
+	}
+}

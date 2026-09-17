@@ -84,44 +84,52 @@ type runner struct {
 	logf    func(format string, args ...any)
 }
 
-// Run executes the workload in one mode and leaves evidence under Out.
-func Run(o RunOptions) error {
+// prepare validates the options against the sandbox and builds the runner.
+func prepare(o RunOptions) (*runner, error) {
 	if o.Mode != "flat" && o.Mode != "tree" {
-		return errors.New("--mode must be flat or tree")
+		return nil, errors.New("--mode must be flat or tree")
 	}
 	dir, err := filepath.Abs(o.Dir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	main := filepath.Join(dir, "main")
 	s, err := flat.Open(main)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := os.Stat(filepath.Join(main, "RULES.md")); err != nil {
-		return fmt.Errorf("%s is not a sandbox from `flat poc init`", main)
+		return nil, fmt.Errorf("%s is not a sandbox from `flat poc init`", main)
 	}
 	heads, _ := flat.Git(main, "for-each-ref", "--format=%(refname:short)", "refs/heads")
 	if strings.TrimSpace(heads) != "main" {
-		return fmt.Errorf("sandbox already has branches (%s); init a fresh directory per run", strings.ReplaceAll(heads, "\n", ","))
+		return nil, fmt.Errorf("sandbox already has branches (%s); init a fresh directory per run", strings.ReplaceAll(heads, "\n", ","))
 	}
 	if o.Out == "" {
 		o.Out = filepath.Join(dir, "runs", time.Now().UTC().Format("20060102-150405")+"-"+o.Mode)
 	}
 	if err := os.MkdirAll(filepath.Join(o.Out, "logs"), 0o755); err != nil {
-		return err
+		return nil, err
 	}
 	if o.FlatBin == "" {
 		if o.FlatBin, err = os.Executable(); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	baseSHA, err := flat.Git(main, "rev-parse", "main")
 	if err != nil {
+		return nil, err
+	}
+	return &runner{o: o, main: main, state: s, baseSHA: baseSHA}, nil
+}
+
+// Run executes the workload in one mode and leaves evidence under Out.
+func Run(o RunOptions) error {
+	r, err := prepare(o)
+	if err != nil {
 		return err
 	}
-	r := &runner{o: o, main: main, state: s, baseSHA: baseSHA}
-	r.env = childEnv(filepath.Dir(o.FlatBin), filepath.Join(dir, "fleet-state"))
+	r.env = childEnv(filepath.Dir(r.o.FlatBin), filepath.Join(filepath.Dir(r.main), "fleet-state"))
 	// Wakes spawn from this process, so its own environment must carry the
 	// same isolation the builders get.
 	for _, kv := range r.env {
@@ -130,7 +138,7 @@ func Run(o RunOptions) error {
 		}
 	}
 	os.Unsetenv("CLAUDECODE")
-	logFile, err := os.OpenFile(filepath.Join(o.Out, "run.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	logFile, err := os.OpenFile(filepath.Join(r.o.Out, "run.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
@@ -140,8 +148,8 @@ func Run(o RunOptions) error {
 		fmt.Print(line)
 		_, _ = logFile.WriteString(line)
 	}
-	_ = writeJSONFile(filepath.Join(o.Out, "options.json"), o)
-	r.logf("run %s mode=%s model=%s seats=%d out=%s", filepath.Base(o.Out), o.Mode, o.Model, o.Seats, o.Out)
+	_ = writeJSONFile(filepath.Join(r.o.Out, "options.json"), r.o)
+	r.logf("run %s mode=%s model=%s seats=%d out=%s", filepath.Base(r.o.Out), r.o.Mode, r.o.Model, r.o.Seats, r.o.Out)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -149,16 +157,18 @@ func Run(o RunOptions) error {
 	bg.Add(2)
 	go func() { defer bg.Done(); r.watch(ctx) }()
 	go func() { defer bg.Done(); r.operator(ctx) }()
-	if o.Mode == "tree" {
+	if r.o.Mode == "tree" {
 		bg.Add(1)
 		go func() { defer bg.Done(); r.lead(ctx) }()
 	}
 
-	r.runBuilders(selectTasks(o.Only))
+	r.runBuilders(selectTasks(r.o.Only))
 	r.logf("all builders finished; final pass")
 	cancel()
 	bg.Wait()
-	flat.WaitWakes()
+	if left := flat.WaitWakes(7 * time.Minute); len(left) > 0 {
+		r.logf("wakes still running past their wall: %s", strings.Join(left, ", "))
+	}
 	if _, _, err := r.state.WatchOnce(r.watchOptions()); err != nil {
 		r.logf("final watch: %v", err)
 	}

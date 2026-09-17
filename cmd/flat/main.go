@@ -618,7 +618,7 @@ func (c *cli) installHook() error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+	if err := flat.WriteFileAtomic(path, append(data, '\n')); err != nil {
 		return err
 	}
 	fmt.Printf("hook installed in %s (%s hook)\n", path, cmd)

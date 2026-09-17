@@ -100,7 +100,7 @@ func (s *State) lock(name string, wait, stale time.Duration) (release func(), er
 		if !errors.Is(err, os.ErrExist) {
 			return nil, err
 		}
-		if st, err := os.Stat(path); err == nil && Now().Sub(st.ModTime()) > stale {
+		if Now().Sub(lockTakenAt(path)) > stale {
 			_ = os.Remove(path)
 			s.appendEvent(Event{Kind: "lock_broken", Detail: name})
 			continue
@@ -110,6 +110,33 @@ func (s *State) lock(name string, wait, stale time.Duration) (release func(), er
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// lockTakenAt reads the time the holder wrote into the lock file, so stale
+// detection does not depend on a filesystem's modification time. A lock
+// whose content cannot be read falls back to its modification time; one
+// that has vanished reads as fresh.
+func lockTakenAt(path string) time.Time {
+	data, err := os.ReadFile(path)
+	if err == nil {
+		fields := strings.Fields(string(data))
+		if len(fields) == 2 {
+			if at, err := time.Parse(time.RFC3339Nano, fields[1]); err == nil {
+				return at
+			}
+		}
+	}
+	if st, err := os.Stat(path); err == nil {
+		return st.ModTime()
+	}
+	return Now()
+}
+
+// WriteFileAtomic writes data to path through a temporary file and a
+// rename, for callers outside the package that must never leave a partial
+// file behind.
+func WriteFileAtomic(path string, data []byte) error {
+	return writeAtomic(path, data)
 }
 
 // Event is one row of events.jsonl: every transition the substrate makes.

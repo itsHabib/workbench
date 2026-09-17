@@ -112,14 +112,21 @@ var (
 	wakeActive = map[string]bool{}
 )
 
-// WaitWakes blocks until every wake this process started has finished.
-func WaitWakes() {
+// WaitWakes blocks until every wake this process started has finished, or
+// until limit passes; it returns the seats still running at the limit.
+// Every wake is bounded by its own wall clock, so a nonempty return means
+// a wake outlived the caller's patience, not that it will never end.
+func WaitWakes(limit time.Duration) []string {
+	deadline := Now().Add(limit)
 	for {
 		wakeMu.Lock()
-		n := len(wakeActive)
+		var active []string
+		for seat := range wakeActive {
+			active = append(active, seat)
+		}
 		wakeMu.Unlock()
-		if n == 0 {
-			return
+		if len(active) == 0 || Now().After(deadline) {
+			return active
 		}
 		time.Sleep(200 * time.Millisecond)
 	}

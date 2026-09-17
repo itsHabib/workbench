@@ -83,7 +83,10 @@ func (s *State) Watch(opts WatchOptions) error {
 			fmt.Fprintf(opts.Out, "%s rows=%d alerts=%d open=%d\n", b.At.Format("15:04:05"), len(b.Rows), len(alerts), b.Requests.Open)
 		}
 		if opts.Once {
-			WaitWakes()
+			opts.WakeOpts.defaults()
+			if left := WaitWakes(opts.WakeOpts.Wall + time.Minute); len(left) > 0 {
+				fmt.Fprintf(opts.Out, "watch: wakes still running past their wall: %s\n", strings.Join(left, ", "))
+			}
 			return err
 		}
 		time.Sleep(opts.Interval)
