@@ -22,6 +22,8 @@ type File struct {
 	// and before the lock is released; the fault harness uses it to die at
 	// the worst moment.
 	CrashAfterWrite func(op string)
+	// Now is the store's clock. One host, one clock; a caller's tests may pin it.
+	Now func() time.Time
 }
 
 // OpenFile opens or creates a file store in dir.
@@ -60,7 +62,11 @@ func (f *File) step(op string, mutate bool, fn func(d *Data, now time.Time) erro
 	if err != nil {
 		return err
 	}
-	ferr := fn(d, time.Now().UTC())
+	now := time.Now().UTC()
+	if f.Now != nil {
+		now = f.Now()
+	}
+	ferr := fn(d, now)
 	if !mutate {
 		return ferr
 	}
