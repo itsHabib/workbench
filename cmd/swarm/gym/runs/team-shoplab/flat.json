@@ -1,0 +1,201 @@
+{
+  "at": "2026-09-17T22:54:20.136382Z",
+  "shape": "flat",
+  "model": "claude-sonnet-5",
+  "store": "resp:127.0.0.1:56440/team3-flat",
+  "seats": [
+    {
+      "seat": "p1",
+      "role": "peer",
+      "joined_s": 0.265545708,
+      "wall_s": 703.017305833,
+      "turns": 72,
+      "cost_usd": 1.9133733999999996,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p2",
+      "role": "peer",
+      "joined_s": 0.333839458,
+      "wall_s": 716.657824125,
+      "turns": 94,
+      "cost_usd": 2.5227841999999994,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p3",
+      "role": "peer",
+      "joined_s": 0.390364291,
+      "wall_s": 703.15021325,
+      "turns": 111,
+      "cost_usd": 2.8588982000000005,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p4",
+      "role": "peer",
+      "joined_s": 0.448177916,
+      "wall_s": 716.619376959,
+      "turns": 78,
+      "cost_usd": 2.2377738,
+      "cost_known": true,
+      "wakes": 0
+    }
+  ],
+  "hidden_passed": 86,
+  "hidden_total": 86,
+  "builds": true,
+  "own_test_files": 16,
+  "wall_s": 717.067579958,
+  "cost_usd": 9.5328296,
+  "turns": 355,
+  "work": [
+    {
+      "id": "errs",
+      "state": "done",
+      "added_by": "p3",
+      "done_by": "p3",
+      "holder": "",
+      "title": "errs package"
+    },
+    {
+      "id": "money",
+      "state": "done",
+      "added_by": "p3",
+      "done_by": "p3",
+      "holder": "",
+      "title": "money package"
+    },
+    {
+      "id": "sku",
+      "state": "done",
+      "added_by": "p3",
+      "done_by": "p1",
+      "holder": "",
+      "title": "sku package"
+    },
+    {
+      "id": "idem",
+      "state": "done",
+      "added_by": "p3",
+      "done_by": "p2",
+      "holder": "",
+      "title": "idem package"
+    },
+    {
+      "id": "outbox",
+      "state": "done",
+      "added_by": "p3",
+      "done_by": "p2",
+      "holder": "",
+      "title": "outbox package"
+    },
+    {
+      "id": "catalog",
+      "state": "done",
+      "added_by": "p3",
+      "done_by": "p3",
+      "holder": "",
+      "title": "catalog package"
+    },
+    {
+      "id": "inventory",
+      "state": "done",
+      "added_by": "p3",
+      "done_by": "p4",
+      "holder": "",
+      "title": "inventory package"
+    },
+    {
+      "id": "shipping",
+      "state": "done",
+      "added_by": "p3",
+      "done_by": "p1",
+      "holder": "",
+      "title": "shipping package"
+    },
+    {
+      "id": "errs-money",
+      "state": "done",
+      "added_by": "p4",
+      "done_by": "p4",
+      "holder": "",
+      "title": "errs and money packages"
+    },
+    {
+      "id": "discount",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p3",
+      "holder": "",
+      "title": "discount package"
+    },
+    {
+      "id": "ledger",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p1",
+      "holder": "",
+      "title": "ledger package"
+    },
+    {
+      "id": "command",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p2",
+      "holder": "",
+      "title": "command package"
+    },
+    {
+      "id": "cart",
+      "state": "done",
+      "added_by": "p4",
+      "done_by": "p3",
+      "holder": "",
+      "title": "cart package"
+    },
+    {
+      "id": "pricing",
+      "state": "done",
+      "added_by": "p4",
+      "done_by": "p1",
+      "holder": "",
+      "title": "pricing package"
+    },
+    {
+      "id": "order",
+      "state": "done",
+      "added_by": "p4",
+      "done_by": "p4",
+      "holder": "",
+      "title": "order package"
+    },
+    {
+      "id": "report",
+      "state": "done",
+      "added_by": "p4",
+      "done_by": "p3",
+      "holder": "",
+      "title": "report package"
+    },
+    {
+      "id": "app",
+      "state": "done",
+      "added_by": "p4",
+      "done_by": "p2",
+      "holder": "",
+      "title": "app package"
+    }
+  ],
+  "requests": 0,
+  "commits_by_author": {
+    "harness": 1,
+    "p1": 4,
+    "p2": 4,
+    "p3": 6,
+    "p4": 2
+  }
+}

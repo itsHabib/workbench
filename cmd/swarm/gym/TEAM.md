@@ -50,8 +50,47 @@ What changed because of that run:
 
 After those changes flat scored 20/20 and no seat needed a wake.
 
-## What this does not say yet
+## Run 2: shoplab (16 packages in 8 dependency layers, 86 hidden tests, about 1,700 reference lines)
 
-kvlab is too small to separate the shapes on anything except overhead. The question that
-matters is where the crossover is: how big a goal has to be before one session stops being
-enough. `shoplab` (about 15 packages in three dependency layers) is the next goal.
+| shape | seats | hidden tests | wall | cost | turns |
+|---|---|---|---|---|---|
+| solo | 1 | 86/86 | 621s | $2.89 | 72 |
+| swat | 2, grew to 6 | 85/86 | 465s | $8.88 | 188 |
+| flat | 4 | 86/86 | 717s | $9.53 | 355 |
+| tree | 1 lead + 4 builders | 85/86 | 856s | $10.59 | 406 |
+
+One attempt per shape, all four run at once on one Mac, so wall times include contention for
+the same CPU. Raw results are in `runs/team-shoplab/`.
+
+What it says:
+
+- **One session still did the whole thing**, for a third of what any team cost. A goal five
+  times bigger did not move the crossover. For greenfield code with an exact spec, the size at
+  which one session stops being enough is above 16 packages.
+- **Only swat was faster than solo**, by a quarter, for three times the cost. It was the only
+  team that matched seats to the work: two seats planned, four more arrived within 100
+  seconds as the list filled, and nobody sat idle before there was something to claim.
+- **The tree was slowest and dearest again.** The lead cost $1.73 and wrote nothing. One
+  builder carried the dependency chain's tail alone (order, report, app) for the last 450
+  seconds while three others had already stopped.
+- **The dependency chain sets the floor, not the seat count.** Eight layers means eight
+  steps that cannot overlap. Flat with four seats was slower than solo because seats waited
+  on each other's layers and paid a rebase, build and test on every landing.
+- **The wake path fired for real in the tree.** Three builders ended their turns early and
+  were resumed by the harness when units opened or a note arrived. Without it that run stalls
+  the way the first flat run did.
+- **A shared decision went wrong quietly.** The swat pair agreed to put every package under
+  `pkg/`. The spec names packages, not directories, so the grader now finds the layout rather
+  than scoring that choice zero. A team decision nobody outside the team can see is a risk a
+  single session does not have.
+- Nobody used `swarm ask` in any run. The spec was exact enough that there was nothing to
+  rule on. The decision ledger earns nothing on a goal like this.
+
+## What this says about when to use a team
+
+A team is not a faster way to build something one session can hold. Both runs say the same
+thing at two sizes. The cases left where a team can win are the ones this harness does not
+reach yet: a goal too large for one context, work that outlives a session, a spec that is
+wrong or vague so that decisions have to be made and remembered, and a person who answers
+partway through. Those are the next goals to build, not a bigger copy of this one.
+

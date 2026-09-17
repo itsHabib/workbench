@@ -1,0 +1,206 @@
+{
+  "at": "2026-09-17T22:54:20.136355Z",
+  "shape": "tree",
+  "model": "claude-sonnet-5",
+  "store": "resp:127.0.0.1:56440/team3-tree",
+  "seats": [
+    {
+      "seat": "b1",
+      "role": "builder",
+      "joined_s": 0.336678,
+      "wall_s": 856.0097265,
+      "turns": 127,
+      "cost_usd": 3.9160441999999995,
+      "cost_known": true,
+      "wakes": 1
+    },
+    {
+      "seat": "b2",
+      "role": "builder",
+      "joined_s": 0.393183208,
+      "wall_s": 393.428339167,
+      "turns": 75,
+      "cost_usd": 2.0696156000000006,
+      "cost_known": true,
+      "wakes": 1
+    },
+    {
+      "seat": "b3",
+      "role": "builder",
+      "joined_s": 0.450583375,
+      "wall_s": 396.304278625,
+      "turns": 65,
+      "cost_usd": 1.6329882000000004,
+      "cost_known": true,
+      "wakes": 1
+    },
+    {
+      "seat": "b4",
+      "role": "builder",
+      "joined_s": 0.504479458,
+      "wall_s": 304.332545792,
+      "turns": 50,
+      "cost_usd": 1.2449408000000004,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "lead",
+      "role": "lead",
+      "joined_s": 0.276191083,
+      "wall_s": 851.116203541,
+      "turns": 89,
+      "cost_usd": 1.7279138,
+      "cost_known": true,
+      "wakes": 0
+    }
+  ],
+  "hidden_passed": 85,
+  "hidden_total": 86,
+  "builds": true,
+  "own_test_files": 16,
+  "wall_s": 856.346459166,
+  "cost_usd": 10.591502600000002,
+  "turns": 406,
+  "work": [
+    {
+      "id": "errs",
+      "state": "done",
+      "added_by": "lead",
+      "done_by": "b2",
+      "holder": "",
+      "title": "errs package: sentinel errors + Code()"
+    },
+    {
+      "id": "idem",
+      "state": "done",
+      "added_by": "lead",
+      "done_by": "b4",
+      "holder": "",
+      "title": "idem package: idempotency store"
+    },
+    {
+      "id": "money",
+      "state": "done",
+      "added_by": "lead",
+      "done_by": "b3",
+      "holder": "",
+      "title": "money package: Money type, Parse/String/Mul/BP/Div/Sum/Allocate"
+    },
+    {
+      "id": "sku",
+      "state": "done",
+      "added_by": "lead",
+      "done_by": "b1",
+      "holder": "",
+      "title": "sku package: SKU type, Parse/MustParse/String/Sort"
+    },
+    {
+      "id": "outbox",
+      "state": "done",
+      "added_by": "lead",
+      "done_by": "b2",
+      "holder": "",
+      "title": "outbox package: Event, Encode/Decode/ReadAll, Log"
+    },
+    {
+      "id": "inventory",
+      "state": "done",
+      "added_by": "lead",
+      "done_by": "b4",
+      "holder": "",
+      "title": "inventory package: stock, reservations"
+    },
+    {
+      "id": "catalog",
+      "state": "done",
+      "added_by": "lead",
+      "done_by": "b1",
+      "holder": "",
+      "title": "catalog package: Product catalog CRUD"
+    },
+    {
+      "id": "shipping",
+      "state": "done",
+      "added_by": "lead",
+      "done_by": "b3",
+      "holder": "",
+      "title": "shipping package: Zone, Rate"
+    },
+    {
+      "id": "discount",
+      "state": "done",
+      "added_by": "lead",
+      "done_by": "b4",
+      "holder": "",
+      "title": "discount package: Coupon book"
+    },
+    {
+      "id": "ledger",
+      "state": "done",
+      "added_by": "lead",
+      "done_by": "b1",
+      "holder": "",
+      "title": "ledger package: double-entry ledger"
+    },
+    {
+      "id": "command",
+      "state": "done",
+      "added_by": "lead",
+      "done_by": "b2",
+      "holder": "",
+      "title": "command package: Cmd parser"
+    },
+    {
+      "id": "cart",
+      "state": "done",
+      "added_by": "lead",
+      "done_by": "b3",
+      "holder": "",
+      "title": "cart package: Cart, Line, Add/Set/Remove/Lines/Subtotal"
+    },
+    {
+      "id": "pricing",
+      "state": "done",
+      "added_by": "lead",
+      "done_by": "b2",
+      "holder": "",
+      "title": "pricing package: Quote calculator"
+    },
+    {
+      "id": "order",
+      "state": "done",
+      "added_by": "lead",
+      "done_by": "b1",
+      "holder": "",
+      "title": "order package: Order state machine, Book"
+    },
+    {
+      "id": "report",
+      "state": "done",
+      "added_by": "lead",
+      "done_by": "b1",
+      "holder": "",
+      "title": "report package: Summary, Summarize"
+    },
+    {
+      "id": "app",
+      "state": "done",
+      "added_by": "lead",
+      "done_by": "b1",
+      "holder": "",
+      "title": "app package: App wiring, Exec, Events"
+    }
+  ],
+  "requests": 0,
+  "commits_by_author": {
+    "b1": 6,
+    "b2": 4,
+    "b3": 3,
+    "b4": 3,
+    "harness": 1
+  },
+  "failed_tests": [
+    "shoplab/outbox.TestHiddenReadAll"
+  ]
+}

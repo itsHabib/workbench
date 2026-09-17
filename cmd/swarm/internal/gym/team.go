@@ -470,6 +470,7 @@ func Grade(goal, origin, into string) Graded {
 func plantHidden(goal, into string) ([]string, error) {
 	var want []string
 	root := "testdata/" + goal + "/hidden"
+	prefix := layoutPrefix(into)
 	err := fs.WalkDir(goals, root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -481,10 +482,13 @@ func plantHidden(goal, into string) ([]string, error) {
 		pkg := filepath.Base(filepath.Dir(p))
 		for _, line := range strings.Split(string(data), "\n") {
 			if name, ok := strings.CutPrefix(line, "func TestHidden"); ok {
-				want = append(want, goal+"/"+pkg+".TestHidden"+name[:strings.Index(name, "(")])
+				want = append(want, goal+"/"+prefix+pkg+".TestHidden"+name[:strings.Index(name, "(")])
 			}
 		}
-		dst := filepath.Join(into, pkg)
+		if prefix != "" {
+			data = bytes.ReplaceAll(data, []byte(`"`+goal+`/`), []byte(`"`+goal+`/`+prefix))
+		}
+		dst := filepath.Join(into, prefix, pkg)
 		if err := os.MkdirAll(dst, 0o755); err != nil {
 			return err
 		}
@@ -492,6 +496,25 @@ func plantHidden(goal, into string) ([]string, error) {
 	})
 	sort.Strings(want)
 	return want, err
+}
+
+// layoutPrefix finds where a team put its packages. The specs name packages,
+// not directories, so a team that agreed on pkg/ or internal/ is graded
+// there rather than scored zero for a layout choice.
+func layoutPrefix(into string) string {
+	for _, prefix := range []string{"", "pkg/", "internal/", "src/"} {
+		found := 0
+		entries, _ := os.ReadDir(filepath.Join(into, prefix))
+		for _, e := range entries {
+			if files, _ := filepath.Glob(filepath.Join(into, prefix, e.Name(), "*.go")); e.IsDir() && len(files) > 0 {
+				found++
+			}
+		}
+		if found >= 2 {
+			return prefix
+		}
+	}
+	return ""
 }
 
 // TeamTable renders runs side by side.
@@ -518,14 +541,27 @@ func TeamTable(rs []TeamResult) string {
 	return sb.String()
 }
 
-func teamTableCmd(dirs []string) int {
+// teamTableCmd renders saved runs. With --regrade GOAL it grades each run's
+// origin again first, for when the grader changed and the sessions did not.
+func teamTableCmd(args []string) int {
+	fl := flag.NewFlagSet("gym team-table", flag.ContinueOnError)
+	regrade := fl.String("regrade", "", "grade each run's origin.git again against this goal")
+	if fl.Parse(args) != nil {
+		return 3
+	}
 	var rs []TeamResult
-	for _, d := range dirs {
+	for _, d := range fl.Args() {
 		data, err := os.ReadFile(filepath.Join(d, "result.json"))
 		var r TeamResult
 		if err != nil || json.Unmarshal(data, &r) != nil {
 			fmt.Fprintln(os.Stderr, "skipping", d)
 			continue
+		}
+		if *regrade != "" {
+			g := Grade(*regrade, filepath.Join(d, "origin.git"), filepath.Join(d, "grade"))
+			r.Passed, r.Total, r.Builds, r.Failed, r.GradeNote = g.Passed, g.Passed+len(g.Failed), g.Builds, g.Failed, g.Note
+			out, _ := json.MarshalIndent(r, "", "  ")
+			_ = os.WriteFile(filepath.Join(d, "result.json"), out, 0o644)
 		}
 		rs = append(rs, r)
 	}

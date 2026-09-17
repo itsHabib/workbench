@@ -1,0 +1,31 @@
+{
+  "at": "2026-09-17T22:54:20.136356Z",
+  "shape": "solo",
+  "model": "claude-sonnet-5",
+  "store": "resp:127.0.0.1:56440/team3-solo",
+  "seats": [
+    {
+      "seat": "solo",
+      "role": "solo",
+      "joined_s": 0.265700583,
+      "wall_s": 620.675401709,
+      "turns": 72,
+      "cost_usd": 2.8855809999999984,
+      "cost_known": true,
+      "wakes": 0
+    }
+  ],
+  "hidden_passed": 86,
+  "hidden_total": 86,
+  "builds": true,
+  "own_test_files": 16,
+  "wall_s": 620.941166125,
+  "cost_usd": 2.8855809999999984,
+  "turns": 72,
+  "work": [],
+  "requests": 0,
+  "commits_by_author": {
+    "harness": 1,
+    "solo": 1
+  }
+}
