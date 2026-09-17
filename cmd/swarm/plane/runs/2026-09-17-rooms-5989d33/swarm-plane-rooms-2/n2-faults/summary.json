@@ -1,0 +1,16 @@
+{
+  "accepted": 618,
+  "clone_exit": "exit status 124",
+  "clones": 2,
+  "faults": [
+    "kill-room 01m2qvej4hfkmp7q8graa51m59",
+    "restart-store"
+  ],
+  "items": 618,
+  "passed": true,
+  "refusals": {},
+  "tasks": 240,
+  "unfinished": null,
+  "violations": null,
+  "wall_s": 181.345063361
+}

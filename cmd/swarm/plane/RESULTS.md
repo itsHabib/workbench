@@ -73,4 +73,27 @@ the full wall because `rooms clone --command` waits out `--max-wall` after a mem
 Fixed at `5989d33`: roles are claimed from the store at start-up, the one thing identical
 clones do not share; a peer with nothing of its own kind to do helps with the other, so no
 role distribution and no single death can strand a kind of work; workers log a start and an
-end line (peer.log was empty in every clone of this matrix). Rerun pending.
+end line (peer.log was empty in every clone of this matrix).
+
+# In Rooms, rerun, 2026-09-17 (binary 5989d33)
+
+Same host, image, snapshot and toolstore; default two watchers at every size; 240 tasks.
+Evidence: `runs/2026-09-17-rooms-5989d33/`. Nothing after `5989d33` touches the worker, the
+driver or the store.
+
+| run | passed | accepted / items | unfinished | violations | wall |
+|---|---|---|---|---|---|
+| 2 clones | yes | 618 / 618 | 0 | 0 | 75 s |
+| 4 clones | yes | 618 / 618 | 0 | 0 | 54 s |
+| 6 clones | yes | 618 / 618 | 0 | 0 | 58 s |
+| 2 clones, clone and store killed | yes | 618 / 618 | 0 | 0 | 181 s |
+| 4 clones, clone and store killed | yes | 618 / 618 | 0 | 0 | 183 s |
+| 6 clones, clone and store killed | yes | 618 / 618 | 0 | 0 | 185 s |
+
+618 is 240 tasks, 68 split children, 308 deliveries and the two role items. In the two-clone
+fault run one clone was killed and the store restarted a quarter of the way through, and the
+survivor finished both kinds of work alone. Fault-run wall is the rooms `--max-wall` wait
+after a kill, not the store.
+
+Still not shown: more than six peers, more than one host, a network partition, real work
+longer than 200 ms, or the `swarm` verbs themselves running on this store.
