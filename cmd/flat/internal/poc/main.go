@@ -14,7 +14,7 @@ import (
 
 const usage = `flat poc: the adversarial proof of concept
 
-  flat poc init DIR
+  flat poc init DIR [--tasks N --packages P]      (no flags: the classic six tasks)
   flat poc run --dir DIR --mode flat|tree [--model M] [--seats 4] [--only t1-...,t2-...]
                [--wall 20m] [--max-turns 80] [--lead-every 90s] [--operator-every 20s]
                [--watch-every 20s] [--kill-t2-after 2m] [--disk-fault-for 90s] [--disk-min 2G]
@@ -31,11 +31,7 @@ func Main(args []string) int {
 	var err error
 	switch args[0] {
 	case "init":
-		if len(args) < 2 {
-			err = fmt.Errorf("init needs a directory")
-			break
-		}
-		err = Init(args[1])
+		err = initCmd(args[1:])
 	case "run":
 		err = runCmd(args[1:])
 	case "stats":
@@ -51,6 +47,27 @@ func Main(args []string) int {
 		return 3
 	}
 	return 0
+}
+
+func initCmd(args []string) error {
+	var dir string
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		dir, args = args[0], args[1:]
+	}
+	fs := flag.NewFlagSet("poc init", flag.ContinueOnError)
+	var spec Spec
+	fs.IntVar(&spec.Tasks, "tasks", 0, "generated task count (0 = the classic six)")
+	fs.IntVar(&spec.Packages, "packages", 4, "packages the generated tasks spread over")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if dir == "" && fs.NArg() > 0 {
+		dir = fs.Arg(0)
+	}
+	if dir == "" {
+		return fmt.Errorf("init needs a directory")
+	}
+	return Init(dir, spec)
 }
 
 func runCmd(args []string) error {
@@ -72,6 +89,7 @@ func runCmd(args []string) error {
 	fs.StringVar(&diskMin, "disk-min", "2G", "admission disk floor")
 	fs.StringVar(&o.Out, "out", "", "run directory")
 	fs.StringVar(&o.FlatBin, "flat-bin", "", "flat binary for builders (default this one)")
+	fs.BoolVar(&o.Consolidate, "consolidate", false, "run a consolidator after the builders")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

@@ -158,7 +158,7 @@ func TestContentionAndRuling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Rule(r.ID, "q", 0, "p lands first", "p started earlier", ""); err != nil {
+	if _, err := s.Rule(r.ID, "q", 0, "p lands first", "p started earlier", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	b, _ = s.Board(BoardOptions{})
@@ -167,7 +167,7 @@ func TestContentionAndRuling(t *testing.T) {
 	}
 	// A directory-scoped ruling covers files under it.
 	r2, _ := s.Ask("p", []string{"pkg/x/y.go"}, "?", nil, "")
-	if _, err := s.Rule(r2.ID, "q", 0, "ok", "", ""); err != nil {
+	if _, err := s.Rule(r2.ID, "q", 0, "ok", "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	ds, _ := s.Lookup([]string{"pkg/x"})
@@ -195,19 +195,19 @@ func TestClaimFencing(t *testing.T) {
 	if c2.Claim.Epoch != c1.Claim.Epoch+1 {
 		t.Fatalf("epoch %d after %d", c2.Claim.Epoch, c1.Claim.Epoch)
 	}
-	if _, err := s.Rule(r.ID, "b", c1.Claim.Epoch, "late", "", ""); err == nil || !strings.Contains(err.Error(), "claimed_by_other") {
+	if _, err := s.Rule(r.ID, "b", c1.Claim.Epoch, "late", "", "", nil); err == nil || !strings.Contains(err.Error(), "claimed_by_other") {
 		t.Fatalf("stale holder ruled: %v", err)
 	}
 	if _, err := s.ClaimRequest(r.ID, "d", time.Minute); err == nil || !strings.Contains(err.Error(), "claimed_by_other") {
 		t.Fatalf("live claim taken: %v", err)
 	}
-	if _, err := s.Rule(r.ID, "c", c2.Claim.Epoch+7, "wrong epoch", "", ""); err == nil || !strings.Contains(err.Error(), "claim_fenced") {
+	if _, err := s.Rule(r.ID, "c", c2.Claim.Epoch+7, "wrong epoch", "", "", nil); err == nil || !strings.Contains(err.Error(), "claim_fenced") {
 		t.Fatalf("wrong epoch accepted: %v", err)
 	}
-	if _, err := s.Rule(r.ID, "c", c2.Claim.Epoch, "ok", "", ""); err != nil {
+	if _, err := s.Rule(r.ID, "c", c2.Claim.Epoch, "ok", "", "", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Rule(r.ID, "c", 0, "again", "", ""); err == nil || !strings.Contains(err.Error(), "already_ruled") {
+	if _, err := s.Rule(r.ID, "c", 0, "again", "", "", nil); err == nil || !strings.Contains(err.Error(), "already_ruled") {
 		t.Fatalf("double ruling: %v", err)
 	}
 }
@@ -219,18 +219,18 @@ func TestTiersAndTiebreak(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, _ := s.Ask("a", []string{"pkg/export"}, "format?", nil, TierOperator)
-	if _, err := s.Rule(r.ID, "peer1", 0, "json", "", ""); err == nil || !strings.Contains(err.Error(), "tier_too_low") {
+	if _, err := s.Rule(r.ID, "peer1", 0, "json", "", "", nil); err == nil || !strings.Contains(err.Error(), "tier_too_low") {
 		t.Fatalf("peer ruled an operator request: %v", err)
 	}
-	if _, err := s.Rule(r.ID, "ld", 0, "json", "", ""); err == nil || !strings.Contains(err.Error(), "tier_too_low") {
+	if _, err := s.Rule(r.ID, "ld", 0, "json", "", "", nil); err == nil || !strings.Contains(err.Error(), "tier_too_low") {
 		t.Fatalf("lead ruled an operator request: %v", err)
 	}
-	if _, err := s.Rule(r.ID, "op", 0, "jsonl", "intent", ""); err != nil {
+	if _, err := s.Rule(r.ID, "op", 0, "jsonl", "intent", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	// Same scope, lower tier: outranked.
 	r2, _ := s.Ask("b", []string{"pkg/export/x.go"}, "?", nil, "")
-	if _, err := s.Rule(r2.ID, "peer1", 0, "csv", "", ""); err == nil || !strings.Contains(err.Error(), "outranked") {
+	if _, err := s.Rule(r2.ID, "peer1", 0, "csv", "", "", nil); err == nil || !strings.Contains(err.Error(), "outranked") {
 		t.Fatalf("peer overrode operator: %v", err)
 	}
 }
@@ -243,15 +243,15 @@ func TestTiebreakAndEscalation(t *testing.T) {
 	}
 	// Same tier, same scope: must supersede explicitly.
 	r3, _ := s.Ask("b", []string{"a.go"}, "?", nil, "")
-	d3, err := s.Rule(r3.ID, "peer1", 0, "first", "", "")
+	d3, err := s.Rule(r3.ID, "peer1", 0, "first", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	r4, _ := s.Ask("c", []string{"a.go"}, "?", nil, "")
-	if _, err := s.Rule(r4.ID, "peer2", 0, "second", "", ""); err == nil || !strings.Contains(err.Error(), "must_supersede") {
+	if _, err := s.Rule(r4.ID, "peer2", 0, "second", "", "", nil); err == nil || !strings.Contains(err.Error(), "must_supersede") {
 		t.Fatalf("silent override at equal tier: %v", err)
 	}
-	if _, err := s.Rule(r4.ID, "peer2", 0, "second", "changed", d3.ID); err != nil {
+	if _, err := s.Rule(r4.ID, "peer2", 0, "second", "changed", d3.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	eff, _ := s.Effective()
@@ -262,7 +262,7 @@ func TestTiebreakAndEscalation(t *testing.T) {
 	}
 	// Higher tier overrides silently and the ledger records the supersede.
 	r5, _ := s.Ask("c", []string{"a.go"}, "?", nil, TierLead)
-	d5, err := s.Rule(r5.ID, "ld", 0, "lead says", "", "")
+	d5, err := s.Rule(r5.ID, "ld", 0, "lead says", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,11 +290,11 @@ func TestLedgerChainDetectsTampering(t *testing.T) {
 	main := repo(t)
 	s := open(t, main)
 	r, _ := s.Ask("a", []string{"f"}, "?", nil, "")
-	if _, err := s.Rule(r.ID, "b", 0, "one", "", ""); err != nil {
+	if _, err := s.Rule(r.ID, "b", 0, "one", "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	r2, _ := s.Ask("a", []string{"g"}, "?", nil, "")
-	if _, err := s.Rule(r2.ID, "b", 0, "two", "", ""); err != nil {
+	if _, err := s.Rule(r2.ID, "b", 0, "two", "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	p := s.path("decisions.jsonl")
@@ -313,7 +313,7 @@ func TestWaitReturnsRuling(t *testing.T) {
 	r, _ := s.Ask("a", []string{"f"}, "?", nil, "")
 	go func() {
 		time.Sleep(30 * time.Millisecond)
-		_, _ = s.Rule(r.ID, "b", 0, "go", "", "")
+		_, _ = s.Rule(r.ID, "b", 0, "go", "", "", nil)
 	}()
 	_, d, err := s.Wait(r.ID, time.Second, 5*time.Millisecond)
 	if err != nil || d == nil || d.Ruling != "go" {
@@ -427,7 +427,7 @@ func TestWatchNudgesAndHookDelivers(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, _ := s.Ask("w", []string{"a.go"}, "?", nil, "")
-	if _, err := s.Rule(r.ID, "v", 0, "w first", "", ""); err != nil {
+	if _, err := s.Rule(r.ID, "v", 0, "w first", "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	_, alerts, _ = s.WatchOnce(WatchOptions{Idle: time.Minute, UnclaimedAfter: time.Hour})
@@ -466,7 +466,7 @@ func TestStatsFromEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, _ := s.Ask("a", []string{"f"}, "?", nil, "")
-	_, _ = s.Rule(r.ID, "b", 0, "x", "", "")
+	_, _ = s.Rule(r.ID, "b", 0, "x", "", "", nil)
 	r2, _ := s.Ask("a", []string{"g"}, "?", nil, TierOperator)
 	_, _ = s.Escalate(r2.ID, "b", TierOperator, "why")
 	st, err := s.Stats(time.Hour, "main")
@@ -504,7 +504,7 @@ func TestAskRoutesByAffinity(t *testing.T) {
 	if len(who) != 2 || who[0].Seat != "p" || who[1].Seat != "q" {
 		t.Fatalf("who = %+v", who)
 	}
-	if _, err := s.Rule(req.ID, "q", 0, "p first", "", ""); err != nil {
+	if _, err := s.Rule(req.ID, "q", 0, "p first", "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if who = s.Affinity([]string{"a.go"}, "p"); len(who) != 1 || !strings.Contains(who[0].Why[1], "ruled") {
@@ -591,18 +591,18 @@ func TestDecideProactive(t *testing.T) {
 	if err := s.Init(Tiers{Operator: []string{"op"}}); err != nil {
 		t.Fatal(err)
 	}
-	d, err := s.Decide("op", []string{"pkg/export"}, "json lines", "product", "")
+	d, err := s.Decide("op", []string{"pkg/export"}, "json lines", "product", "", nil)
 	if err != nil || d.Tier != TierOperator || d.Request != "" {
 		t.Fatalf("decide: %v %+v", err, d)
 	}
 	r, _ := s.Ask("a", []string{"pkg/export/export.go"}, "format?", nil, "")
-	if _, err := s.Rule(r.ID, "peer1", 0, "csv", "", ""); err == nil || !strings.Contains(err.Error(), "outranked") {
+	if _, err := s.Rule(r.ID, "peer1", 0, "csv", "", "", nil); err == nil || !strings.Contains(err.Error(), "outranked") {
 		t.Fatalf("peer overrode a proactive operator ruling: %v", err)
 	}
-	if _, err := s.Decide("op", []string{"pkg/export"}, "json array", "", ""); err == nil || !strings.Contains(err.Error(), "must_supersede") {
+	if _, err := s.Decide("op", []string{"pkg/export"}, "json array", "", "", nil); err == nil || !strings.Contains(err.Error(), "must_supersede") {
 		t.Fatalf("same tier re-decided without superseding: %v", err)
 	}
-	if _, err := s.Decide("op", []string{"pkg/export"}, "json array", "changed", d.ID); err != nil {
+	if _, err := s.Decide("op", []string{"pkg/export"}, "json array", "changed", d.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := trunc("héllo wörld", 6); got != "héllo…" {
@@ -628,5 +628,140 @@ func TestLockStaleFromContent(t *testing.T) {
 	}
 	if _, err := s.lock("stale", 50*time.Millisecond, time.Minute); err == nil {
 		t.Fatal("fresh lock broken")
+	}
+}
+
+func TestOrderFromLedger(t *testing.T) {
+	main := repo(t)
+	s := open(t, main)
+	t.Setenv("GIT_COMMITTER_DATE", "2020-01-01T00:00:00Z")
+	a := branch(t, main, "a", "x.go")
+	t.Setenv("GIT_COMMITTER_DATE", "2020-01-02T00:00:00Z")
+	b := branch(t, main, "b", "x.go")
+	t.Setenv("GIT_COMMITTER_DATE", "2020-01-03T00:00:00Z")
+	c := branch(t, main, "c", "y.go")
+	t.Setenv("GIT_COMMITTER_DATE", "")
+	land(t, a, "a")
+	land(t, b, "b")
+	land(t, c, "c")
+	q, err := s.Order(BoardOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(q.Order, ",") != "a,b,c" || len(q.Unruled) != 1 {
+		t.Fatalf("by start time: %+v", q)
+	}
+	r, _ := s.Ask("a", []string{"x.go"}, "order?", nil, "")
+	if _, err := s.Rule(r.ID, "b", 0, "b first", "", "", []string{"b", "a"}); err != nil {
+		t.Fatal(err)
+	}
+	q, _ = s.Order(BoardOptions{})
+	if strings.Join(q.Order, ",") != "b,a,c" || len(q.Unruled) != 0 || len(q.Rulings) != 1 {
+		t.Fatalf("ruled order: %+v", q)
+	}
+	if _, err := s.Decide("op", []string{"y.go"}, "cycle", "", "", []string{"a", "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if q, _ = s.Order(BoardOptions{}); q.Conflict == "" {
+		t.Fatalf("cycle not reported: %+v", q)
+	}
+}
+
+func TestVerifyReceipts(t *testing.T) {
+	main := repo(t)
+	s := open(t, main)
+	good := branch(t, main, "good", "a.go")
+	land(t, good, "good")
+	bad := branch(t, main, "bad", "b.go")
+	write(t, bad, "FAIL", "1")
+	must(t, bad, "add", "-A")
+	must(t, bad, "commit", "-q", "-m", "marker")
+	land(t, bad, "bad")
+	// The verification command fails when a FAIL file exists at the head.
+	b, _, err := s.WatchOnce(WatchOptions{Verify: "git ls-files --error-unmatch FAIL-absent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range b.Rows {
+		if r.State != "red" || r.Receipt == nil || r.Receipt.Pass {
+			t.Fatalf("%s: state %s receipt %+v", r.Branch, r.State, r.Receipt)
+		}
+	}
+	b, _, _ = s.WatchOnce(WatchOptions{Verify: "git ls-files --error-unmatch a.go"})
+	// Receipts are per tip, so the first command's verdict sticks.
+	if got := rowOf(t, b, "good").State; got != "red" {
+		t.Fatalf("receipt not reused: %s", got)
+	}
+	if n, _ := s.Inbox("bad", false); len(n) == 0 {
+		t.Fatal("red branch not nudged")
+	}
+	if _, err := os.Stat(filepath.Join(os.TempDir(), "flat-verify-"+short(rowOf(t, b, "bad").Tip))); err == nil {
+		t.Fatal("verify worktree left behind")
+	}
+}
+
+func TestLoad(t *testing.T) {
+	main := repo(t)
+	s := open(t, main)
+	branch(t, main, "p", "a.go")
+	branch(t, main, "q", "a.go")
+	if err := s.Init(Tiers{Operator: []string{"op"}}); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := s.Ask("p", []string{"a.go"}, "?", nil, "")
+	_, _ = s.Ask("p", []string{"z.go"}, "format?", nil, TierOperator)
+	ls, err := s.Load(time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	find := func(seat string) SeatLoad {
+		for _, l := range ls {
+			if l.Seat == seat {
+				return l
+			}
+		}
+		t.Fatalf("no load row for %s in %+v", seat, ls)
+		return SeatLoad{}
+	}
+	if q := find("q"); q.OpenRequests != 1 || q.PendingNotes != 1 {
+		t.Fatalf("q load = %+v", q)
+	}
+	if o := find("operator"); o.OpenRequests != 1 {
+		t.Fatalf("operator load = %+v", o)
+	}
+	if _, err := s.Rule(r.ID, "q", 0, "p first", "", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	ls, _ = s.Load(time.Hour)
+	if q := find("q"); q.OpenRequests != 0 || q.RuledInWindow != 1 {
+		t.Fatalf("q after ruling = %+v", q)
+	}
+}
+
+func TestConsolidationMergeIsInherited(t *testing.T) {
+	main := repo(t)
+	s := open(t, main)
+	p := branch(t, main, "p", "a.go")
+	land(t, p, "p")
+	q := branch(t, main, "q", "b.go")
+	land(t, q, "q")
+	theme := branch(t, main, "theme", "DEMO.md")
+	must(t, theme, "merge", "-q", "--no-ff", "p", "-m", "merge p")
+	must(t, theme, "merge", "-q", "--no-ff", "q", "-m", "merge q")
+	land(t, theme, "theme")
+	b, err := s.Board(BoardOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := rowOf(t, b, "theme")
+	if strings.Join(tr.Files, ",") != "DEMO.md,briefs/out/theme/RESULT.json" {
+		t.Fatalf("theme own files = %v", tr.Files)
+	}
+	if tr.State != "landed" || len(b.Contended) != 0 {
+		t.Fatalf("theme state %s contended %+v", tr.State, b.Contended)
+	}
+	q2, _ := s.Order(BoardOptions{})
+	if strings.Join(q2.Order, ",") != "p,q,theme" || len(q2.Unruled) != 0 {
+		t.Fatalf("order = %+v", q2)
 	}
 }

@@ -29,6 +29,7 @@ type Stats struct {
 	Blocked          int            `json:"blocked"`
 	Working          int            `json:"working"`
 	Silent           int            `json:"silent"`
+	Red              int            `json:"red"` // landed but verification failed
 	AdmitRefusals    int            `json:"admit_refusals"`
 	Nudges           int            `json:"nudges"`
 	Takeovers        int            `json:"resource_takeovers"`
@@ -155,6 +156,8 @@ func (st *Stats) fromBoard(b *Board) {
 			st.Working++
 		case "silent":
 			st.Silent++
+		case "red":
+			st.Red++
 		case "pin_violation":
 			st.PinViolations++
 		case "pin_invalid":

@@ -115,6 +115,7 @@ type Decision struct {
 	Tier       string    `json:"tier"`
 	Evidence   string    `json:"evidence,omitempty"`
 	Supersedes string    `json:"supersedes,omitempty"`
+	Order      []string  `json:"order,omitempty"` // branches in landing order, when the ruling is about order
 	Prev       string    `json:"prev"`
 	Hash       string    `json:"hash"`
 }
@@ -351,7 +352,7 @@ func (s *State) ClaimRequest(id, holder string, ttl time.Duration) (*Request, er
 
 // Rule appends a decision for a request. epoch 0 means "claim now if free";
 // otherwise it must match the caller's live claim.
-func (s *State) Rule(id, by string, epoch int, ruling, evidence, supersedes string) (*Decision, error) {
+func (s *State) Rule(id, by string, epoch int, ruling, evidence, supersedes string, order []string) (*Decision, error) {
 	if ruling == "" {
 		return nil, refuse("bad_ruling", "a ruling needs --ruling text")
 	}
@@ -379,7 +380,7 @@ func (s *State) Rule(id, by string, epoch int, ruling, evidence, supersedes stri
 	if err != nil {
 		return nil, err
 	}
-	d := &Decision{ID: NewID("dec"), At: now, Request: id, Scope: r.Scope, Ruling: ruling, By: by, Tier: tier, Evidence: evidence, Supersedes: supersedes}
+	d := &Decision{ID: NewID("dec"), At: now, Request: id, Scope: r.Scope, Ruling: ruling, By: by, Tier: tier, Evidence: evidence, Supersedes: supersedes, Order: order}
 	if err := s.appendDecision(d); err != nil {
 		return nil, err
 	}
@@ -467,7 +468,7 @@ func (s *State) Escalate(id, by, to, why string) (*Request, error) {
 
 // Decide records a ruling with no request, for a ruling made proactively
 // (a lead or operator settling a scope before anyone asks).
-func (s *State) Decide(by string, scope []string, ruling, evidence, supersedes string) (*Decision, error) {
+func (s *State) Decide(by string, scope []string, ruling, evidence, supersedes string, order []string) (*Decision, error) {
 	if len(scope) == 0 || ruling == "" {
 		return nil, refuse("bad_ruling", "decide needs --scope and --ruling")
 	}
@@ -481,7 +482,7 @@ func (s *State) Decide(by string, scope []string, ruling, evidence, supersedes s
 	if err != nil {
 		return nil, err
 	}
-	d := &Decision{ID: NewID("dec"), At: Now(), Scope: scope, Ruling: ruling, By: by, Tier: tier, Evidence: evidence, Supersedes: supersedes}
+	d := &Decision{ID: NewID("dec"), At: Now(), Scope: scope, Ruling: ruling, By: by, Tier: tier, Evidence: evidence, Supersedes: supersedes, Order: order}
 	if err := s.appendDecision(d); err != nil {
 		return nil, err
 	}

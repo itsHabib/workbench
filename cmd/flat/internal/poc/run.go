@@ -34,6 +34,7 @@ type RunOptions struct {
 	DiskMin       uint64
 	Out           string // run directory for evidence
 	FlatBin       string // path to the flat binary the builders call
+	Consolidate   bool   // after the builders, one consolidator merges landed branches in ledger order
 }
 
 // Session is one provider session's accounting, read from the CLI's JSON.
@@ -162,7 +163,14 @@ func Run(o RunOptions) error {
 		go func() { defer bg.Done(); r.lead(ctx) }()
 	}
 
-	r.runBuilders(selectTasks(r.o.Only))
+	tasks, err := LoadTasks(r.main)
+	if err != nil {
+		return err
+	}
+	r.runBuilders(selectTasks(tasks, r.o.Only))
+	if r.o.Consolidate {
+		r.consolidate()
+	}
 	r.logf("all builders finished; final pass")
 	cancel()
 	bg.Wait()
@@ -176,8 +184,7 @@ func Run(o RunOptions) error {
 }
 
 // selectTasks narrows the workload to only, when given.
-func selectTasks(only []string) []Task {
-	tasks := Tasks()
+func selectTasks(tasks []Task, only []string) []Task {
 	if len(only) == 0 {
 		return tasks
 	}
@@ -216,7 +223,7 @@ func (r *runner) runBuilders(tasks []Task) {
 
 func (r *runner) watchOptions() flat.WatchOptions {
 	return flat.WatchOptions{Base: "main", Idle: 10 * time.Minute, UnclaimedAfter: 5 * time.Minute, Renudge: 5 * time.Minute, DiskMin: r.o.DiskMin,
-		Wake: true, WakeOpts: flat.WakeOptions{Model: r.o.Model, Max: 2, Wall: 6 * time.Minute}}
+		Wake: true, WakeOpts: flat.WakeOptions{Model: r.o.Model, Max: 2, Wall: 6 * time.Minute}, Verify: "go test ./..."}
 }
 
 func (r *runner) watch(ctx context.Context) {
@@ -279,7 +286,7 @@ func (r *runner) operator(ctx context.Context) {
 				}
 			}
 			os.Setenv("FLAT_SEAT", "operator")
-			if _, err := r.state.Rule(q.ID, "operator", 0, row.Ruling, "operator intent", ""); err != nil {
+			if _, err := r.state.Rule(q.ID, "operator", 0, row.Ruling, "operator intent", "", nil); err != nil {
 				row.Err = err.Error()
 			}
 			r.logf("operator ruled %s from %s matched=%v", q.ID, q.From, row.Matched)
@@ -298,6 +305,7 @@ const leadPrompt = `You are the lead for this fleet. You never edit code. Each t
 2. For every open request that needs lead: rule it from evidence (the board, git log of the
    branches involved, briefs/BRIEF.md, the code) with
    flat rule <id> --ruling "..." --evidence "..."
+   When the ruling is about landing order, record it with --order "<first>,<second>".
    If the question is a product decision the brief does not settle, escalate:
    flat escalate <id> --to operator --why "..."
 3. For every silent builder or unruled overlap on the board, nudge the seat:
@@ -406,7 +414,7 @@ func (r *runner) builderPrompt(t Task, wt string, resumed bool) string {
 	}
 	switch r.o.Mode {
 	case "flat":
-		sb.WriteString("There is no lead. Peers rule for peers. When you ask, `--needs peer` is the default. Before you write RESULT.json, run `flat requests`: for any open request about ordering or mechanics that you can answer from the board (`flat board --md`), git log and the code, rule it: `flat rule <id> --ruling \"...\" --evidence \"...\"`. If a request needs product intent the brief does not settle, `flat escalate <id> --to operator --why \"...\"`. Nobody else will do this.\n\n")
+		sb.WriteString("There is no lead. Peers rule for peers. When you ask, `--needs peer` is the default. Before you write RESULT.json, run `flat requests`: for any open request about ordering or mechanics that you can answer from the board (`flat board --md`), git log and the code, rule it: `flat rule <id> --order \"<first>,<second>\" --ruling \"...\" --evidence \"...\"`. If a request needs product intent the brief does not settle, `flat escalate <id> --to operator --why \"...\"`. Nobody else will do this.\n\n")
 	case "tree":
 		sb.WriteString("A lead session rules on requests. When you ask for a ruling on ordering or mechanics, pass `--needs lead`. Do not rule on other builders' requests and do not escalate to the operator yourself; the lead does.\n\n")
 	}
@@ -416,6 +424,34 @@ func (r *runner) builderPrompt(t Task, wt string, resumed bool) string {
 	sb.WriteString(Rules)
 	sb.WriteString("\nbriefs/BRIEF.md is the topic brief. Start now.\n")
 	return sb.String()
+}
+
+const consolidatorPrompt = `You are seat theme, the consolidator. Run: flat order
+Merge every branch it lists, one at a time, in that order, into this branch with
+git merge --no-ff <branch> -m "merge <branch>". After each merge run: go test ./...
+Resolve conflicts so every merged branch's behavior survives (every key, every field, every
+test). If flat order reports an unruled pair, take the order it printed. Record anything you
+could not reconcile in CONFLICTS.md. Then write DEMO.md with one line per merged branch and the
+demo command, run git rev-parse HEAD, write briefs/out/theme/RESULT.json with that head_sha and
+the list of merged branches as claims, commit only that file, and stop. One shell command per
+tool call; no && and no ;.`
+
+// consolidate runs the theme merge: the lead's theme map is now the
+// ledger's order, and the consolidator is a seat like any other.
+func (r *runner) consolidate() {
+	wt := filepath.Join(filepath.Dir(r.main), "wt", "theme")
+	if _, err := flat.Git(r.main, "worktree", "add", "-q", wt, "-b", "theme", "main"); err != nil {
+		r.logf("theme worktree: %v", err)
+		return
+	}
+	r.mu.Lock()
+	r.alive++
+	r.mu.Unlock()
+	sess := r.claude(context.Background(), "theme", "consolidator", wt, consolidatorPrompt, r.o.MaxTurns, r.o.BuilderWall)
+	r.mu.Lock()
+	r.alive--
+	r.mu.Unlock()
+	r.logf("consolidator done: turns=%d out=%d exit=%d", sess.NumTurns, sess.OutputTok, sess.Exit)
 }
 
 // claude runs one provider session and records it.

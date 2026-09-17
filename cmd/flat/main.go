@@ -33,10 +33,12 @@ decide      ask --scope a,b --question Q [--options "x|y"] [--needs peer|lead|op
             wait ID [--timeout 8m]
             decisions [--scope PATH] [--json]
             who SCOPE[,SCOPE]        which seats hold context on a scope (the routing index)
+            order                    landing order of landed branches from the ledger (the theme map)
+            load [--window 1h]       queue wait per address: the number behind "too many messages"
 resource    take NAME [--ttl 30m] · drop NAME
 admit       admit [--seats N] [--disk-min 10G] [--resource NAME] [--wait] [--json]
 watch       watch [--interval 30s] [--once] [--fetch] [--idle 20m] [--unclaimed 10m] [--disk-min 10G]
-                  [--wake] [--wake-model M] [--wake-tools LIST] [--wake-max 2]
+                  [--wake] [--wake-model M] [--wake-tools LIST] [--wake-max 2] [--verify "go test ./..."]
             digest
 inbox       inbox [--keep] · nudge SEAT TEXT · hook · install-hook [--dir REPO]
 stats       stats [--threshold 20m] [--json]
@@ -85,9 +87,10 @@ type cli struct {
 
 	as, scope, question, options, needs, ruling, evidence, supersedes, to, why        string
 	operator, lead, verifier, diskMin, resource, dir, cmd, wakeModel, wakeTools, base string
+	orderFlag, verifyCmd                                                              string
 	jsonOut, md, phone, fetch, all, keep, wait, once, wake                            bool
 	epoch, seats, wakeMax                                                             int
-	ttl, timeout, idle, interval, unclaimed, threshold                                time.Duration
+	ttl, timeout, idle, interval, unclaimed, threshold, window                        time.Duration
 }
 
 func parse(verb string, args []string) (*cli, error) {
@@ -132,6 +135,9 @@ func parse(verb string, args []string) (*cli, error) {
 	fs.StringVar(&c.wakeModel, "wake-model", "", "model for wakes")
 	fs.StringVar(&c.wakeTools, "wake-tools", "", "allowed tools for wakes")
 	fs.IntVar(&c.wakeMax, "wake-max", 2, "concurrent wakes")
+	fs.StringVar(&c.orderFlag, "order", "", "branches in landing order, comma-separated, when ruling on order")
+	fs.StringVar(&c.verifyCmd, "verify", "", "watch: command to run at each landed head, e.g. 'go test ./...'")
+	fs.DurationVar(&c.window, "window", time.Hour, "load window")
 
 	// Positional args may precede flags: `flat rule ID --ruling ...`.
 	for len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -157,6 +163,8 @@ var verbs = map[string]func(*cli) error{
 	"escalate":     (*cli).escalate,
 	"wait":         (*cli).waitFor,
 	"decisions":    (*cli).decisions,
+	"order":        (*cli).order,
+	"load":         (*cli).load,
 	"who":          (*cli).who,
 	"take":         (*cli).take,
 	"drop":         (*cli).drop,
@@ -298,21 +306,59 @@ func (c *cli) check() error {
 	if err != nil {
 		return err
 	}
-	others := touching(b, p, c.seat)
+	// Contention is judged at package scope: a sibling in the same directory
+	// counts, because a ruling on one file rarely leaves its test alone.
+	// Coverage is judged at file scope: the ruling must reach this path.
+	pkg := packageOf(p)
+	others := touching(b, pkg, c.seat)
 	ds, err := c.s.Lookup([]string{p})
 	if err != nil {
 		return err
 	}
 	switch {
 	case len(others) == 0:
-		fmt.Printf("clear: no other branch has changed %s\n", p)
+		fmt.Printf("clear: no other branch has changed anything under %s\n", pkg)
 	case len(ds) > 0:
 		d := ds[len(ds)-1]
-		fmt.Printf("contended but ruled: %s also changed by %s. ruling %s by %s (%s): %s\n", p, strings.Join(others, ", "), d.ID, d.By, d.Tier, d.Ruling)
+		fmt.Printf("contended but ruled: %s is also changed by %s. ruling %s by %s (%s): %s\n", pkg, strings.Join(others, ", "), d.ID, d.By, d.Tier, d.Ruling)
 	default:
-		fmt.Printf("contended, no ruling: %s is also changed by %s. do not edit it until ruled: flat ask --scope %s --question 'who lands first on %s?' --options '%s|me' then flat wait ID\n", p, strings.Join(others, ", "), p, p, strings.Split(others[0], " ")[0])
+		fmt.Printf("contended, no ruling: %s is also changed by %s. do not edit %s until ruled. ask at package scope: flat ask --scope %s --question 'who lands first on %s?' --options '%s|me' then flat wait ID; rule with --order to record it\n", pkg, strings.Join(others, ", "), p, pkg, pkg, strings.Split(others[0], " ")[0])
 		return c.record(&flat.Refusal{Code: "contended_unruled", Msg: p})
 	}
+	return nil
+}
+
+// packageOf is the directory a path lives in, or the path itself for a
+// directory or a top-level file.
+func packageOf(p string) string {
+	p = strings.TrimSuffix(p, "/")
+	if i := strings.LastIndex(p, "/"); i > 0 {
+		return p[:i]
+	}
+	return p
+}
+
+func (c *cli) load() error {
+	ls, err := c.s.Load(c.window)
+	if err != nil {
+		return err
+	}
+	if c.jsonOut {
+		return c.emit(ls)
+	}
+	fmt.Println(flat.LoadText(ls))
+	return nil
+}
+
+func (c *cli) order() error {
+	seq, err := c.s.Order(c.boardOpts())
+	if err != nil {
+		return err
+	}
+	if c.jsonOut {
+		return c.emit(seq)
+	}
+	fmt.Println(seq.Text())
 	return nil
 }
 
@@ -381,7 +427,7 @@ func (c *cli) claim() error {
 }
 
 func (c *cli) rule() error {
-	d, err := c.s.Rule(c.arg(0), c.seat, c.epoch, c.ruling, c.evidence, c.supersedes)
+	d, err := c.s.Rule(c.arg(0), c.seat, c.epoch, c.ruling, c.evidence, c.supersedes, split(c.orderFlag, ","))
 	if err != nil {
 		return c.record(err)
 	}
@@ -393,7 +439,7 @@ func (c *cli) rule() error {
 }
 
 func (c *cli) decide() error {
-	d, err := c.s.Decide(c.seat, split(c.scope, ","), c.ruling, c.evidence, c.supersedes)
+	d, err := c.s.Decide(c.seat, split(c.scope, ","), c.ruling, c.evidence, c.supersedes, split(c.orderFlag, ","))
 	if err != nil {
 		return c.record(err)
 	}
@@ -527,7 +573,7 @@ func (c *cli) watch() error {
 		return err
 	}
 	return c.s.Watch(flat.WatchOptions{Interval: c.interval, Base: c.base, Fetch: c.fetch, Idle: c.idle, UnclaimedAfter: c.unclaimed, DiskMin: floor, Once: c.once, Out: os.Stdout,
-		Wake: c.wake, WakeOpts: flat.WakeOptions{Model: c.wakeModel, Tools: c.wakeTools, Max: c.wakeMax}})
+		Wake: c.wake, WakeOpts: flat.WakeOptions{Model: c.wakeModel, Tools: c.wakeTools, Max: c.wakeMax}, Verify: c.verifyCmd})
 }
 
 func (c *cli) digest() error {

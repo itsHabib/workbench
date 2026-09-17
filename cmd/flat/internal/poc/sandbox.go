@@ -4,6 +4,7 @@
 package poc
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,88 @@ import (
 
 	"github.com/itsHabib/workbench/cmd/flat/internal/flat"
 )
+
+// Spec sizes a generated workload. Zero values mean the classic six tasks.
+type Spec struct {
+	Tasks    int `json:"tasks"`
+	Packages int `json:"packages"`
+}
+
+// Generate builds N tasks over P packages. Task i adds one key to package
+// (i mod P), so every package is contended by about N/P builders; every
+// fifth task also touches the shared fixture and must hold its lease.
+// Faults: task 2 is killed and resumed (B), task 4 commits after RESULT
+// (A), the last task has an unspecified product choice (C).
+func Generate(spec Spec) []Task {
+	if spec.Tasks == 0 {
+		return Tasks()
+	}
+	if spec.Packages <= 0 {
+		spec.Packages = 1
+	}
+	var tasks []Task
+	for i := 1; i <= spec.Tasks; i++ {
+		pkg := fmt.Sprintf("p%d", (i-1)%spec.Packages+1)
+		t := Task{Branch: fmt.Sprintf("t%02d-%s-k%d", i, pkg, i), Title: fmt.Sprintf("%s: key k%d", pkg, i)}
+		t.Card = fmt.Sprintf(`Add the key "k%d" with value %d to the map returned by Values() in pkg/%s/%s.go, and a
+test in pkg/%s/%s_test.go asserting Values()["k%d"] == %d. Keep every existing key.
+Files you will touch: pkg/%s/%s.go, pkg/%s/%s_test.go.`, i, i, pkg, pkg, pkg, pkg, i, i, pkg, pkg, pkg, pkg)
+		switch {
+		case i%5 == 0:
+			t.Resource = "fixture-db"
+			t.Card += fmt.Sprintf(`
+
+Also add %d to the "amount" of every row in fixtures/db.json (add the field if absent).
+fixtures/db.json is the shared fixture database: hold the fixture-db resource while you
+change it.`, i)
+		case i == 2:
+			t.Fault = "B"
+		case i == 4:
+			t.Fault = "A"
+			t.Card += `
+
+When you are done and RESULT.json is committed, also bump Version in cmd/app/main.go to
+"0.2.0" in one more commit so the demo shows the new version.`
+		case i == spec.Tasks:
+			t.Fault = "C"
+			t.Card += fmt.Sprintf(`
+
+Also add an "export" subcommand to cmd/app/main.go that writes the keys and values of
+pkg/%s Values() to stdout in the export format, implemented in pkg/export/export.go
+(replace the stub). The brief does not say which export format downstream tools expect.
+That is a product decision. Do not choose one yourself.`, pkg)
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks
+}
+
+// packageFiles are the generated packages a Spec adds to the app.
+func packageFiles(spec Spec) map[string]string {
+	files := map[string]string{}
+	if spec.Tasks == 0 {
+		return files
+	}
+	for p := 1; p <= spec.Packages; p++ {
+		pkg := fmt.Sprintf("p%d", p)
+		files[fmt.Sprintf("pkg/%s/%s.go", pkg, pkg)] = fmt.Sprintf("package %s\n\n// Values is the package's registry; each task adds one key.\nfunc Values() map[string]int {\n\treturn map[string]int{}\n}\n", pkg)
+		files[fmt.Sprintf("pkg/%s/%s_test.go", pkg, pkg)] = fmt.Sprintf("package %s\n\nimport \"testing\"\n\nfunc TestValuesNotNil(t *testing.T) {\n\tif Values() == nil {\n\t\tt.Fatal(\"nil\")\n\t}\n}\n", pkg)
+	}
+	return files
+}
+
+// LoadTasks reads the workload a sandbox was initialized with.
+func LoadTasks(main string) ([]Task, error) {
+	data, err := os.ReadFile(filepath.Join(main, "briefs", "tasks.json"))
+	if err != nil {
+		return nil, fmt.Errorf("%s is not a sandbox from `flat poc init` (%w)", main, err)
+	}
+	var tasks []Task
+	if err := json.Unmarshal(data, &tasks); err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
 
 // Task is one builder's job. Resource names an exclusive resource the task
 // must hold; Fault marks a planted fault carried by the card.
@@ -69,10 +152,12 @@ const Rules = `# Rules for every builder
 2. Commit and push WIP within 5 minutes of starting and every 10 minutes after:
    git push origin <your branch>
 3. Before editing any file, run: flat check <path>
-   If it says "contended, no ruling", do not edit that file. Ask for a ruling:
-   flat ask --scope <path> --question "..." --options "a|b"
+   If it says "contended, no ruling", do not edit that file. Ask for a ruling at PACKAGE scope
+   (the directory, so the ruling covers the test file too):
+   flat ask --scope <package dir> --question "..." --options "a|b"
    then: flat wait <id>
    Follow the ruling. Rebase on the other branch if the ruling says it lands first.
+   When you rule on order, record it: flat rule <id> --order "<first>,<second>" --ruling "..." --evidence "..."
 4. To change anything under fixtures/, hold the resource first: flat take fixture-db
    If refused, someone holds it: retry every minute for up to 8 minutes. When done: flat drop fixture-db
 5. If the task is ambiguous about product behavior, never guess:
@@ -259,7 +344,7 @@ card per builder.
 // Init creates dir/origin.git (bare) and dir/main (a clone on main) holding
 // the sandbox app, the rules, the brief and the task cards, and writes
 // tiers.json so "operator" and "lead" outrank peers.
-func Init(dir string) error {
+func Init(dir string, spec Spec) error {
 	dir, err := filepath.Abs(dir)
 	if err != nil {
 		return err
@@ -291,11 +376,17 @@ func Init(dir string) error {
 	for k, v := range appFiles {
 		files[k] = v
 	}
+	for k, v := range packageFiles(spec) {
+		files[k] = v
+	}
 	files["RULES.md"] = Rules
 	files["briefs/BRIEF.md"] = Brief
-	for i, t := range Tasks() {
+	tasks := Generate(spec)
+	for i, t := range tasks {
 		files[fmt.Sprintf("briefs/tasks/T%d.md", i+1)] = fmt.Sprintf("# T%d · %s\n\nbranch: %s\n\n%s\n", i+1, t.Title, t.Branch, t.Card)
 	}
+	tj, _ := json.MarshalIndent(tasks, "", "  ")
+	files["briefs/tasks.json"] = string(tj) + "\n"
 	for rel, content := range files {
 		p := filepath.Join(main, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {

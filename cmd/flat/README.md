@@ -15,6 +15,9 @@ ruling, and that only the ruling needs a mind. It replaces the tree with five pi
 | resource leases | `flat take`, `flat drop` | keep two builders off one fixture, device or live app |
 | admission | `flat admit` | nobody did this; the disk filled |
 | watcher and inbox | `flat watch`, `flat digest`, `flat inbox`, `flat hook` | nudge the silent, render a delta table, forward what arrived |
+| verification receipts | `flat watch --verify "go test ./..."` | notice a landing that is red; a receipt per exact head, written by a process |
+| landing order | `flat order`, `flat rule --order` | the theme map: merge order derived from order rulings and start times |
+| load | `flat load` | the number behind "the lead gets too many messages": queue wait per address |
 
 What remains a mind: writing a builder's handoff, and rulings that need intent nobody wrote
 down. Those go to whoever holds the evidence (any peer) or to the operator, by tier. There is a

@@ -13,7 +13,8 @@ contract; `poc/KILL.md` and `poc/RESULTS.md` are the adversarial run that justif
   git; `decide.go` is requests, claims, rulings, tiers, routing and the ledger; `resource.go`
   leases; `admit.go` admission (`disk_unix.go`, `disk_windows.go`); `watch.go` alerts,
   digest and renders; `inbox.go` notes and the hook; `wake.go` session records and wakes;
-  `stats.go` the scorecard.
+  `receipt.go` verification receipts at landed heads; `order.go` the landing order the
+  ledger implies; `load.go` queue wait per address; `stats.go` the scorecard.
 - `internal/poc` — the sandbox generator, the runner (real `claude -p` builders, watcher,
   deterministic operator, tree-mode lead), the scorer and the comparison.
 

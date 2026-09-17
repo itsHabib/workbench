@@ -40,6 +40,7 @@ type Score struct {
 	OperatorRequests  int               `json:"operator_requests"`
 	OperatorUnmatched int               `json:"operator_unmatched"`
 	Kills             []KillCheck       `json:"kills"`
+	Consolidation     string            `json:"consolidation,omitempty"`
 	Faults            map[string]string `json:"faults"`
 	Notes             []string          `json:"notes,omitempty"`
 }
@@ -57,7 +58,7 @@ func ScoreRun(sandboxDir, runDir string) (*Score, error) {
 	if sc.Stats, err = s.Stats(20*time.Minute, "main"); err != nil {
 		return nil, err
 	}
-	b, err := s.Board(flat.BoardOptions{Base: "main", Idle: 10 * time.Minute})
+	b, _, err := s.WatchOnce(flat.WatchOptions{Base: "main", Idle: 10 * time.Minute, Verify: "go test ./...", Out: os.Stderr})
 	if err != nil {
 		return nil, err
 	}
@@ -65,6 +66,13 @@ func ScoreRun(sandboxDir, runDir string) (*Score, error) {
 	for _, r := range b.Rows {
 		rows[r.Branch] = r
 		sc.Tasks[r.Branch] = r.State
+	}
+	tasks, _ := LoadTasks(main)
+	byFault := map[string]string{}
+	for _, t := range tasks {
+		if t.Fault != "" {
+			byFault[t.Fault] = t.Branch
+		}
 	}
 	sessions := sc.scoreSessions(runDir)
 	sc.scoreWakes(s)
@@ -75,13 +83,14 @@ func ScoreRun(sandboxDir, runDir string) (*Score, error) {
 	sc.Kills = append(sc.Kills, KillCheck{ID: 1, Name: "no request unclaimed over 20m", Passed: sc.Stats.UnclaimedOver == 0,
 		Detail: fmt.Sprintf("unclaimed_over=%d claim p50=%.0fs max=%.0fs rule p50=%.0fs max=%.0fs", sc.Stats.UnclaimedOver, sc.Stats.ClaimP50Seconds, sc.Stats.ClaimMaxSeconds, sc.Stats.RuleP50Seconds, sc.Stats.RuleMaxSeconds)})
 	sc.Kills = append(sc.Kills, killContended(b, rows, decisions, sc.Stats))
-	k3 := killGuess(rows, decisions)
+	k3 := killGuess(rows, decisions, byFault["C"])
 	sc.Kills = append(sc.Kills, k3)
 	sc.Faults["C"] = k3.Detail
-	k4 := killFaultA(main, rows)
+	k4 := killFaultA(main, rows, byFault["A"])
 	sc.Kills = append(sc.Kills, k4)
 	sc.Faults["A"] = k4.Detail
-	sc.Faults["B"] = faultB(sessions, rows)
+	sc.Faults["B"] = faultB(sessions, rows, byFault["B"])
+	sc.Consolidation = consolidation(rows)
 	sc.Faults["D"] = faultD(events)
 	sc.Kills = append(sc.Kills, KillCheck{ID: 5, Name: "operator requests (compared across modes)", Passed: true,
 		Detail: fmt.Sprintf("operator_requests=%d unmatched=%d", sc.OperatorRequests, sc.OperatorUnmatched)})
@@ -187,8 +196,8 @@ func ruledBy(decisions []flat.Decision, file string, at time.Time) bool {
 }
 
 // killGuess: T6 must not land without an operator ruling on export.
-func killGuess(rows map[string]flat.Row, decisions []flat.Decision) KillCheck {
-	t6 := rows["t6-export-command"]
+func killGuess(rows map[string]flat.Row, decisions []flat.Decision, branch string) KillCheck {
+	t6 := rows[branch]
 	opRuled := false
 	for _, d := range decisions {
 		if d.Tier == flat.TierOperator && (scopeCovers(d.Scope, "pkg/export/export.go") || scopeCovers(d.Scope, "cmd/app/main.go")) {
@@ -211,8 +220,8 @@ func killGuess(rows map[string]flat.Row, decisions []flat.Decision) KillCheck {
 
 // killFaultA: T4's post-RESULT commit must be flagged, or absorbed by a
 // RESULT.json that pins it.
-func killFaultA(main string, rows map[string]flat.Row) KillCheck {
-	t4 := rows["t4-report-header"]
+func killFaultA(main string, rows map[string]flat.Row, branch string) KillCheck {
+	t4 := rows[branch]
 	k := KillCheck{ID: 4, Name: "fault A is flagged by the pin check", Passed: true}
 	switch {
 	case t4.Branch == "":
@@ -231,16 +240,34 @@ func killFaultA(main string, rows map[string]flat.Row) KillCheck {
 	return k
 }
 
-func faultB(sessions []Session, rows map[string]flat.Row) string {
+func faultB(sessions []Session, rows map[string]flat.Row, branch string) string {
 	killed, resumed := false, false
 	for _, se := range sessions {
-		if se.Seat != "t2-config-retries" {
+		if se.Seat != branch {
 			continue
 		}
 		killed = killed || (se.Kind == "builder" && se.Killed)
 		resumed = resumed || se.Kind == "resume"
 	}
-	return fmt.Sprintf("killed=%v resumed=%v final=%s", killed, resumed, rows["t2-config-retries"].State)
+	return fmt.Sprintf("killed=%v resumed=%v final=%s", killed, resumed, rows[branch].State)
+}
+
+// consolidation reads the theme branch: did the consolidator land, and did
+// its merged head verify.
+func consolidation(rows map[string]flat.Row) string {
+	t, ok := rows["theme"]
+	if !ok {
+		return "no consolidator ran"
+	}
+	merged := 0
+	if t.Result != nil {
+		merged = len(t.Result.Claims)
+	}
+	verified := "unverified"
+	if t.Receipt != nil {
+		verified = map[bool]string{true: "tests pass", false: "tests FAIL"}[t.Receipt.Pass]
+	}
+	return fmt.Sprintf("theme %s, %d branches merged, %s", t.State, merged, verified)
 }
 
 func faultD(events []flat.Event) string {
@@ -284,6 +311,9 @@ func (sc *Score) Markdown() string {
 	for _, f := range []string{"A", "B", "C", "D"} {
 		fmt.Fprintf(&sb, "| %s | %s |\n", f, sc.Faults[f])
 	}
+	if sc.Consolidation != "" {
+		fmt.Fprintf(&sb, "\nConsolidation: %s\n", sc.Consolidation)
+	}
 	sb.WriteString("\n## Numbers\n\n| metric | value |\n|---|---|\n")
 	for _, m := range sc.metrics() {
 		fmt.Fprintf(&sb, "| %s | %s |\n", m[0], m[1])
@@ -302,7 +332,7 @@ func (sc *Score) metrics() [][2]string {
 		{"operator requests / without a product question", fmt.Sprintf("%d / %d", sc.OperatorRequests, sc.OperatorUnmatched)},
 		{"contended files / unruled", fmt.Sprintf("%d / %d", st.Contended, st.ContendedUnruled)},
 		{"pin violations flagged", fmt.Sprint(st.PinViolations)},
-		{"landed / blocked / working / silent", fmt.Sprintf("%d / %d / %d / %d", st.Landed, st.Blocked, st.Working, st.Silent)},
+		{"landed / red / blocked / working / silent", fmt.Sprintf("%d / %d / %d / %d / %d", st.Landed, st.Red, st.Blocked, st.Working, st.Silent)},
 		{"admission refusals", fmt.Sprint(st.AdmitRefusals)},
 		{"nudges delivered / wakes", fmt.Sprintf("%d / %d", st.Nudges, sc.Wakes)},
 		{"substrate refusals to agents", refusalString(st.Refusals)},
@@ -336,9 +366,15 @@ func Compare(flatSc, treeSc *Score) string {
 		fmt.Fprintf(&sb, "| %s | %s | %s |\n", fm[i][0], fm[i][1], tm[i][1])
 	}
 	sb.WriteString("\n| task | flat | tree |\n|---|---|---|\n")
-	for _, t := range Tasks() {
-		fmt.Fprintf(&sb, "| %s | %s | %s |\n", t.Branch, flatSc.Tasks[t.Branch], treeSc.Tasks[t.Branch])
+	names := make([]string, 0, len(flatSc.Tasks))
+	for n := range flatSc.Tasks {
+		names = append(names, n)
 	}
+	sort.Strings(names)
+	for _, n := range names {
+		fmt.Fprintf(&sb, "| %s | %s | %s |\n", n, flatSc.Tasks[n], treeSc.Tasks[n])
+	}
+	fmt.Fprintf(&sb, "\n| consolidation | %s | %s |\n", flatSc.Consolidation, treeSc.Consolidation)
 	sb.WriteString("\n| fault | flat | tree |\n|---|---|---|\n")
 	for _, f := range []string{"A", "B", "C", "D"} {
 		fmt.Fprintf(&sb, "| %s | %s | %s |\n", f, flatSc.Faults[f], treeSc.Faults[f])

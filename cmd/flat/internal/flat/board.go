@@ -36,6 +36,7 @@ type Row struct {
 	Unpushed   bool      `json:"unpushed,omitempty"`
 	Overlaps   []Overlap `json:"overlaps,omitempty"`
 	Result     *Result   `json:"result,omitempty"`
+	Receipt    *Receipt  `json:"receipt,omitempty"` // verification at this tip, when the watcher ran one
 }
 
 // Overlap is a file this row shares with another live branch.
@@ -66,6 +67,7 @@ type Board struct {
 	Requests   RequestSummary `json:"requests"`
 	Resources  []Resource     `json:"resources,omitempty"`
 	FetchError string         `json:"fetch_error,omitempty"`
+	tips       map[string]string
 }
 
 // BoardOptions tune the derivation.
@@ -114,15 +116,15 @@ func (s *State) Board(opts BoardOptions) (*Board, error) {
 		return nil, err
 	}
 	names, tips, rows := pickTips(s.Repo, refs)
+	b.tips = tips
 	byFile := map[string][]string{}
 	for _, name := range names {
 		row := rows[name]
 		row.AgeSeconds = int64(b.At.Sub(row.TipAt).Seconds())
-		fork := s.forkPoint(name, row.Tip, baseSHA, tips)
-		if row.Tip == fork {
+		row.Files = s.ownFiles(name, row.Tip, baseSHA, tips)
+		if len(row.Files) == 0 {
 			continue // nothing of its own on this branch yet
 		}
-		row.Files, _ = gitLines(s.Repo, "diff", "--name-only", fork, row.Tip)
 		s.classify(row, opts)
 		for _, f := range row.Files {
 			if !isResultFile(f) {
@@ -217,29 +219,40 @@ func contentions(byFile map[string][]string, effective []Decision) []Contention 
 	return out
 }
 
-// forkPoint is where a branch's own work begins: the deepest merge-base
-// with the base branch or with any other branch's tip. A branch that
-// rebased onto a peer, as a ruling may tell it to, carries the peer's
-// commits; those are inherited, not its own changes, and must not count
-// as contention or as its landing.
-func (s *State) forkPoint(name, tip, baseSHA string, tips map[string]string) string {
-	best := baseSHA
-	if mb, err := Git(s.Repo, "merge-base", baseSHA, tip); err == nil {
-		best = mb
+// ownFiles is what a branch changed itself: the files touched by commits
+// reachable from its tip and from no other branch tip or the base. A branch
+// that rebased onto a peer, or a consolidation that merged peers, carries
+// their commits; those are inherited, not its own changes, and must not
+// count as contention or as its landing.
+func (s *State) ownFiles(name, tip, baseSHA string, tips map[string]string) []string {
+	lines, err := gitLines(s.Repo, append([]string{"log", "--format=", "--name-only", tip, "--not", baseSHA}, s.inherited(name, tip, tips)...)...)
+	if err != nil {
+		return nil
 	}
+	seen := map[string]bool{}
+	var out []string
+	for _, f := range lines {
+		if f != "" && !seen[f] {
+			seen[f] = true
+			out = append(out, f)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// inherited lists the other tips this branch is built on top of. Only a tip
+// that is an ancestor of this one is inherited; a branch built on top of
+// this one must not erase it.
+func (s *State) inherited(name, tip string, tips map[string]string) []string {
+	var out []string
 	for other, otherTip := range tips {
-		if other == name || otherTip == "" || otherTip == tip {
-			continue
-		}
-		mb, err := Git(s.Repo, "merge-base", otherTip, tip)
-		if err != nil || mb == best || mb == tip {
-			continue
-		}
-		if isAncestor(s.Repo, best, mb) {
-			best = mb
+		if other != name && otherTip != "" && otherTip != tip && isAncestor(s.Repo, otherTip, tip) {
+			out = append(out, otherTip)
 		}
 	}
-	return best
+	sort.Strings(out)
+	return out
 }
 
 func (s *State) classify(row *Row, opts BoardOptions) {
@@ -407,7 +420,7 @@ func (b *Board) Markdown() string {
 // Phone renders the smallest read: one short line per branch, then one for
 // requests. Fits a phone notification.
 func (b *Board) Phone() string {
-	letter := map[string]string{"working": "W", "silent": "S", "landed": "L", "blocked": "B", "pin_violation": "X", "pin_invalid": "?"}
+	letter := map[string]string{"working": "W", "silent": "S", "landed": "L", "blocked": "B", "pin_violation": "X", "pin_invalid": "?", "red": "R"}
 	var sb strings.Builder
 	for _, r := range b.Rows {
 		flag := " "

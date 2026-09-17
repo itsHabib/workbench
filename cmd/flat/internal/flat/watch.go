@@ -23,6 +23,7 @@ type WatchOptions struct {
 	Out            io.Writer
 	Wake           bool // resume seats that have notes and are between turns
 	WakeOpts       WakeOptions
+	Verify         string // command to run at each landed head; a failure makes the branch red
 }
 
 func (o *WatchOptions) defaults() {
@@ -102,6 +103,9 @@ func (s *State) WatchOnce(opts WatchOptions) (*Board, []Alert, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if opts.Verify != "" {
+		s.verifyLanded(b, opts.Verify)
+	}
 	as := &alertSet{now: b.At, current: map[string]*Alert{}}
 	rowAlerts(b, as)
 	reqs, err := s.Requests(true)
@@ -150,6 +154,9 @@ func rowAlerts(b *Board, as *alertSet) {
 		case "pin_invalid":
 			as.add(Alert{Key: "pininvalid:" + r.Branch, Kind: "pin_invalid", Subject: r.Branch, Seats: []string{r.Branch},
 				Text: fmt.Sprintf("branch %s has a RESULT.json whose head_sha is missing or not on the branch. fix head_sha to the commit before the RESULT commit.", r.Branch)})
+		case "red":
+			as.add(Alert{Key: "red:" + r.Branch, Kind: "landed_red", Subject: r.Branch, Seats: []string{r.Branch},
+				Text: fmt.Sprintf("branch %s landed but its verification failed at %s: %s. fix it, then re-pin RESULT.json to the new head.", r.Branch, short(r.Tip), r.Receipt.Tail)})
 		}
 	}
 	for _, c := range b.Contended {
@@ -261,7 +268,7 @@ func digestRows(b *Board, sb *strings.Builder) {
 	for _, r := range b.Rows {
 		byState[r.State] = append(byState[r.State], r)
 	}
-	for _, st := range []string{"landed", "working", "silent", "blocked", "pin_violation", "pin_invalid"} {
+	for _, st := range []string{"landed", "red", "working", "silent", "blocked", "pin_violation", "pin_invalid"} {
 		rows := byState[st]
 		if len(rows) == 0 {
 			continue
