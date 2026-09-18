@@ -1,0 +1,17 @@
+p3 Add README worked example and golden integration test
+p5 cli-main: adapt to job.LoadCSV single-job return and type/no-job_id columns
+p5 cli-main: CSV primary input, JSON via -format json, multi-job output
+p5 cli-main: add setup time (once per job) to total
+p5 Add CLI main: flags, wiring, table/JSON output
+p3 Align CSV job format with dec_dli5hxg9kpa8_28524aa6
+p3 Add CSV job loader (job.LoadCSV / ParseCSV)
+p2 Add per-material SetupMinutes to material data table
+p4 Align contouring/facing with SFM+chipload cutting-parameter convention
+p4 Add shared Operation interface and facing estimator
+harness customer change
+p3 Add facing and pocketing time estimate formulas
+p5 Add material/tool defaults with user data override (internal/data)
+p4 Add contouring operation estimator
+p2 Add drilling operation time estimator
+p1 Add job JSON schema and loader (internal/job)
+harness spec

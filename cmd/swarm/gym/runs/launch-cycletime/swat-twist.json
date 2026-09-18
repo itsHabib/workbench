@@ -1,0 +1,279 @@
+{
+  "at": "2026-09-18T04:13:15.245115Z",
+  "shape": "swat",
+  "model": "claude-sonnet-5",
+  "store": "resp:127.0.0.1:56440/launch2",
+  "seats": [
+    {
+      "seat": "p1",
+      "role": "peer",
+      "joined_s": 0.163984625,
+      "wall_s": 680.863076916,
+      "turns": 95,
+      "cost_usd": 2.191061200000001,
+      "cost_known": true,
+      "wakes": 1
+    },
+    {
+      "seat": "p2",
+      "role": "peer",
+      "joined_s": 0.220885708,
+      "wall_s": 678.347744209,
+      "turns": 99,
+      "cost_usd": 2.1560544000000004,
+      "cost_known": true,
+      "wakes": 1
+    },
+    {
+      "seat": "p3",
+      "role": "joiner",
+      "joined_s": 60.401819833,
+      "wall_s": 622.069868625,
+      "turns": 113,
+      "cost_usd": 2.856202400000001,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p4",
+      "role": "joiner",
+      "joined_s": 80.501347333,
+      "wall_s": 586.323495542,
+      "turns": 89,
+      "cost_usd": 2.2002436000000003,
+      "cost_known": true,
+      "wakes": 1
+    },
+    {
+      "seat": "p5",
+      "role": "joiner",
+      "joined_s": 100.613989625,
+      "wall_s": 575.189081542,
+      "turns": 104,
+      "cost_usd": 2.8764195999999997,
+      "cost_known": true,
+      "wakes": 0
+    }
+  ],
+  "hidden_passed": 1,
+  "hidden_total": 1,
+  "builds": true,
+  "own_test_files": 9,
+  "wall_s": 688.615991916,
+  "cost_usd": 12.279981200000003,
+  "turns": 500,
+  "work": [
+    {
+      "id": "job-schema",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "job JSON schema + loader (internal/job)"
+    },
+    {
+      "id": "job-schema-loader",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p1",
+      "holder": "",
+      "title": "Job JSON schema + loader"
+    },
+    {
+      "id": "data-materials",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p5",
+      "holder": "",
+      "title": "built-in material/tool defaults + user data override (internal/data)"
+    },
+    {
+      "id": "estimate-facing",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p3",
+      "holder": "",
+      "title": "facing + pocketing time formulas (internal/estimate)"
+    },
+    {
+      "id": "data-materials-defaults",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p2",
+      "holder": "",
+      "title": "Material/tool defaults + data loader"
+    },
+    {
+      "id": "estimate-pocketing",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p2",
+      "holder": "",
+      "title": "Pocketing operation estimator"
+    },
+    {
+      "id": "estimate-drilling",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p2",
+      "holder": "",
+      "title": "Drilling operation estimator"
+    },
+    {
+      "id": "estimate-contouring",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p4",
+      "holder": "",
+      "title": "Contouring operation estimator"
+    },
+    {
+      "id": "cli-main",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p5",
+      "holder": "",
+      "title": "CLI main: flags, wiring, table/json output"
+    },
+    {
+      "id": "readme-example",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p3",
+      "holder": "",
+      "title": "README worked example + golden integration test"
+    },
+    {
+      "id": "estimate-facing-op",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p4",
+      "holder": "",
+      "title": "Facing operation estimator + shared Operation interface"
+    },
+    {
+      "id": "job-csv-loader",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p3",
+      "holder": "",
+      "title": "CSV job loader (LoadCSV, one row per operation)"
+    },
+    {
+      "id": "data-setup-time",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "Add per-material SetupMinutes to data.Material + defaults"
+    },
+    {
+      "id": "setup-minutes-data",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p2",
+      "holder": "",
+      "title": "Per-material setup time table + SetupMinutes lookup"
+    },
+    {
+      "id": "data-setup-minutes",
+      "state": "done",
+      "added_by": "p3",
+      "done_by": "p4",
+      "holder": "",
+      "title": "Per-material SetupMinutes table in internal/data per ruling dec_dli5hwkpnxmg_5e90ecd4"
+    },
+    {
+      "id": "setup-time-field",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "Add SetupMinutes to data.Material + defaults"
+    }
+  ],
+  "requests": 3,
+  "commits_by_author": {
+    "harness": 2,
+    "p1": 1,
+    "p2": 2,
+    "p3": 4,
+    "p4": 3,
+    "p5": 5
+  },
+  "grade_note": "no hidden tests: 1/1 means the team's own suite is green on origin main",
+  "receipts": [
+    {
+      "head": "d7030aaa626ee42af4ee2c54a1c55bb7a9f01165",
+      "author": "harness",
+      "green": false,
+      "at_s": 15.353588541
+    },
+    {
+      "head": "5d388fe71d34bd1f5c470702c3dc9ba244d49506",
+      "author": "p1",
+      "green": true,
+      "at_s": 121.173579125
+    },
+    {
+      "head": "925ab3e0a04e0c521c447f6d40d201122a4b1dba",
+      "author": "p4",
+      "green": true,
+      "at_s": 136.965317708
+    },
+    {
+      "head": "f0ecf1119a0b0d162585447e8bd44adf3960d501",
+      "author": "p5",
+      "green": true,
+      "at_s": 168.051000583
+    },
+    {
+      "head": "3718e402f87f313fe186493c145a350fc6d9b4b5",
+      "author": "p3",
+      "green": true,
+      "at_s": 199.005383833
+    },
+    {
+      "head": "07e1a5b2760daabdb05d9e7f113a5dc608e24e5e",
+      "author": "harness",
+      "green": true,
+      "at_s": 245.400834583
+    },
+    {
+      "head": "908516b240523fcb9b877b056bb201377694cb97",
+      "author": "p4",
+      "green": true,
+      "at_s": 306.729339541
+    },
+    {
+      "head": "f8134307da24b1b015a6af3dfb50336ca152b329",
+      "author": "p2",
+      "green": true,
+      "at_s": 337.689960041
+    },
+    {
+      "head": "3224a83704a77693e23b3611020c912f3d30c4ea",
+      "author": "p3",
+      "green": true,
+      "at_s": 353.666808458
+    },
+    {
+      "head": "04777265a189c62f386093130763d76d7f8c1d5c",
+      "author": "p3",
+      "green": true,
+      "at_s": 430.013372041
+    },
+    {
+      "head": "82cc74a3a95956998aab5d451fbf2a12e812b307",
+      "author": "p5",
+      "green": true,
+      "at_s": 551.905082333
+    },
+    {
+      "head": "68e00548e13bd0dd9707b96c1d87f756ae6f606c",
+      "author": "p3",
+      "green": true,
+      "at_s": 673.557443291
+    }
+  ]
+}

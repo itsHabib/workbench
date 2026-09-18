@@ -115,10 +115,13 @@ type receipt struct {
 
 type teamRun struct {
 	receipts                 []receipt
+	live                     []string
 	shape, model, store, out string
 	goal, self, seatCmd      string
 	goalFile, module         string
 	reconcile                bool
+	twist                    string
+	twistAfter               time.Duration
 	wakes                    int
 	turns                    int
 	wall                     time.Duration
@@ -141,6 +144,8 @@ func teamCmd(args []string) int {
 	turns := fl.Int("turns", 150, "turn cap per session")
 	goal := fl.String("goal", "kvlab", "which sandbox goal: a directory under testdata")
 	goalFile := fl.String("goal-file", "", "a goal of your own (a markdown file); no hidden tests, graded on build and the team's own tests")
+	twist := fl.String("twist", "", "a requirement change delivered by note to every live seat partway through")
+	twistAfter := fl.Duration("twist-after", 4*time.Minute, "when the twist is delivered")
 	reconcile := fl.Bool("reconcile", false, "a controller verifies every landing on origin main and nudges its author when red")
 	wakes := fl.Int("wakes", 8, "most times a stopped seat is resumed")
 	seatCmd := fl.String("seat-cmd", "", "shell that runs one seat turn somewhere else (see docs/SEAT.md); empty runs claude here")
@@ -159,7 +164,7 @@ func teamCmd(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), *wall)
 	defer cancel()
 	self, _ := os.Executable()
-	r := &teamRun{goalFile: *goalFile, reconcile: *reconcile, module: "goal", seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
+	r := &teamRun{twist: *twist, twistAfter: *twistAfter, goalFile: *goalFile, reconcile: *reconcile, module: "goal", seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
 	r.env = append(childEnv(filepath.Dir(self), filepath.Join(abs, "fleet-state")), "SWARM_STORE="+*store)
 	if err := r.seed(); err != nil {
 		fmt.Fprintln(os.Stderr, "seed:", err)
@@ -169,6 +174,10 @@ func teamCmd(args []string) int {
 	if r.reconcile {
 		r.wg.Add(1)
 		go r.reconciler()
+	}
+	if r.twist != "" {
+		r.wg.Add(1)
+		go r.twister()
 	}
 	r.wg.Wait()
 	res := r.result()
@@ -207,6 +216,36 @@ func (r *teamRun) launch(n int) {
 			r.spawn(s, "peer", others)
 		}
 	}
+}
+
+// twister is the customer changing their mind. After a delay it sends the
+// change as a note to every seat that has joined and appends it to SPEC.md
+// on origin, so a seat that reads the spec later sees it too. Work landed
+// under the old requirement is now wrong; the ledger has to be superseded
+// and the reconcile controller has to catch whatever goes red meanwhile.
+func (r *teamRun) twister() {
+	defer r.wg.Done()
+	select {
+	case <-r.ctx.Done():
+		return
+	case <-time.After(r.twistAfter):
+	}
+	seed := filepath.Join(r.out, "seed")
+	_ = hgit(seed, "pull", "-q", "--rebase", "origin", "main")
+	f, err := os.OpenFile(filepath.Join(seed, "SPEC.md"), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err == nil {
+		_, _ = f.WriteString("\n\n## Change from the customer\n\n" + r.twist + "\n")
+		_ = f.Close()
+		_ = hgit(seed, "commit", "-q", "-am", "customer change")
+		_ = hgit(seed, "push", "-q", "origin", "HEAD:main")
+	}
+	r.mu.Lock()
+	seats := append([]string{}, r.live...)
+	r.mu.Unlock()
+	for _, seat := range seats {
+		_ = r.swarm("customer", "nudge", seat, "CHANGE OF REQUIREMENT (also appended to SPEC.md on origin main): "+r.twist+" Decide with the team how existing decisions and landed work change; supersede rulings rather than ignoring them; fix what this makes wrong before taking new work.")
+	}
+	fmt.Printf("[%4.0fs] twist delivered to %s\n", time.Since(r.start).Seconds(), strings.Join(seats, ","))
 }
 
 // reconciler is a standing controller, not a seat: every new commit on
@@ -389,6 +428,9 @@ func (r *teamRun) spawn(seat, role string, roster []string) {
 	for _, kv := range [][]string{{"user.name", seat}, {"user.email", seat + "@example.invalid"}, {"commit.gpgsign", "false"}, {"core.hooksPath", "/dev/null"}} {
 		_ = hgit(dir, "config", kv[0], kv[1])
 	}
+	r.mu.Lock()
+	r.live = append(r.live, seat)
+	r.mu.Unlock()
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()

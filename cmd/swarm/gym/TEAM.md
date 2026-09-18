@@ -123,3 +123,24 @@ role as a controller rather than a seat. Reconcile cost nothing and would have s
 landing back to its author by note.
 
 Not tested: a decision that turns out wrong partway through, and a landing that goes red.
+
+## Run 4: the customer changes their mind partway
+
+Same brief, same shape, `--reconcile`, plus `--twist` at four minutes: every live seat gets a
+note and SPEC.md on origin gains a section saying jobs come as CSV from the ERP, not JSON,
+that every estimate needs a per-material setup time, and that the README example must be CSV.
+
+| seats | own suite | wall | cost | turns | units | rulings | landings verified |
+|---|---|---|---|---|---|---|---|
+| 2, grew to 5 | green | 689s | $12.28 | 500 | 16 | 3 | 16, all green |
+
+Before the twist: one architecture ruling, five seats, five packages landed. After it, within
+two minutes, two new rulings: one accepting CSV as primary input with JSON kept behind a flag
+and naming where setup time lives, and one fixing the CSV columns. Then: a CSV loader, a
+setup-minutes table, the CLI adapted twice, and a README example rewritten in CSV, all as
+new units on the same list. Three seats that had stopped were woken by the harness when
+units finished. The reconcile controller verified sixteen landings in fresh clones; none went
+red, so the nudge path is still unexercised. Raw results in `runs/launch-cycletime/`.
+
+Cost of the change: about $8 and six minutes on top of the first run's $4.38. The ledger
+carried it: later commits cite the ruling id in their messages.
