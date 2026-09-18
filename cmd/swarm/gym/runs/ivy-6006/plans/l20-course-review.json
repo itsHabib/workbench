@@ -1,0 +1,64 @@
+{
+  "course": "6.006",
+  "lecture": "l20-course-review",
+  "title": "Course Review",
+  "note": "Only seven speaker-tag lines in this transcript, so lesson.mjs's boundary rule (cut at a column-0 speaker tag once the running chunk passes ~38 lines) produces just four chunks, three of them very long single JASON KU turns that each range across several review topics. `topic` is intentionally omitted from every section: this run had no way to run lesson.mjs, only to reconstruct chunk line ranges by hand from the AUDIENCE/JASON KU markers found by grep, and a hand-guessed exact topic-label string risks turning a silent drift warning into a hard error. What was hard about this lecture is that it is retrospective and pointer-heavy rather than teaching new material — most of chunk 2 and chunk 3 name a 6.046 topic (potential-method amortization, max flow, randomized/numerical/approximation/parallel algorithms) in one or two sentences each without developing it, so the emphasis fields had to be written as a map of pointers with just enough of each idea to be honest, rather than a full explanation the lecture itself never gives.",
+  "sections": [
+    {
+      "chunk": 0,
+      "emphasis": "This chunk restates the three goals the course opened with, so recite them as goals rather than as new content. Goal 1: solve hard computational problems — get an algorithm that produces correct outputs on a finite set of inputs, the same bar as an intro programming class. Goals 2 and 3 are what set this class apart, because they are about communicating to humans, not just convincing a computer: argue correctness (show the algorithm returns the right output on every valid input, out of a possibly infinite space of inputs — this is applied 6.042) and argue efficiency (show the algorithm is 'good', which needed a model of computation to even define). Land the grading point explicitly, because it is the clearest evidence of what the class actually values: a correct Python script with no argument for why it's correct or efficient does not earn full credit here — communicating the why is treated as inseparable from doing the work.",
+      "quiz": {
+        "question": "According to this recap, why would a demonstrably correct, working piece of code still lose points on a 6.006 quiz?",
+        "options": [
+          "Because the course grades on the argument for correctness and efficiency, not just on producing a correct output — communicating why the algorithm works is one of the three stated goals",
+          "Because 6.006 only accepts algorithms written in pseudocode, never actual code",
+          "Because a correct algorithm is worthless unless it also runs in constant time"
+        ],
+        "answer": 0,
+        "explain": "The lecture is explicit: writing a correct script without showing why it's correct and why it's efficient does not satisfy the class's conditions, because two of the three course goals are specifically about arguing correctness and efficiency to another person, not just getting the right answer out of a computer. Language choice is not the issue, and 'efficient' in this class means scaling well with input size, not literally constant time — that's an unreasonable bar the course never sets."
+      }
+    },
+    {
+      "chunk": 1,
+      "emphasis": "Two threads, kept separate. First, finish the 'good' = scalability point: efficiency in this class is always about growth relative to input size, which is why recursion and induction matter — they're the tools for proving something about an arbitrary n, not a fixed-size case — and communication is named as one of the most important goals of all, because most computer science is done with other people. Second, place lecture 19's complexity material on the final: know the definitions of P, NP, EXP and how they nest (EXP is a superset of NP, which nestles inside it, and they might be equal but probably aren't); know what a reduction's directionality means (a polynomial-time reduction from A to B, plus a black box for B, gives you a solution for A — so if A is known hard, B can't be easy either, or you'd have solved A); and know hardness (at least as hard as everything in a class) versus completeness (in the class AND at least as hard as everything in it). This is explicitly the only untested-so-far material that might appear on the final, phrased mostly as true/false-style definitional questions.",
+      "quiz": {
+        "question": "The lecture says: 'I know problem A is hard, and I can reduce A to B in polynomial time using a black box for B.' What does that tell you about B?",
+        "options": [
+          "B can't be easy either — if B had a polynomial-time algorithm, plugging it into the reduction would give a polynomial-time algorithm for A, contradicting A being hard",
+          "B must be exactly as fast to solve as A, no faster and no slower",
+          "B is automatically proven to be in NP"
+        ],
+        "answer": 0,
+        "explain": "This is the directionality point the recap stresses for the final: a reduction from A to B says solving B (via the black box) plus the conversion steps would solve A. If A is known hard and such a reduction exists, B being easy (polynomial-time solvable) would make A easy too — a contradiction — so B inherits at least A's hardness. It says nothing about matching exact runtimes, and membership in NP is a separate property the reduction alone doesn't establish."
+      }
+    },
+    {
+      "chunk": 2,
+      "emphasis": "Walk the three units of the actual course content, each anchored to what problem it solved. Quiz 1: black-box data structures for finding things among non-constant-size inputs, split by whether you need an extrinsic sequence order (a dynamic array/Python list for cheap push/pop at the end; a sequence AVL when you need fast middle-insertion) or intrinsic key lookup (a hash table for pure dictionary operations; a set AVL when you need dynamic order-preserving queries like next-larger; a sorted array when the order is static). Those structures then powered faster sorting: priority-queue sorts generalized from arrays/sorted arrays (n²) to a heap (n log n); an AVL tree gave another n log n route by exploiting dynamic order; and a direct-access array gave linear-time counting sort, extended by radix sort's repeated digit-passes to sort polynomially-bounded ranges in linear time. Quiz 2: graphs as a data structure relating inputs to each other (vertices as states, edges as relations/transitions), with a family of single-source shortest-path algorithms traded off by how much structure the graph has — linear time on a DAG (no cycles), an easy unweighted-style conversion when weights are small integers, and Bellman-Ford/Dijkstra when weights are general or restricted to non-negative. Quiz 3: dynamic programming as SRTBOT applied recursively to a graph you must first construct yourself (define subproblems as vertices, relations as edges, then solve via topological order and base cases) — call out explicitly that this construction step is what makes DP harder than the other two units: nobody hands you the graph.",
+      "quiz": {
+        "question": "The recap says quiz 3 (dynamic programming) is harder than the graph algorithms of quiz 2 for a specific reason. What is it?",
+        "options": [
+          "In DP you must construct the graph of subproblems and relations yourself — the vertices and edges are not handed to you the way they are for a graph algorithm",
+          "DP problems always require more memory than any graph algorithm",
+          "DP only works on unweighted graphs, which makes it a more restrictive special case"
+        ],
+        "answer": 0,
+        "explain": "The recap's own comparison is explicit: reducing a problem to an existing graph algorithm is fairly easy once you have a graph, but DP requires the creative step of building that graph yourself — deciding what the subproblems (vertices) are and how they relate (edges) — before SRTBOT's topological-order-plus-base-cases machinery can even start. Memory and weight restrictions are not the stated reason; the difficulty is squarely in that construction step."
+      }
+    },
+    {
+      "chunk": 3,
+      "emphasis": "This is a tour of where 6.046 and beyond extend the three course goals; keep it as a map of pointers, not a set of things to derive. It relaxes correctness OR efficiency: randomized algorithms trade a guarantee away — a Las Vegas algorithm (hashing is the example already seen) is always correct but only probably efficient; a Monte Carlo algorithm is always efficient but only probably correct. It relaxes what a computer can represent: numerical algorithms compute real numbers only to some bounded precision, paying more time for more precision (long division is the class's own example of a procedure using only small digits to get arbitrary precision). It relaxes what counts as a good-enough answer: approximation algorithms accept a solution provably within some bounded distance of optimal for NP-hard optimization problems, when finding the exact optimum is out of reach. And it relaxes the model of computation itself: from word-RAM to a cache model that prices memory hierarchy realistically, to quantum computation exploiting superposition and entanglement, to parallel and distributed computing which can speed things up but not always by a clean k-factor with k processors. Close the lecture, and the course, on that framing: everything from here on is a different way of bending one of the three original goals.",
+      "quiz": {
+        "question": "What is the core difference the lecture draws between a Las Vegas algorithm and a Monte Carlo algorithm?",
+        "options": [
+          "Las Vegas is always correct but only probably efficient; Monte Carlo is always efficient but only probably correct",
+          "Las Vegas always runs in constant time; Monte Carlo always runs in exponential time",
+          "Las Vegas only works on graphs; Monte Carlo only works on numerical problems"
+        ],
+        "answer": 0,
+        "explain": "The lecture defines the pair by which guarantee each one keeps and which it trades away: hashing is given as the Las Vegas example — it always returns the right answer, but a bad run of collisions can make a particular lookup slow. A Monte Carlo hash table variant, by contrast, is always fast (constant time) but can occasionally return a wrong answer because it only kept some of the colliding entries. Neither is tied to a fixed runtime class or a fixed problem domain — the split is specifically about which of correctness and efficiency is the one that's merely probable."
+      }
+    }
+  ]
+}

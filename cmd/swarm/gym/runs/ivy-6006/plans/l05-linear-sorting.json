@@ -1,0 +1,149 @@
+{
+  "course": "6.006",
+  "lecture": "l05-linear-sorting",
+  "title": "Linear Sorting",
+  "note": "No visual for this lecture; it is straight transcript teaching, and several of the audience turns are inaudible (the transcript records them as a bare 'AUDIENCE:' with nothing after), so chunks 2, 4, 5, 6 and 7 all open on one of those empty turns — Jason Ku's reply is what carries the content, not the question, and the emphasis says so rather than inventing a question. The one source defect: at chunk 2, the transcript has Jason say 'I get 9 factorial permutations' while working the general n-item case (the worked example with 5 numbers does not appear until chunk 4) — 9 is very likely a transcription slip for n, since the whole derivation is symbolic in n up to that point; the plan corrects it to n factorial and says so in the emphasis. The other thing worth calling out for the teacher: chunks 5 and 6 stage a deliberate wrong turn — Jason tries tuple sort most-significant-digit-first, gets a wrong answer, and only then explains why least-significant-first with a stable sort is required. The emphasis is written so the mistake is narrated as the lesson, not silently corrected, since that is the whole pedagogical point of the stretch. Chunk indexes come from scripts/lesson.mjs and must stay in sync with the bundle.",
+  "sections": [
+    {
+      "chunk": 0,
+      "topic": "JASON KU: Good morning, everybody. How's everybody doing? Nice long week",
+      "emphasis": "This opens with a recap, so move briskly and land the two callbacks the rest of the lecture leans on. First, the comparison-model lower bound from last week: any algorithm that only compares two items at a time needs a decision tree with at least log n height to tell n outputs apart, so searching by comparisons alone cannot beat log n time. Second, and more important for today, the escape hatch: if the keys are unique integers, you can use random access instead of comparisons — store the item with key K at index K of an array, and you get constant-time find. That is the direct access array, and its one flaw is space: the array has to be as big as the universe of possible keys, u, which can be far bigger than the number n of items you actually have. Recap the fix from last week only far enough to set up today — hashing maps that large key space down to a small one and gets expected constant time, but say plainly why it is only expected: a bad hash function can collide everything into one slot, and then a lookup degrades to a linear scan, worst case n. Land the point Jason is making with the p-set aside: when a problem demands worst-case guarantees rather than expected ones, a hash table is the wrong tool, and that is exactly the constraint today's lecture works under.",
+      "quiz": {
+        "question": "Why is a direct access array's find operation constant time, while a hash table's worst-case find can take linear time?",
+        "options": [
+          "A direct access array stores the item with key K at index K, so one random access finds it; a hash table maps many possible keys to few slots, and a bad hash function can collide every item into the same slot, forcing a linear scan of that slot's chain",
+          "A direct access array is smaller than a hash table, so it is faster to search",
+          "A hash table always takes linear time; only its insert operation is ever constant"
+        ],
+        "answer": 0,
+        "explain": "The direct access array's trick is intrinsic semantics — the key IS the index, so there is nothing to search, only one random access. A hash table buys its small size back by mapping many keys onto few slots, which means collisions are possible; with a bad hash function every item can land in the same slot's chain, and finding an item there costs a linear scan of that chain. That worst case is exactly why a problem that requires worst-case bounds — like the problem set Jason mentions — should not lean on a hash table."
+      }
+    },
+    {
+      "chunk": 1,
+      "topic": "AUDIENCE: What does the subscript e mean?",
+      "emphasis": "Two short pieces before the real subject starts, then the pivot. First, answer the subscript question exactly as Jason does: the subscript e on a runtime means expected, and a subscript A means amortized — the hash table's constant-time bounds are expected because of hash function randomness, and can be amortized because occasional full rehashes are rare enough not to hurt on average (that is how Python's dict and set are built). Second, note the escape hatch in the other direction: if your key range is genuinely small, or you get to choose small keys yourself, skip hashing entirely and use a direct access array — no randomness, no expected-case hedging. Then pivot cleanly: today's subject is sorting, not searching. Restate last week's result so it is fresh — insertion sort and selection sort are quadratic, merge sort is n log n, and n log n looked good but the question today is whether you can beat it. Say the answer up front, since the lecture proves it before moving past it: in the comparison model, no — n log n is optimal — and the proof reuses last week's decision-tree argument, now applied to sorting's own output space instead of a single search answer.",
+      "quiz": {
+        "question": "Jason says today's lecture proves that n log n is optimal for sorting 'in the comparison model.' What does that qualifier mean, and why does it matter?",
+        "options": [
+          "It restricts the claim to algorithms that decide everything by comparing two items at a time — the same restriction that gave last week's log n search lower bound its power, and it is why the rest of the lecture, which uses random access on keys instead of comparisons, is allowed to beat n log n",
+          "It means the bound only holds for arrays, not for linked lists or other sequence structures",
+          "It is a historical label with no real restriction — the n log n bound holds for any sorting algorithm whatsoever"
+        ],
+        "answer": 0,
+        "explain": "The comparison model is the same restriction from last week's search lower bound: the algorithm may only learn about the input by comparing two items. That restriction is exactly what makes the decision-tree argument apply, and it is exactly what the rest of today's lecture escapes by using random access on keys — direct access array sort, counting sort and radix sort all beat n log n precisely because they are not comparison-based. Without the qualifier the claim would contradict the linear-time algorithms the lecture is about to build."
+      }
+    },
+    {
+      "chunk": 2,
+      "topic": "AUDIENCE:",
+      "emphasis": "This is the lower-bound proof, and it is short if you keep it to the one substitution that matters. Reuse last week's frame directly: a comparison-based algorithm is a binary decision tree, and if it has to distinguish between L possible outputs it needs at least log L height, because a tree with fewer levels does not have enough leaves. Last week L was n, the number of items being searched for; today L is the number of possible outputs of a sort, which is every permutation of the n input items. Count those permutations the way Jason does: n choices for where the first item ends up, n−1 for the second since one slot is taken, and so on, multiplying to n factorial. The transcript says '9 factorial' at this point — that is almost certainly a transcription slip for n factorial, since the whole derivation up to here is symbolic in n and the concrete 5-number example does not appear until later in the lecture; teach it as n factorial and do not repeat the 9. So the decision tree needs at least log(n factorial) height, and the rest of the stretch is turning that into something recognizable: n factorial is at least (n/2)^(n/2), because half of the n terms in the product are each at least n/2, and log of that is Θ(n log n). Land the conclusion plainly: no comparison sort can beat n log n comparisons, which is why merge sort is the best a comparison-based algorithm can do.",
+      "quiz": {
+        "question": "The lower-bound argument for sorting counts n factorial possible outputs, rather than n outputs the way last week's search argument did. Why does sorting have that many possible outputs?",
+        "options": [
+          "A sort's output is a full ordering (a permutation) of all n input items — n choices for where the first item lands, n−1 for the second, and so on down to 1, which multiplies to n factorial",
+          "Because there are n factorial different sorting algorithms, one for each possible comparison order",
+          "It is the same n outputs as the search problem; the factorial only appears when computing the runtime, not the output count"
+        ],
+        "answer": 0,
+        "explain": "Search has to identify one of n items, so its decision tree needs log n height. Sorting has to identify one of n factorial possible orderings — the number of ways to permute n distinct items — which is why the decision tree needs log(n factorial) height instead. Bounding n factorial below by (n/2)^(n/2) turns that into the familiar Θ(n log n), which is the bound the rest of the lecture is built to beat by leaving the comparison model."
+      }
+    },
+    {
+      "chunk": 3,
+      "topic": "JASON KU: Yeah, sure. You can just plug in Sterling formula, but I did t",
+      "emphasis": "Close out the lower-bound stretch first, briefly: the audience question about 'n over 2' is just asking Jason to justify the (n/2)^(n/2) bound, and his answer is the same halving argument — half of the n factors in the product n·(n−1)·(n−2)···1 are each at least n/2, so the product of just that half is a valid lower bound on the whole thing, and a log of that is asymptotically n log n. Say plainly that this is the same style of argument as last week's, just with n factorial substituted for n, and that this settles it: n log n cannot be beaten by comparisons alone. Then pivot to the escape hatch, which is the spine of the rest of the lecture: last week random access beat the comparison bound for searching, so can it beat n log n for sorting too? Yes — and the construction is 'direct access array sort,' under a caveat: assume the keys are unique and live in a small range. Instantiate a direct access array sized to the key universe u, walk through the n items once and drop each one straight into its key's slot in constant time, then walk the whole array of size u and read off whatever is not empty, in order. Total cost is n (to insert) plus u (to walk and read), so if u is on the order of n, this is a genuinely linear-time sort — with the caveat spelled out plainly: only when the keys are unique and u is not much bigger than n.",
+      "quiz": {
+        "question": "Direct access array sort runs in O(n + u) time. Under what condition does that make it a linear-time sort, and what does it require of the keys?",
+        "options": [
+          "It is linear time when u is on the order of n (the key universe is not much bigger than the item count), and it requires the keys to be unique, since two items with the same key would collide in the same array slot",
+          "It is always linear time regardless of u, because inserting each item is O(1)",
+          "It requires the keys to be sorted before you begin, since the array only walks forward"
+        ],
+        "answer": 0,
+        "explain": "The n term comes from inserting each item in constant time; the u term comes from walking the whole array to read the sorted order back out, and that term is unavoidable no matter how few items there are. So the algorithm is only linear time when u = O(n). The uniqueness caveat is separate and just as necessary: the array has one slot per key, so two items sharing a key would overwrite each other with nothing yet in place to catch the collision — that gap is exactly what the next stretch's counting sort is built to close."
+      }
+    },
+    {
+      "chunk": 4,
+      "topic": "AUDIENCE:",
+      "emphasis": "The audience turn here is inaudible in the transcript; Jason's replies carry the content. First he closes a loose end — keys must be numbers, by convention, because the point of a key is to give sorting something numeric to act on, even when what you actually want sorted is more complex data with the key just pointing back to it. Then the real move of the stretch: direct access array sort only worked because u was small; what if the key universe is as large as n squared? Building a direct access array of that size would make the algorithm quadratic, so the idea is to shrink the digits instead of the array. Any key K less than n squared can be written as two digits base n: K = a·n + b, where a = K div n and b = K mod n, each strictly less than n. Work Jason's concrete example slowly, since it is what makes the abstraction land — with the five numbers 17, 3, 24, 22, 12 and n = 5, each becomes an (a, b) pair: 17 is (3, 2), and so on for the rest. Land the framing explicitly: sorting these five numbers by their true value is now the same problem as sorting five two-digit tuples, and the open question the stretch ends on is which digit to sort by first — the audience's guess names it as 'the first digit,' and the next stretch is about testing that guess.",
+      "quiz": {
+        "question": "A key K satisfies 0 ≤ K < n². Writing K = a·n + b with a = K div n and b = K mod n, what can you say about a and b?",
+        "options": [
+          "Both a and b are strictly less than n, so K has been rewritten as a pair of digits, each drawn from a range of size n instead of one number drawn from a range of size n²",
+          "a is less than n but b can be as large as n², since the mod operation does not shrink the range",
+          "a and b are both less than n², the same range as K itself"
+        ],
+        "answer": 0,
+        "explain": "Dividing K by n and taking the floor gives a quotient a that is less than n whenever K < n²; the remainder b = K mod n is by definition always less than n. So the pair (a, b) has replaced one number from a range of size n² with two numbers each from a range of size n — the same trick Jason works through on 17, 3, 24, 22 and 12, turning them into two-digit base-n pairs. That is what makes it possible to sort by direct-access-sized pieces instead of one array of size n²."
+      }
+    },
+    {
+      "chunk": 5,
+      "topic": "AUDIENCE:",
+      "emphasis": "Another inaudible audience turn; Jason's reply is the content. First he settles which digit matters more for the value of K = a·n + b: a is the more significant digit, because changing a by 1 changes K by n, while changing b changes K by at most n−1 — b can never make up for a difference in a. Name the digits the way the lecture does from here on, since the terminology keeps recurring: a is the n's digit (or most significant), b is the 1's digit (or least significant). Then introduce the strategy by its everyday name — tuple sort, or 'Excel spreadsheet sort' — sorting a table repeatedly, one column at a time, by priority. Pose Jason's live question honestly, because the answer is not obvious and the lecture is about to test it by doing the wrong thing first: when you have several columns ranked by importance, do you sort by the most important column first, or the least important column first? Walk the demonstration exactly as it happens: Jason tries most-significant-first, sorts the five base-5 numbers by their leading digit, gets an order, then sorts that result by the trailing digit — and the final order is wrong. Do not fix the mistake here; let it stand as the cliffhanger the way the transcript does, since the next stretch exists to explain why it failed.",
+      "quiz": {
+        "question": "In K = a·n + b, why is a the more significant digit than b?",
+        "options": [
+          "Changing a by 1 changes K by exactly n, while b ranges only from 0 to n−1 and can never change K by as much as a single increment of a does",
+          "a is listed first when the pair is written down, and whatever is written first is more significant by convention only",
+          "a and b are equally significant, since both are single base-n digits"
+        ],
+        "answer": 0,
+        "explain": "K = a·n + b means a step of one in a moves K by a full n, while every possible value of b covers a range smaller than n — so no adjustment of b can compensate for even a single-unit change in a. That is why a dominates the value and is called the more significant digit, matching ordinary base-10 intuition where the tens digit outweighs the ones digit. The naming matters for what comes next: Jason's first attempt at tuple sort gets the order of sorting by these two digits backwards, and it fails."
+      }
+    },
+    {
+      "chunk": 6,
+      "topic": "AUDIENCE:",
+      "emphasis": "This is where the wrong attempt gets explained, so build the explanation on top of the failure the previous stretch just staged rather than restating it. Sorting most-significant-first and then least-significant-first fails because the second pass, sorting only by the 1's digit, throws away everything the first pass had already gotten right about the n's digit — a later sort with no memory of the earlier one is free to interleave the groups the first pass had carefully separated. Name the property that a correct second pass needs to preserve: stability — a stable sort never reorders two items that were already equal on the key it is sorting by, so their relative order survives from whatever sort ran before it. The fix, then, is to run the passes in the other order: sort by the least significant digit first, and sort by the most significant digit last, using a stable sort throughout, so the final most-significant pass settles ties by leaving the already-correct least-significant order untouched inside each group. Walk Jason's redo to completion and let the audience's answer land as the resolution to the earlier cliffhanger. Close the stretch honestly on the open question it raises: a naive way to do the sort-within-a-group approach the audience proposes can still cost quadratic time if one digit value collects most of the items, which is exactly why the lecture needs a genuinely linear stable sort as the tool that does each pass — the subject of the next stretch.",
+      "quiz": {
+        "question": "Tuple sort must run its passes least-significant-digit first, most-significant-digit last, using a stable sort each time. What breaks if you run most-significant first instead?",
+        "options": [
+          "The later pass, sorting only by the less significant digit, has no memory of the grouping the earlier pass created and is free to interleave those groups, destroying the correct order the first pass had already established",
+          "Nothing breaks — the two orders always produce the same result when the sort is stable",
+          "Sorting most-significant-first is fine; the problem is only that it takes longer, not that it gives the wrong answer",
+          "A stable sort cannot be run more than once on the same data, so the second pass is invalid regardless of order"
+        ],
+        "answer": 0,
+        "explain": "Jason's own demonstration is the proof: sorting most-significant-first looks fine after the first pass, but the second pass, sorting purely by the least significant digit, ignores the digit ordering already established and scrambles it. Running least-significant-first instead means every later pass only needs to break ties among items that already agree on the digits it does not look at — and a stable sort guarantees those ties stay in their already-correct relative order. That is the one property, stability, that makes the multi-pass approach correct at all."
+      }
+    },
+    {
+      "chunk": 7,
+      "topic": "AUDIENCE:",
+      "emphasis": "Introduce counting sort as the stable, linear-time single-digit sort that tuple sort needs. It is a small but critical upgrade on direct access array sort: instead of one item per slot of a size-u array, each slot holds a chain — a dynamic array or linked list — so that duplicate keys no longer collide, they queue. The correctness-critical detail, and the one to slow down for, is that items must be appended to their slot's chain in the order they arrive, never inserted out of order, because preserving that arrival order is exactly what makes counting sort stable. Walk Jason's worked example precisely: the numbers 32, 42, 22, 03, 44 (already reduced to base-5 digit pairs) get sorted by their most significant digit; 32 goes to slot 3, 42 and later 44 both go to slot 4 but 42 arrives first, so it sits ahead of 44 in that slot's chain, and reading the slots off in order — 0, 1, 2, 3, 4 — with each slot's chain read in arrival order reproduces a stable sort by that one digit. State the runtime plainly and say where each piece comes from: allocating the u-slot array costs u, inserting the n items costs n, and reading everything back off costs another n plus u to walk every slot, so the whole thing is O(n + u) — the same shape as direct access array sort, but now correct even with duplicate keys.",
+      "quiz": {
+        "question": "Counting sort replaces each single slot of a direct access array with a chain that items are appended to in arrival order. Why does that specific detail — appending in arrival order — matter?",
+        "options": [
+          "It is what makes counting sort stable: items with the same key stay in the relative order they arrived in, which tuple sort depends on when it runs a later pass on a different, less significant digit",
+          "It only matters for performance, since appending is faster than inserting at the front",
+          "It prevents the chains from ever needing more than one item, keeping the algorithm's space usage at exactly u"
+        ],
+        "answer": 0,
+        "explain": "Stability is defined by relative order among equal keys being preserved, and a chain that always appends new items to the end (rather than, say, the front) guarantees exactly that: whatever order the items arrived in — which, in tuple sort, reflects the correctly-sorted order from a previous, less significant pass — is the order they come back out in. That is precisely the property tuple sort's most-significant-first pass needs from its auxiliary sort in order to not undo the earlier passes' work, which is the failure the previous stretch demonstrated."
+      },
+      "exercise": {
+        "prompt": "Counting sort runs on n = 300 items whose keys are drawn from a universe of size u = 300 (u is order n, as the lecture requires). Counting the array allocation as one unit per slot and the item work — one unit to insert each item, one unit to read each item back off — how many total units of work is that?",
+        "answer": { "value": 900, "unit": "units of work", "tolerance": 0 },
+        "explain": "The u-slot array allocation costs u = 300 units. Each of the n = 300 items costs one unit to insert into its slot's chain and one more unit to be read back off at the end, so that is 2n = 600 units. Together that is 300 + 600 = 900, the concrete shape of O(n + u) with u on the order of n — the case that makes counting sort linear time rather than merely O(n + u) in the abstract."
+      }
+    },
+    {
+      "chunk": 8,
+      "topic": "JASON KU: So your colleague is saying, how do I ensure that the things i",
+      "emphasis": "Close the lecture by generalizing counting sort into radix sort and being honest about what it costs. First, answer the audience's real worry about collisions: counting sort itself does not sort within a chain — it trusts that items landing in the same slot are already in the right relative order from an earlier pass, which is exactly the stability guarantee the previous two stretches built up to. Second, correct a scale confusion the same way Jason does: counting sort's direct access array is sized to u, not to n; in the five-number example u happened to equal n only because that specific example chose u = n, not because counting sort requires it — say plainly that counting sort works for any u, at a cost of O(n + u). Then generalize the digit trick from two digits to as many as needed: a key bounded by n^c can be split into c base-n digits by repeated division, so tuple-sorting those c digits with counting sort as the stable auxiliary sort, least significant to most significant, is radix sort. State the runtime carefully, term by term the way Jason builds it: breaking every one of the n keys into its digits costs n times the digit count, and running counting sort once per digit costs n plus u for each of those log_n(u) passes, so altogether it is O(n + n·log_n(u)). Land the closing condition precisely, since it is the whole payoff of the lecture: when u is at most n raised to some constant c, log_n(u) is just c, a constant, so radix sort runs in linear time — the caveat throughout is that this only works when the keys are not too large relative to n.",
+      "quiz": {
+        "question": "Radix sort runs in O(n + n·log_n(u)) time. Under what condition on u does this become linear time, and why?",
+        "options": [
+          "When u is at most n raised to some fixed constant c, because then log_n(u) equals c, a constant, so the n·log_n(u) term collapses to O(n)",
+          "Radix sort is always linear time, regardless of u, because each individual digit is sorted in linear time",
+          "Only when u is exactly equal to n, the same condition direct access array sort needed"
+        ],
+        "answer": 0,
+        "explain": "The number of base-n digits a key needs is log_n(u), and radix sort pays roughly n work per digit, so the total is n·log_n(u) on top of the n term from breaking keys into digits in the first place. That log_n(u) term is only a constant when u is bounded by a fixed power of n — log_n(n^c) = c — which is a much more permissive condition than direct access array sort's u = O(n) or counting sort's need to already have u on the order of n for a single pass. That generality, at the cost of allowing several passes, is the whole point of building tuple sort and counting sort into radix sort."
+      }
+    }
+  ]
+}

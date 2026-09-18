@@ -258,3 +258,28 @@ tried has cost three to eight times more. The case for a team is not size. It is
 single session structurally cannot do, which the vague-goal and requirement-change runs are the
 only evidence for so far: a decision that binds many hands, a change that arrives mid-way, work
 that outlives a session, a human answering partway.
+
+## Run 10: real work in ivy, twenty independent lecture plans against a deadline
+
+The first run on a real repository. A scratch copy of ivy is the team's origin; the goal
+(`gym/goals/ivy-6006-plans.md`) is job class A from ivy's own work board for the `6.006`
+bundle: a lesson plan per lecture, twenty lectures, checked by `node scripts/check-plans.mjs
+6.006`. Units are independent, so this is the first goal with no dependency chain. SWAT with a
+25-minute deadline, `--reconcile`, `--verify` set to ivy's checker. Nothing touched the real ivy.
+
+| seats | plans | checker on main | wall | cost | turns | red landings |
+|---|---|---|---|---|---|---|
+| 2, grew to 6 | 20 of 20 | 0 errors, 88 warnings | 1371s | $30.51 | 716 | 12 of 40 |
+
+The founders made one unit per lecture without being told to. The projection added a third
+seat at 162 seconds when the finish slipped past the deadline, then more as the pace measured
+in. Twelve landings went red on real content errors the checker caught (a section topic that
+did not match its chunk, a task with no visual to grade against) and were sent back to their
+authors by note; all twenty plans ended clean. The deadline was missed by two minutes.
+
+Two harness faults, both fixed after the run: seats could not run node because the allowlist
+was Go-only, so two seats spent eight wakes each reporting they were blocked; and nothing
+stopped waking a seat that made no progress. Seat tools now follow the verifier, and three
+wakes without progress retire a seat. The plans are in `runs/ivy-6006/plans/` for a reader who
+wants to judge them; the checker says nothing about whether they teach well, which needs the
+narration pass this run skipped.

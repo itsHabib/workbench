@@ -1,0 +1,92 @@
+{
+  "course": "6.006",
+  "lecture": "l19-complexity",
+  "title": "Complexity",
+  "note": "This transcript is one long monologue broken by only a handful of audience questions, so scripts/lesson.mjs's boundary rule (cut only at a speaker-tag column-0 line, once the running chunk has passed ~38 lines) produces just six chunks, two of them well over a hundred lines — the algorithm cuts where the marks are, not where the topic changes, so a single chunk here can carry several distinct ideas (the run of chunk 4, for instance, covers the NP-triviality check, the polynomial-guess-count bound, the Tetris NP example, AND the certificate/verifier definition of NP). The emphasis fields are written to walk that internal structure in order rather than pretend each chunk is one idea. `topic` is intentionally omitted from every section: this run had no way to run lesson.mjs to get the exact truncated label string, only to reconstruct the chunk line ranges by hand from the speaker-tag markers, and a hand-guessed topic string that drifted by one character would turn a silent warning into a hard error. What was genuinely hard about this lecture is the cardinality argument in chunk 2 (programs are countable, decision problems biject with reals and so are uncountable) — it is the one place a plain restatement risks losing the actual proof.",
+  "sections": [
+    {
+      "chunk": 0,
+      "emphasis": "Land two classes and the runtime distinction under them, in order. First, P is the set of problems solvable in polynomial time (in the input size n) — this course has been entirely about problems in P. Second, EXP is the set of problems solvable in exponential time, meaning roughly 2^(n^c) for some constant c. Say the containment plainly: every polynomial-time algorithm is also an exponential-time algorithm, so P is nested inside EXP, and separately note they are known to be different classes — n-by-n chess is in EXP (explore the whole game tree) but provably not in P. Then work the example the lecture uses to make P concrete: negative-weight-cycle detection — given a directed weighted graph, does it have a negative-weight cycle — is in P, because Bellman-Ford on an augmented graph decides it in polynomial time. Keep the running theme explicit: this whole unit is about telling which side of the P/EXP line a problem sits on, and today's tool for that is reductions.",
+      "quiz": {
+        "question": "Negative-weight-cycle detection is in P. What does that mean, concretely?",
+        "options": [
+          "There is an algorithm — Bellman-Ford on an augmented graph — that decides the question in time polynomial in the size of the graph",
+          "The problem can only be solved by trying every possible cycle, which takes exponential time",
+          "The answer to the problem is always 'no cycle exists'"
+        ],
+        "answer": 0,
+        "explain": "Being in P means a polynomial-time algorithm exists, and Bellman-Ford on the augmented graph is exactly that algorithm for this problem — it is the concrete witness the lecture gives for what 'in P' cashes out to. Trying every cycle would be exponential, which is the EXP-style approach P is defined against; and the problem is a genuine yes-or-no decision problem, not one with a fixed answer."
+      }
+    },
+    {
+      "chunk": 1,
+      "emphasis": "Two moves here. First, generalize what 'a problem' means: this class has been all about decision problems, where the answer to every input is simply yes or no (can white win, is there a negative cycle). Second, introduce Tetris as a decision problem — given a board and a sequence of pieces, can you survive without ever overflowing the top — and say precisely what is and is not known about it: it can be solved in exponential time (try everything), but whether it can be solved in polynomial time is open for now. Then define R: the class of all problems solvable in finite time on any computer, whatever that time is. Make the containment chain explicit — P is inside EXP is inside R — and say why R is worth naming at all: it is the class the next chunk shows is NOT everything, which is the surprising part.",
+      "quiz": {
+        "question": "As of this point in the lecture, what is known about where Tetris sits among P, EXP, and R?",
+        "options": [
+          "Tetris is in EXP (solvable by trying everything) and therefore in R, but whether it is in P is not yet settled",
+          "Tetris is proven to be in P, just like negative-weight-cycle detection",
+          "Tetris is proven to not be in R at all — no algorithm solves it in any finite time"
+        ],
+        "answer": 0,
+        "explain": "The lecture is explicit: Tetris can be solved in exponential time, so it sits inside EXP and therefore inside R (EXP is contained in R), but nobody yet knows an algorithm that solves it in polynomial time — that question is left open here and only addressed later, when NP-hardness enters. Claiming it is proven in P or proven outside R both go further than the lecture has justified at this point."
+      }
+    },
+    {
+      "chunk": 2,
+      "emphasis": "This is the hard argument in the lecture; slow down and keep the two counting arguments separate. First, the halting problem: given a program, does it ever terminate? State plainly that this is proven impossible — no single algorithm decides it correctly on every input — and that such a problem is called uncomputable, meaning not in R. Then build the counting argument for why MOST decision problems are uncomputable, in three steps. (1) A program is, in the end, a finite string of bits, and finite bit-strings correspond to natural numbers — so the set of programs is countably infinite. (2) A decision problem is a yes/no answer for every possible input, i.e. an infinite string of bits — and an infinite bit-string, read as binary digits after a point, corresponds to a real number between 0 and 1. So decision problems biject with real numbers, which are uncountable — strictly more numerous than the natural numbers. (3) Since every program solves exactly one decision problem (run it on all inputs and read off the yes/no string it produces), and there are only countably many programs but uncountably many decision problems, there are not nearly enough programs to go around — most decision problems have no program at all. Land the emotional beat honestly: this is startling and a little depressing, but the saving grace, stated at the end, is that most of the problems anyone actually cares about happen to live in R — nobody knows exactly why, but it is why the field keeps working.",
+      "quiz": {
+        "question": "Why does the counting argument conclude that most decision problems are uncomputable?",
+        "options": [
+          "Programs are countably infinite (each is a finite bit-string), but decision problems biject with the uncountably infinite real numbers, so there cannot be enough programs to cover every decision problem",
+          "Because the halting problem is uncomputable, and every decision problem reduces to the halting problem",
+          "Because most decision problems require more memory than any real computer has"
+        ],
+        "answer": 0,
+        "explain": "The argument is a cardinality mismatch, not a reduction or a resource limit: finite bit-strings (programs) are countable, but infinite bit-strings (decision problems, one yes/no answer per input) correspond to real numbers, which are uncountable. Since each program can only account for one decision problem, and there are strictly more decision problems than programs, most decision problems simply have no program solving them — this holds even with unlimited time and memory."
+      }
+    },
+    {
+      "chunk": 3,
+      "emphasis": "Introduce NP by way of a new, deliberately fictional kind of computer: a lucky algorithm, one that can make guesses and is guaranteed to always guess right when a right guess exists. NP is the class of decision problems solvable in polynomial time by such a lucky algorithm — say the name plainly: Non-deterministic Polynomial time, and note NP only applies to decision problems (unlike P, EXP, R, which allow any output). Place it on the diagram: P is contained in NP is contained in EXP, and it is not known whether either containment is strict (though most believe both are). Use the maze analogy to make 'lucky' concrete: at every junction the algorithm guesses left or right; the guarantee is that if the destination is reachable at all, the sequence of guesses it makes will lead there — if it's not reachable, the guesses do not matter because every path dead-ends into a 'no' anyway. That asymmetry — guessing right whenever a yes exists, not caring what happens when the answer is no — is the seed of the next chunk's trivial-algorithm check.",
+      "quiz": {
+        "question": "In the maze analogy for a lucky (non-deterministic) algorithm, what exactly is guaranteed?",
+        "options": [
+          "If the destination is reachable, the algorithm's guesses will lead it there; if the destination is unreachable, nothing is promised about the guesses because every path ends in 'no' regardless",
+          "The algorithm always finds the destination, whether or not it is actually reachable",
+          "The algorithm tries every possible path through the maze before answering"
+        ],
+        "answer": 0,
+        "explain": "The lucky-algorithm model is defined by that one-sided guarantee: guesses are only guaranteed to be right when a right sequence of guesses exists to reach a 'yes'. When the destination is unreachable, there is no yes-path to be guided to, so the guesses are unconstrained — every branch dead-ends into 'no' either way. It does not brute-force every path (that would be the ordinary, non-lucky exponential algorithm), and it cannot manufacture a yes when none is reachable."
+      }
+    },
+    {
+      "chunk": 4,
+      "emphasis": "This chunk has four distinct beats; keep them in order and keep them separate. (1) A sanity check on the model: does letting the algorithm guess the whole yes/no answer trivialize every problem? No — because the model always resolves toward yes when any guess-path reaches yes, a coin-flip-guess algorithm would output yes on every input, which only 'solves' the single problem whose answer is always yes; it does not make every real problem trivial. (2) The guess budget is bounded: at one bit per guess and polynomial running time, the algorithm gets to make a polynomial number of guesses, which lets it search an exponentially large space of possibilities but never more. (3) Work the concrete example: Tetris is in NP because a lucky algorithm can guess, piece by piece, exactly where and how to place each one, checking validity as it goes, and it is guaranteed to find a surviving sequence of guesses if one exists. (4) Give the second, equivalent definition of NP, which most people find more intuitive: NP is the set of decision problems where a YES answer can be checked in polynomial time given a certificate (proof) — subset sum's certificate is the actual subset that sums to the target, and it is checked by just adding the numbers; Tetris's certificate is the sequence of moves, checked by replaying it. State the asymmetry precisely: this definition guarantees a certificate exists for every yes-instance and that no certificate ever tricks the verifier into saying yes on a no-instance — it says nothing useful about how to recognize a no-instance. Close on P vs NP as the open conjecture: nobody has proven or disproven P = NP, though it is widely believed false, worth $1,000,000 to resolve either way, and phrased informally as 'you cannot engineer luck.'",
+      "quiz": {
+        "question": "Under the certificate definition of NP, what exactly does a 'yes' from the polynomial-time verifier tell you, and what does a 'no' tell you?",
+        "options": [
+          "A 'yes' is meaningful — some certificate genuinely proved the answer is yes — but a 'no' is inconclusive, since it might just mean the wrong certificate was tried, not that no certificate exists",
+          "Both 'yes' and 'no' are fully reliable, since the verifier is a correct polynomial-time algorithm",
+          "A 'no' proves the instance has no solution, but a 'yes' might be a false positive from a bad certificate"
+        ],
+        "answer": 0,
+        "explain": "The definition's guarantee is one-sided by design: for every yes-instance some certificate makes the verifier say yes, and the verifier never says yes on a no-instance for any certificate — so a yes is trustworthy. But a no from the verifier on one particular certificate only means that certificate didn't work; it says nothing about whether some other certificate would have. This is exactly the asymmetry the maze analogy set up in the previous chunk: the model is built to find yes, not to certify no."
+      }
+    },
+    {
+      "chunk": 5,
+      "emphasis": "This closing stretch has three parts. (1) Reductions, restated for hardness rather than for solving: a reduction from A to B converts any input of A into an input of B, and any solution of B back into a solution of A — familiar reduction examples are unweighted shortest paths (set all weights to 1) and longest path (negate all the weights and find shortest path). The new use here is proving lower bounds: if A reduces to B, then B is at least as hard as A, because solving B would let you solve A. (2) NP-hardness and NP-completeness, defined from that: a problem is NP-hard if every problem in NP reduces to it (so solving it would solve all of NP); a problem that is both NP-hard and itself in NP is NP-complete. Walk one worked reduction concretely — 3-partition (split n integers into groups of 3 with equal sums) reduces to jigsaw puzzles and separately to Tetris, via board constructions that force a valid tiling or a survived game to correspond exactly to a valid 3-partition — so both are NP-hard. (3) Close with the roll call of other NP-complete problems the lecture names — subset sum, longest common subsequence on many sequences, longest simple path, traveling salesman, 3-coloring, largest clique, 3D motion planning, Boolean satisfiability, Minesweeper, Sudoku, and even Super Mario Bros., Legend of Zelda, and Pokémon — to land the point that NP-hardness is everywhere once you go looking, not a curiosity.",
+      "quiz": {
+        "question": "The lecture shows 3-partition reduces to Tetris. What does that reduction actually establish?",
+        "options": [
+          "Tetris is at least as hard as 3-partition — if Tetris could be solved in polynomial time, 3-partition could too, so Tetris inherits 3-partition's (conjectured) NP-hardness",
+          "Tetris and 3-partition are proven to take exactly the same amount of time to solve",
+          "3-partition can now be solved quickly by first converting it into a game of Tetris and playing it"
+        ],
+        "answer": 0,
+        "explain": "A reduction from A to B shows B is at least as hard as A: any algorithm for B could be used to solve A by converting inputs forward and solutions backward. Since 3-partition is assumed NP-hard, and it reduces to Tetris, Tetris must be at least as hard — that is precisely how the lecture concludes Tetris is NP-hard. It says nothing about matching runtimes, and reductions used for hardness are a proof tool, not a practical solving strategy — nobody is meant to actually play Tetris to solve 3-partition instances."
+      }
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "course": "6.006",
+  "lecture": "l07-binary-trees-part-2-avl",
+  "title": "Binary Trees, Part 2: AVL",
+  "note": "Same constraint as l03/l04: node script execution is refused by the sandbox in this run, so chunk boundaries were derived by hand from scripts/lesson.mjs's documented algorithm (column-0 marks only, TARGET=38, no *** topic: markers here) and could not be checked against check-plans.mjs; topic is left off every section. This lecture chunks unusually coarsely: Demaine gives only six brief audience interjections across ~495 lines, and the algorithm can only break at a speaker-tag line, so long uninterrupted stretches (the augmentation argument, and separately the entire rotation/AVL-balance argument) each stay a single chunk far past the 38-line target, producing only 3 chunks total instead of the roughly a dozen a more interactive transcript would get. The hardest part was chunk 2: it runs the height-balance-implies-log-height proof, the height-as-subtree-property update rule, and all three rebalancing rotation cases back to back with no natural internal pause, so the emphasis has to carry a lot without a section boundary to lean on.",
+  "sections": [
+    {
+      "chunk": 0,
+      "emphasis": "Recap part one before extending it: every node has an item, a left pointer, a right pointer, and a parent pointer; height of a node is the length of the longest downward path in edges, and the height of the root is the height h of the whole tree; every subtree operation from last time — insert, delete, first, last, predecessor, successor — ran in order h time, and h can be as bad as linear on an ugly tree. State today's goal precisely: keep the same data structure, but guarantee h is Theta(log n), turning every one of those order h operations into order log n for free. Before rotations, finish the two ways a binary tree can represent an interface. For a set, maintain traversal order (recursively: left subtree, then root, then right subtree) as increasing key order; that gives the binary search tree property — every key in a node's left subtree is smaller than it, every key in its right subtree is bigger — and subtree_find is exactly binary search generalized from an array to a tree. For a sequence, maintain traversal order as sequence order instead of key order, and use subtree_at(node, i): compare i against nL, the size of node's left subtree — recurse left if i < nL, return node itself if i = nL, otherwise recurse right with index i - nL - 1. That one algorithm, driven by size instead of keys, is what makes insert_at and delete_at possible for the first time, by calling subtree insert/delete at the node found by search.",
+      "quiz": {
+        "question": "subtree_at(node, i) recurses right with index i - nL - 1 rather than just i, where nL is the size of node's left subtree. Why the subtraction?",
+        "options": [
+          "Because index 0 in the right subtree corresponds to index nL + 1 in the whole subtree, so nL (the left subtree) plus 1 (the root) must be subtracted off before recursing",
+          "Because the right subtree is always exactly one smaller than the left subtree in a balanced tree, so nL + 1 accounts for that difference",
+          "It is an off-by-one safety margin; any value close to nL would work equally well"
+        ],
+        "answer": 0,
+        "explain": "Indexing restarts at 0 for each recursive call, but the right subtree's first element is actually the (nL+1)-th element overall (nL elements in the left subtree, plus the root itself at index nL) — so to ask the right subtree 'which of your own elements is this' the search has to subtract nL for the left subtree and 1 more for the root before recursing. It is not a balance assumption or a safety margin; it is required by exactly how many elements were skipped to get here, regardless of tree shape."
+      }
+    },
+    {
+      "chunk": 1,
+      "emphasis": "Answer the audience's real question — where does nL, node.left's size, actually come from? — with subtree augmentation, the general tool behind it. Define a subtree property precisely: something computable about a node in constant time purely from the same property already known for its left and right children — 'downward looking' only, nothing about the rest of the tree. Size is the canonical example: node.size = node.left.size + node.right.size + 1, an update rule that takes constant time given the children's sizes. Answer the audience's constant-time worry directly: naively recursing that formula would be linear, so instead every node stores its size directly, and the update rule is only ever applied to the ancestors of whatever leaf just got added or removed — exactly order h nodes, each updated in constant time, which is why maintaining size costs no more asymptotically than the insert or delete that changed the tree. Generalize past size: sum, product, min, and max of any per-node feature are all valid subtree properties, as long as they only depend on the two children. Then give the crucial counterexample, because it is the trap a learner will otherwise fall into: a node's index in the traversal order is NOT a subtree property, because inserting one new node can shift every index to its right — that is a global dependency, not a downward-looking one, and it is exactly why subtree_at has to search rather than just read a stored index field.",
+      "quiz": {
+        "question": "Why can subtree size be maintained as a stored, constant-time-updatable field, but a node's index in the traversal order cannot?",
+        "options": [
+          "Size only depends on the node's own children (downward-looking), so only its O(h) ancestors need updating after a change; index depends on everything to a node's left, so a single insertion can change every other node's index",
+          "Size is an integer and indices are not, and only integer-valued properties can be subtree properties",
+          "Index could be maintained the same way, but the lecture skips it only because it isn't useful for any sequence operation"
+        ],
+        "answer": 0,
+        "explain": "The defining test for a subtree property is whether it can be computed from just the two children in constant time — size passes because node.left.size + node.right.size + 1 needs nothing else. A node's index depends on the sizes of everything to its left across the whole tree, so one insertion anywhere to the left of a node changes that node's index — that is a global dependency, and exactly what subtree augmentation cannot afford to recompute cheaply. The data type is irrelevant, and index actually matters a great deal for sequence operations; it just cannot be stored directly, which is why subtree_at exists — to compute it on demand instead."
+      }
+    },
+    {
+      "chunk": 2,
+      "emphasis": "This chunk is the whole rest of the lecture and it has three parts; keep them in order. First, the tool: a rotation (right-rotate at y, or its mirror left-rotate at x) restructures a node and its child while provably preserving traversal order — verify it on the labeled A, x, B, y, C picture, where the order A, x, B, y, C reads the same before and after, even though depths shift (some subtrees move up, some move down). This is the only move available for rebalancing without touching what the tree represents. Second, the guarantee: define an AVL tree by height balance — skew(node) = height(node.right) - height(node.left) must always be -1, 0, or 1 at every node. Prove height balance forces h = O(log n) by building the sparsest possible height-balanced tree (every node skewed the same direction) and showing its node count N_h satisfies N_h > 2·N_{h-2} (dropping the +1 and replacing N_{h-1} with the smaller N_{h-2} only shrinks the true count), which solves to N_h > 2^(h/2) — exponential in h, so h is at most about 2 log n. Height itself is a subtree property too — node.height = 1 + max(node.left.height, node.right.height) — so it can be maintained the same order-h-ancestors-updated way as size, including after every rotation. Third, the fix: after an insert or delete changes one leaf, walk up from it checking skew; find the lowest node x whose skew has become ±2 (only one node can be, since a single leaf change alters each ancestor's height by at most 1). Let y be x's heavier child. If skew(y) matches x's lean or is flat (cases 1 and 2), a single rotation at x restores balance for both x and y. If skew(y) leans the opposite way (case 3, the one case to memorize), a rotation at y followed by a rotation at x — equivalently, redrawing around y's own child z — restores balance. After fixing x, continue checking its ancestors the same way; at most O(h) = O(log n) checks and rotations later, height balance is fully restored, and with it every subtree operation runs in O(log n) — insert, delete, find, find_previous, find_next, get_at, insert_at, delete_at, all of it.",
+      "quiz": {
+        "question": "After inserting a leaf, the rebalancing walk finds the lowest ancestor x with skew ±2, and its heavier child y has a skew leaning the OPPOSITE direction from x. Which fix applies?",
+        "options": [
+          "Case three: two rotations — first at y, then at x (equivalently, rotate around y's own child z) — a single rotation at x alone would make the imbalance worse, not better",
+          "Case one: a single rotation at x is always enough, regardless of which way y leans",
+          "No fix is needed — a skew of ±2 with an oppositely-leaning child is already within tolerance"
+        ],
+        "answer": 0,
+        "explain": "The lecture is explicit that this is the one case to memorize precisely because a single rotation at x does not work here — it makes the imbalance worse — and the fix is the double rotation through y's child z instead, restoring height balance for the whole local picture in one pass. A skew of ±2 is exactly the out-of-tolerance case the rebalancing walk exists to catch, not something to leave alone; single rotation at x is what cases one and two use, when y's skew instead matches x's lean or is flat."
+      }
+    }
+  ]
+}

@@ -1,0 +1,106 @@
+{
+  "course": "6.006",
+  "lecture": "l01-algorithms-and-computation",
+  "title": "Algorithms and Computation",
+  "note": "Same constraint as every other plan in this run: node script execution is refused by the sandbox with no approval arriving, so chunk boundaries were derived by hand from scripts/lesson.mjs's documented algorithm (column-0 marks, TARGET=38) and could not be checked against check-plans.mjs; topic is left off every section. This being lecture 1, the hardest part was resisting the urge to over-teach: the transcript itself is introductory and conversational (lots of short back-and-forth with students), so several chunks are short and the emphasis had to stay at the level Jason Ku actually pitches it at — informal and example-driven — rather than tightening it into something denser than the lecture itself.",
+  "sections": [
+    {
+      "chunk": 0,
+      "emphasis": "Open with the course's real goal, stated as three things, not one: solve computational problems, prove that the solution is correct, and argue that it is efficient — and do all of that in a way that communicates to another person, not just a computer. Define a computational problem formally and precisely: a set of possible inputs, a set of possible outputs, and a binary relation between them (a bipartite graph) specifying, for each input, which outputs count as correct — possibly more than one. Note that a problem is normally given as a checkable predicate (given an input and a candidate output, can you verify correctness?) rather than an exhaustive table, because that table would be infinite for problems with arbitrarily large inputs. Use the birthday-matching example to motivate why this course cares about ARBITRARY input size, not a fixed classroom: an algorithm must work whether n is 300 students or a billion. Close by defining an algorithm itself: a fixed-size procedure that, for any input, deterministically produces a single output, and that output must always be one of the correct ones for the problem to be considered solved.",
+      "quiz": {
+        "question": "Why does the lecture define a computational problem as a binary relation between inputs and outputs, rather than as a single function from inputs to outputs?",
+        "options": [
+          "Because a given input can have more than one correct output (like several matching array indices), so 'correct' is a set-valued property of an input, not a single fixed answer",
+          "Because problems are always solved by more than one algorithm, and the relation tracks every possible algorithm",
+          "Because inputs and outputs must always be the same size, and only a relation can express that constraint"
+        ],
+        "answer": 0,
+        "explain": "The array-search example makes this concrete: if multiple positions hold the value being searched for, every one of those indices is a correct output for that same input — a single-valued function couldn't express that, but a relation (allowing an input to connect to several acceptable outputs) can. It has nothing to do with how many algorithms might solve the problem, and nothing about input/output relative size is implied by choosing a relation over a function."
+      }
+    },
+    {
+      "chunk": 1,
+      "emphasis": "Walk through the student's proposed algorithm for the birthday problem end to end: maintain a running record, interview students one at a time, and for each one check whether their birthday is already in the record — if so, return that matching pair immediately; if not, add them to the record and continue; if the record is exhausted with no match, return none. Note explicitly what level of description this is: informal, verbal, precise enough that a peer could code it up, but not literal code — exactly the bar this course expects on problem sets. Answer the audience's sharper technical question directly: yes, 'function' here means the ordinary mathematical sense — exactly one output per input — not the functional-programming sense of forbidding side effects or external state; those are different, unrelated notions of 'function.'",
+      "quiz": {
+        "question": "A student asks whether an algorithm must be a 'pure function' with no side effects or external state, functional-programming style. How does the lecture answer?",
+        "options": [
+          "No — 'function' here just means the mathematical sense: exactly one output per input. It says nothing about side effects, I/O, or external state, which is a different, unrelated notion of 'function'",
+          "Yes — algorithms in this course are required to avoid any I/O or external state, matching functional-programming purity",
+          "The question doesn't apply, since algorithms in this course are not modeled as functions at all"
+        ],
+        "answer": 0,
+        "explain": "The lecture is explicit that the mathematical definition — a binary relation with exactly one output per input — is what's meant by requiring an algorithm to be 'a function,' and that this is entirely separate from the functional-programming notion of purity (no mutable state, no I/O) the student was asking about. Algorithms in this course are absolutely modeled as functions, in the sense just defined — the clarification is about which sense of 'function' is meant, not whether the concept applies at all."
+      }
+    },
+    {
+      "chunk": 2,
+      "emphasis": "Begin the correctness proof for the birthday algorithm and set up the two ingredients any inductive proof needs: a base case, and an inductive step that gets from a smaller case to a larger one. State the real goal precisely so it becomes provable: at the end of interviewing everyone, the algorithm has either already returned a matching pair, or correctly reports none. Reformulate that as an inductive hypothesis parameterized by K, the number of students interviewed so far: if the first K students contain a match, the algorithm has already returned it before interviewing student K+1. Maintaining this property all the way up to K=n gives exactly the correctness statement wanted. Choose the base case as K=0, the easiest possible choice — with zero students interviewed, no work has been done and the hypothesis holds vacuously, since there's no possible match among zero students to have missed.",
+      "quiz": {
+        "question": "Why is K=0, rather than K=1, chosen as the base case for the birthday algorithm's inductive proof?",
+        "options": [
+          "With zero students interviewed, the hypothesis (‘if the first K contain a match, it's already been returned’) holds vacuously — there's no possible match among zero people for the algorithm to have missed",
+          "K=1 would require checking two different students at once, which the base case can't do",
+          "K=0 is chosen arbitrarily; any starting value would work equally well for this proof"
+        ],
+        "answer": 0,
+        "explain": "The hypothesis is an implication ('if a match exists among the first K, it's already returned'), and with K=0 there are zero people, so the premise (a match existing) is automatically false — making the implication vacuously true with no work required to verify it. K=1 isn't wrong exactly, but it's a needlessly harder base case (you'd have to reason about one student and no possible partner) when K=0 is strictly simpler and still valid. The choice matters — K=0's vacuous truth is exactly what makes it the easiest correct starting point."
+      }
+    },
+    {
+      "chunk": 3,
+      "emphasis": "Complete the induction: assume the hypothesis holds for K', and split the K'+1 case into exactly two possibilities. Either the first K' students already contained a match, in which case the algorithm already returned it, by the inductive hypothesis itself — nothing left to argue. Or they didn't, and the algorithm's actual behavior on interviewing student K'+1 is checked directly: does that student's birthday appear in the record built from the first K' students? If yes, a match exists among the first K'+1 and the algorithm returns it, exactly as required; if no, the hypothesis is re-established for K'+1 by construction. Setting K'=n at the very end recovers the full correctness claim. Name the bar this course actually expects: an argument detailed enough that a peer in the class could code the algorithm up correctly from the description — not a fully formalized proof. Pivot to the second goal, efficiency: not just 'how fast,' but how an algorithm's speed compares to other ways of solving the same problem.",
+      "quiz": {
+        "question": "In the inductive step, why does the proof need to split into exactly two cases (match already in the first K', versus not) rather than arguing directly about the K'+1 case alone?",
+        "options": [
+          "Because the inductive hypothesis only tells you something about the first K' students directly; whether a match already existed there determines whether there's anything left to prove, or whether the K'+1st student's check is what settles it",
+          "Because the algorithm behaves completely differently depending on whether K' is even or odd",
+          "The case split isn't actually necessary; it's included only for stylistic clarity"
+        ],
+        "answer": 0,
+        "explain": "The inductive hypothesis is conditional ('IF the first K' contain a match, THEN already returned'), so using it productively requires first asking whether its premise holds — if it does, the hypothesis alone finishes the argument; if not, the burden shifts entirely to analyzing what the algorithm actually does when it checks student K'+1 against the record. That case split is exactly what makes the inductive step airtight rather than hand-wavy; parity of K' plays no role at all."
+      }
+    },
+    {
+      "chunk": 4,
+      "emphasis": "Ask why simply timing an algorithm on a real computer is a bad way to measure efficiency, and draw out both problems the class raises: running time depends on the size of the input (expected, and fine to control for), but it ALSO depends on the raw speed of whatever machine happens to be running it — a slow calculator and a research supercomputer would report wildly different times for the identical algorithm and code. The fix: stop measuring wall-clock time, and instead count fundamental operations — an abstract measure of how much work the algorithm itself requires, independent of hardware. Name this approach asymptotic analysis and introduce its three symbols: big-O (an upper bound on growth), Omega (a lower bound), and Theta (both at once — a tight bound). Establish how 'size of input' n is measured for common structures: an n-by-n array has size n^2 (that's how many entries there are to convey), and a graph's size is its number of vertices plus its number of edges.",
+      "quiz": {
+        "question": "Why does the lecture insist on counting 'fundamental operations' instead of measuring wall-clock time to evaluate an algorithm?",
+        "options": [
+          "Wall-clock time is contaminated by the specific machine's hardware speed, not just the input size — the same algorithm and code can report very different times on a slow versus a fast computer, which operation-counting avoids entirely",
+          "Wall-clock time is simply impossible to measure accurately with any precision on modern hardware",
+          "Operation counting is required because most algorithms don't have any well-defined running time at all"
+        ],
+        "answer": 0,
+        "explain": "The lecture's own example makes the point directly: a watch calculator and a research supercomputer running the identical algorithm and code would report very different elapsed times, purely because of hardware speed, not anything about the algorithm's actual efficiency — that hardware dependence is exactly what operation-counting is designed to abstract away. It's a matter of measuring the wrong thing, not an impossibility of measurement, and every algorithm has a perfectly well-defined running time in this operation-counting sense."
+      }
+    },
+    {
+      "chunk": 5,
+      "emphasis": "Name the standard growth-rate vocabulary in increasing order of badness: constant time (unaffected by input size), logarithmic, linear, n log n, and polynomial in general (n to a fixed power c) — which is what 'efficient' means by default in this course, distinct from other fields where it might mean something looser. Then name the one class to actively avoid: exponential time, 2 to the Theta(n), where the running time roughly doubles (or worse) for every additional unit of input size. Build visual intuition by comparing these curves out to large n: log n is nearly flat and barely distinguishable from constant at scale; linear is the reference line everything else is judged against; n log n looks almost linear with a slightly steeper slope once n is large; and exponential shoots almost straight up, dwarfing every polynomial curve — which is exactly why polynomial time is the bar this course sets for 'efficient,' and exponential time is treated as effectively intractable.",
+      "quiz": {
+        "question": "Why does the lecture single out polynomial time (n^c for constant c) as the specific bar for 'efficient' in this course, rather than, say, linear time only?",
+        "options": [
+          "Polynomial time is the widest class that still stays fundamentally tractable as input size grows, while anything beyond it (like exponential time) blows up so fast it becomes unusable even for modest input sizes",
+          "Linear time and polynomial time are actually the same thing, so the distinction doesn't matter",
+          "Polynomial time is chosen arbitrarily as a historical convention with no real justification given in the lecture"
+        ],
+        "answer": 0,
+        "explain": "The lecture's own growth-curve comparison makes the justification visual: n log n and n^c curves, however steep, stay grounded relative to n, while exponential curves shoot up so fast that even moderate input sizes become computationally hopeless — that gap is exactly why polynomial is treated as the practical ceiling for 'efficient' rather than something stricter like linear time alone, which would exclude many genuinely useful algorithms (like the n log n sorts this course covers later). Linear and polynomial are explicitly distinguished (linear is just the c=1 case); the choice is motivated by that visual and practical gap, not asserted as an unexplained convention."
+      }
+    },
+    {
+      "chunk": 6,
+      "emphasis": "Introduce the word-RAM model of computation, the concrete machine this course measures efficiency against. Random access memory means jumping to any location in memory costs constant time, not time proportional to distance. Memory is addressed in words — fixed-size chunks (64 bits on modern machines) that the CPU can read, operate on, and write back in one constant-time step; use the lecture's own historical aside about 32-bit machines being capped at addressing about 4 gigabytes, versus 64 bits reaching roughly 20 exabytes, to make word size concrete and consequential rather than abstract. The available constant-time operations are comparisons, arithmetic, and logical/bitwise operations on a small, fixed number of words at a time — meaning touching n things unavoidably costs at least linear time, since each one has to be individually read. Close with why the next eight lectures exist: this model only handles a constant amount of data per operation, so the course needs data structures to make operations over large, non-constant amounts of data efficient — and note that familiar built-in structures (Python's list, set, dictionary) hide real, sometimes surprising costs behind their convenience, which is exactly what this course will make explicit. End with the roadmap: reduce to a known problem, or design a new recursive algorithm; the three units ahead are data structures and sorting, shortest paths and graphs, and dynamic programming.",
+      "quiz": {
+        "question": "Why does the lecture connect the word-RAM model's constant-time-per-word operations directly to the need for a whole unit on data structures?",
+        "options": [
+          "Because the model only lets the CPU operate on a small, fixed amount of data (one word or so) at a time, so efficiently supporting operations over large amounts of data requires deliberately designed structures, not just raw hardware capability",
+          "Because data structures are needed only to work around bugs in how modern CPUs implement random access memory",
+          "Because the word-RAM model forbids storing more than one word of data in memory at all, making data structures mandatory just to store anything"
+        ],
+        "answer": 0,
+        "explain": "The word-RAM model's whole point is that constant-time operations only ever touch a small, fixed-size chunk of data — so making an operation like 'find whether X is in this large collection' fast for arbitrarily large collections is not something the raw model provides for free; it requires the deliberately engineered data structures the course is about to spend eight lectures on. It has nothing to do with hardware bugs, and the model obviously permits storing arbitrarily much data in memory — the constraint is on how much of it a single constant-time operation can touch."
+      }
+    }
+  ]
+}

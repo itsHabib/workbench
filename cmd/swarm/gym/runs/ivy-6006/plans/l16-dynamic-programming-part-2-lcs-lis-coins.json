@@ -1,0 +1,50 @@
+{
+  "course": "6.006",
+  "lecture": "l16-dynamic-programming-part-2-lcs-lis-coins",
+  "title": "Dynamic Programming, Part 2: LCS, LIS, Coins",
+  "note": "Only 7 speaker-tag marks in this transcript (two brief audience Q&As break up an otherwise continuous ERIK DEMAINE monologue), so lesson.mjs's boundary rule produces just 3 chunks, each covering one full worked example (LCS, then LIS, then the coin game) plus the SRTBOT review at the very start of chunk 0. Chunk boundaries were hand-computed via grep for column-0 speaker tags since node is unavailable this session; topic is omitted from every section for the same reason as the other plans landed this run -- a hand-reconstructed label risks the drift-error path rather than just its warning. What was hard about this lecture is LIS's subproblem-constraint trick in chunk 1: the naive suffix subproblem L(i) has no valid recurrence at all (nothing enforces the increasing property), and the fix -- redefining L(i) to require A[i] itself be included -- changes what the subproblem even means, so the emphasis had to walk the failed attempt before the fix, not just present the working definition, or the 'why' of subproblem constraints would be lost.",
+  "sections": [
+    {
+      "chunk": 0,
+      "emphasis": "Two things in this chunk: a quick SRTBOT review, then the full longest-common-subsequence (LCS) example, worked start to finish. On the review, land one line precisely, since it's reused today: pick subproblems by asking a question about the solution whose answer set is small (polynomial), then locally brute-force every possible answer and take the best, recursing into smaller subproblems for each. Then LCS itself: given two sequences A and B, find the longest sequence that is a subsequence of both. State the new trick plainly, since it's the chunk's real lesson -- with two sequences instead of one, take the PRODUCT of subproblem spaces: choose suffixes for each, so subproblems are pairs L(i, j) = length of the LCS of A's suffix from i and B's suffix from j. Build the relation by looking at the first letters A[i] and B[j]: if they differ, at least one of them cannot be in the LCS, so brute-force both possibilities and take max(L(i+1, j), L(i, j-1)); if they're equal, prove (by a swap argument on any hypothetical optimal solution) that they might as well be matched to each other, so the answer is 1 + L(i+1, j+1) with no need to max over anything. Close with parent pointers: recording which case produced each L(i, j) lets you walk backward from the final answer and read off the actual longest common subsequence, not just its length -- a general technique, not special to LCS.",
+      "quiz": {
+        "question": "When A[i] and B[j] are equal, why does the LCS relation get to say 1 + L(i+1, j+1) directly, with no max over other options needed?",
+        "options": [
+          "Because a swap argument shows any optimal solution can be rearranged to match A[i] with B[j] without losing length, so committing to that match is always at least as good as any other choice",
+          "Because equal letters can never appear more than once in either sequence, so there's nothing else to consider",
+          "Because the problem defines LCS to only count matched pairs at equal indices"
+        ],
+        "answer": 0,
+        "explain": "The lecture proves this with a swap argument: take any optimal solution to the suffixes starting at i and j; if the letters at i and j aren't already paired with each other, you can show swapping the pairing to match them directly loses nothing (and not matching them at all is provably suboptimal, since you could always add the pair for a longer subsequence) -- so committing to the match is safe, and no max is needed. It is not a statement about uniqueness of letters in the sequences, nor a definitional shortcut."
+      }
+    },
+    {
+      "chunk": 1,
+      "emphasis": "Longest increasing subsequence (LIS), and specifically the subproblem-constraint idea that makes it work -- walk the failed first attempt before the fix, since that's the actual lesson. First attempt: define L(i) as the LIS of the suffix of A starting at i, and try to build a relation on whether A[i] is included or not. Show why this breaks: if A[i] is excluded, you get L(i+1); if included, you'd want 1 + L(i+1), but nothing in that formula enforces that the next included letter is actually bigger than A[i] -- the recurrence has no way to check the increasing property against an unknown continuation. The fix, called a subproblem constraint: redefine L(i) to require that A[i] itself is the FIRST letter of the increasing subsequence being counted -- this changes what L(i) means, but keeps the original problem solvable, since the true answer is now max over all i of L(i) (brute-forcing where the LIS could start, since there are only n choices). With that constraint in place the relation becomes honest: L(i) = 1 + max over all j > i with A[j] > A[i] of L(j) (or just 1, if no such j exists) -- brute-forcing the next included letter j and using the constraint A[j] > A[i] to actually enforce the increasing property this time. Land the running time: n subproblems, each doing up to n work to try every j, giving O(n^2) total (plus O(n) more to take the final max over starting points, which doesn't change the bound).",
+      "quiz": {
+        "question": "Why does the naive definition L(i) = 'LIS of the suffix starting at i' fail to have a working recurrence, before the subproblem-constraint fix is applied?",
+        "options": [
+          "Nothing in the recurrence checks that the first letter of the recursively-computed L(i+1) is actually bigger than A[i], so there is no way to enforce the increasing property when A[i] is included",
+          "Because suffixes are the wrong kind of subproblem entirely for any single-sequence problem",
+          "Because L(i) would need quadratically many values of i to be well-defined"
+        ],
+        "answer": 0,
+        "explain": "The lecture traces the exact failure: including A[i] and adding 1 + L(i+1) silently assumes L(i+1)'s answer starts with something bigger than A[i], but L(i+1) as defined has no idea what A[i] even is, so the recurrence has no way to check or enforce the increasing property. Suffixes are in fact the right subproblem shape for a single sequence (the lecture uses them successfully once the constraint is added); the fix is adding the constraint that L(i) must start with A[i], not switching away from suffixes, and there are only a linear number of i's, not a quadratic number."
+      }
+    },
+    {
+      "chunk": 2,
+      "emphasis": "Two closing pieces: first, the DAG/shortest-path connection, briefly; then the full alternating-coin-game example, worked start to finish. Briefly note that both LCS and LIS can equivalently be viewed as a longest-path (equivalently, negated-weight shortest-path) computation on the subproblem DAG, though writing the recurrence directly is simpler in practice; this connection doesn't hold for every DP (Fibonacci can't be phrased as shortest paths) but does for many. Then the coin game: two players alternately take the leftmost or rightmost coin from a row, each maximizing their own total value, and the surprising twist -- suffixes or prefixes alone are NOT enough subproblems here, because taking from one end while the opponent takes from the other quickly leaves an arbitrary SUBSTRING in the middle. Walk the two-part subproblem-expansion trick precisely: define x(i, j, p) as the maximum value the player to move can extract from coins i..j, where p tracks WHOSE turn it is (me or you) -- doubling the number of subproblems rather than trying to write one messier turn-agnostic recurrence. Give both halves of the relation: x(i, j, me) = max(Vi + x(i+1, j, you), Vj + x(i, j-1, you)) -- I brute-force which end to take, add its value, and flip the turn; x(i, j, you) is the same shape but with MIN instead of MAX and no value added to my side, because the opponent is adversarial and I only care about what's left for me once they've moved. Close on the general lesson this example is meant to teach: when the obvious subproblems (prefixes/suffixes/substrings) aren't quite enough, expanding the subproblem space with extra parameters (here, a factor of 2 for whose turn it is) can restore a clean recurrence, as long as the total number of subproblems stays polynomial.",
+      "quiz": {
+        "question": "Why does the alternating-coin-game recurrence use max in x(i, j, me) but min in x(i, j, you)?",
+        "options": [
+          "Because I get to choose my own move and want the best outcome for myself, but my opponent chooses their move to minimize what's left for me, since it's a zero-sum game",
+          "Because min and max are used arbitrarily and either would give the same answer",
+          "Because x(i, j, you) counts the opponent's points, which should be maximized from the opponent's own perspective inside the same formula"
+        ],
+        "answer": 0,
+        "explain": "The lecture is explicit about the zero-sum framing: on my turn I control the choice and want the value maximized in my favor, but on the opponent's turn, they are choosing to maximize THEIR OWN score, which -- since the game is zero-sum -- is the same as minimizing what's left for me. So x(i, j, you) still measures value from MY perspective, but takes the min over the opponent's two choices because they are working against me. Swapping max and min would give a wrong (and asymmetric) answer, and x(i, j, you) is defined throughout as my payoff, not the opponent's."
+      }
+    }
+  ]
+}

@@ -1,0 +1,132 @@
+{
+  "course": "6.006",
+  "lecture": "l09-breadth-first-search",
+  "title": "Breadth-First Search",
+  "note": "First 6.006 plan of any kind, and the first computer-science lesson to carry a visual. The lecture is a transcript, so chunk topics are speaker tags rather than headings — lesson.mjs owns those boundaries and they must not be re-derived by eye. The graph-traversal visual enters at chunk 5, where Solomon draws level sets on the board, and carries the graded task at chunk 6, where he writes the BFS loop; the earlier chunks are definitions and representations and teach straight from the notes. The visual's graph is not the lecture's a–f board graph: it is nine nodes so that BFS and DFS part at the third visit, which is the misconception the task exists to catch. Neighbours are taken in alphabetical order in the visual, and the emphasis says so every time a prediction is asked for. Chunk indexes come from scripts/lesson.mjs and must stay in sync with the bundle.",
+  "sections": [
+    {
+      "chunk": 0,
+      "topic": "JUSTIN SOLOMON: OK, team. Let's get started for the day. It's a pleasure",
+      "emphasis": "This opens part two of the course, and the one idea to land is the definition, stated plainly and then read twice: a graph is a pair, a set of vertices V and a set of edges E, and an edge is nothing more than a pair of vertices. Say that the fancy notation E ⊆ V × V is exactly that sentence. Then draw the distinction the whole unit turns on: in an undirected graph an edge is an unordered set {v, w}, so v–w and w–v are the same edge; in a directed graph an edge is an ordered pair (v, w), and (w, v) is a different edge that may not exist. Use Solomon's four-vertex board example to make it bite — can you get from the upper right to the lower left? No, because every edge on that route points the wrong way, and you cannot swim upstream in a directed graph. Say out loud that you are already leaning on the idea of a path, which has not been defined yet, and that the definition arrives later in the lecture. Keep the tone of the transcript: this is a review for many, and starting from the beginning is deliberate.",
+      "quiz": {
+        "question": "In a directed graph, an edge from w to v exists. What does that tell you about an edge from v to w?",
+        "options": [
+          "Nothing — (w, v) and (v, w) are different ordered pairs, and the second may or may not be in E",
+          "It must also exist, since edges connect two vertices and connection is symmetric",
+          "It cannot exist, because a simple graph forbids two edges between the same pair"
+        ],
+        "answer": 0,
+        "explain": "A directed edge is an ordered pair, so the direction is part of the edge's identity. Having (w, v) in the edge set says nothing about (v, w); that is exactly why the board example could not get from the upper right to the lower left — every edge along the way pointed the other way. Symmetry is the undirected case, where the edge is the unordered set {v, w}. And a simple graph forbids duplicate edges, but (w, v) and (v, w) are not duplicates of each other in a directed graph."
+      }
+    },
+    {
+      "chunk": 1,
+      "topic": "AUDIENCE: No.",
+      "emphasis": "Two things in this stretch, and the second is the one to be precise about. First, let the applications breathe but do not linger: computer networks, social networks, road maps with shortest routes, the states and single-twist transitions of a Rubik's cube, triangle meshes behind every 3D model, and the adjacency graph of voting precincts. The point of the list is that graphs are unavoidable, not any one example. Second, the simplifying assumption. Define a simple graph exactly: no self-loops, and no repeated edge between the same pair. Then derive the bound Solomon writes in big text, because it recurs every time a runtime is stated: with edges being pairs of distinct vertices and never repeated, an undirected graph has at most V choose 2 edges and a directed graph at most twice that, and both are O(V²). Walk the factor of two carefully — it comes from the source and target being distinguishable, which the binomial coefficient does not count. Then say why anyone cares: from now on runtimes will be written in terms of V and E, and E can be anywhere from zero to about V², so an algorithm that costs O(E) is a real improvement over O(V²) on the sparse graphs that show up in practice.",
+      "quiz": {
+        "question": "A simple undirected graph has V vertices. What is the largest number of edges it can have, and why?",
+        "options": [
+          "V choose 2 — every edge is an unordered pair of distinct vertices, and no pair is repeated",
+          "V² — every vertex can connect to every vertex, including itself",
+          "2 · (V choose 2) — each pair of vertices can carry an edge in either direction"
+        ],
+        "answer": 0,
+        "explain": "In a simple graph there are no self-loops, so an edge is a pair of two different vertices, and there are no repeats, so each pair appears at most once. Unordered pairs of distinct vertices are counted by V choose 2. The factor of two belongs to the directed case, where (v, w) and (w, v) are different edges; V² would additionally allow self-loops, which a simple graph forbids. Either way the count is O(V²), which is the bound the lecture wants you to carry forward."
+      }
+    },
+    {
+      "chunk": 2,
+      "topic": "AUDIENCE:",
+      "emphasis": "Definitions with a counting payoff at the end; do the counting properly. Neighbours first: the outgoing neighbour set Adj⁺(u) is every vertex an edge from u points to, the incoming set Adj⁻(u) is every vertex with an edge pointing into u, and in an undirected graph the superscript is dropped because the two sets are the same. Degree is just the size of that set, out-degree and in-degree in the directed case — use Solomon's three-vertex board graph, where node 1 has out-degree 2 and in-degree 1. Then the sum. Add up the out-degree over every vertex: in a directed graph each edge is counted exactly once, at its source, so the sum is E; in an undirected graph each edge sits at both of its endpoints and is counted twice, so the sum is 2E. Solomon botches this sentence on the first try and says so — reassure the learner that the two-vertex, one-edge example settles it: degrees 1 and 1 sum to 2, edges 1. Say why it matters before moving on: every graph algorithm in this unit has a loop that says for every vertex, for every neighbour, and this sum is exactly how long that loop takes. Close on the first representation — an edge list, which is just the set of edges written down in no order — and set up the question of the next stretch, which is how long it takes to check whether a particular edge exists.",
+      "quiz": {
+        "question": "Sum the degree over every vertex of an undirected graph with E edges. What do you get?",
+        "options": [
+          "2E — each edge is counted once at each of its two endpoints",
+          "E — each edge is counted once, the same as in the directed case",
+          "V · E — every vertex could be touching every edge"
+        ],
+        "answer": 0,
+        "explain": "An undirected edge sits in the neighbour set of both of its endpoints, so it contributes one to the degree of each and two to the total. Two vertices joined by one edge already show it: degrees 1 + 1 = 2, edges 1. The directed case is where the sum of out-degrees equals E, because each edge has one source. This sum is what bounds the for-every-vertex, for-every-neighbour loop that BFS and every later graph algorithm is built around."
+      }
+    },
+    {
+      "chunk": 3,
+      "topic": "AUDIENCE: The first one's 1, 2.",
+      "emphasis": "This is the longest stretch and it has three parts; keep them separate. Part one is representation, framed the way the sets lectures framed it — pick the structure that makes your queries fast. An edge list makes 'is there an edge from v to w' a linear scan, up to O(V²). An adjacency list maps each vertex u to the set of its outgoing neighbours, and if that inner set is a hash table the same query is two expected O(1) lookups. Take Solomon's answer to the audience question seriously: storing outgoing versus incoming neighbours is a design decision, and it has to match what the algorithm will ask for. An adjacency matrix makes the edge query trivial but costs V² space and makes 'loop over my neighbours' a scan of a whole row. Part two is paths. A path is a sequence of vertices where every consecutive pair is an edge; its length is the number of edges, which is one less than the number of vertices, and adding one by accident is the classic bug. Shortest path is the path with the fewest edges. Part three is the three model problems in increasing difficulty: single-pair reachability, single-pair shortest path, and single-source shortest path, which asks for the distance from s to every vertex. Show the reductions explicitly — shortest path solves reachability by returning infinity when there is no path, and single-source solves single-pair by throwing away everything except t. Name the idea: reduction, using one solved problem to solve another. Today solves problem three, and end on the shortest-path tree question Solomon raises — storing every path would cost V² space, and the next stretch shows it only needs V.",
+      "quiz": {
+        "question": "You store an adjacency list where each vertex maps to a hash table of its outgoing neighbours. What does 'is there an edge from v to w' cost, and why?",
+        "options": [
+          "Expected O(1) — look up v, then look up w in v's neighbour table, each an expected constant-time hash lookup",
+          "O(E) — you still have to scan the edges adjacent to v one by one",
+          "O(V) — you have to scan the whole row for v as you would in an adjacency matrix"
+        ],
+        "answer": 0,
+        "explain": "That is the whole point of the adjacency list with a hash table inside it: one lookup finds v's neighbour set, a second lookup asks that set whether w is in it, and both are expected constant time. The O(E) scan is what the plain edge list costs, and the O(V) row scan is the adjacency matrix's cost for iterating over neighbours, not for a single edge query. Solomon's line is that you went from V² to 1 with one simple trick."
+      },
+      "exercise": "Hold the talk button. A path in an undirected graph visits the vertices a, b, c, d, in that order. Tell me its length, tell me why it is that number and not one more, and then tell me which of the three model problems — reachability, single-pair shortest path, single-source shortest path — you would solve to find out whether d is reachable from a, and how you would read the answer off it."
+    },
+    {
+      "chunk": 4,
+      "topic": "AUDIENCE: Just for previous ..",
+      "emphasis": "One construction, and it rests on one property; teach the property first. The property: a prefix of a shortest path is itself a shortest path. If the shortest path from a to d is a, b, c, d, then a, b, c must be a shortest path to c — because if something shorter to c existed, you could splice it in and get a shorter path to d, contradicting what you started with. Say that argument out loud once, slowly; it is the argument that makes the rest work. The construction: for every vertex v, store only its parent P(v), the vertex just before it on a shortest path from the source. That is one entry per vertex, so V space, not V² — and yet it loses nothing, because the path is recovered by walking P(v), then P(P(v)), and so on back to the source. Use Solomon's board graph: the parent of f is d or e, either is fine, e for fun; the parent of e is c; of d is c; of c is b; of b is a. Then explain the word tree: following parent pointers can never cycle, because each step strictly decreases the distance to the source, so the parent pointers form a tree rooted at s. Defer the recursion question as Solomon does — no algorithm has been written yet, so there is nothing to recurse on.",
+      "quiz": {
+        "question": "Why can the shortest-path tree store only one parent P(v) per vertex, yet still reconstruct every shortest path from the source?",
+        "options": [
+          "Because a prefix of a shortest path is itself a shortest path, so following P(v), then P(P(v)), and so on retraces a shortest path all the way back to s",
+          "Because every vertex has exactly one shortest path from s, so there is nothing else to store",
+          "Because the tree stores the whole path implicitly by keeping the vertices in distance order"
+        ],
+        "answer": 0,
+        "explain": "The splice argument is the reason: if the path from s to the parent of v were not shortest, you could replace it with a shorter one and shorten the path to v, which contradicts v's path being shortest. So walking parent pointers backward always stays on a shortest path, and one pointer per vertex — V space — is enough. Shortest paths are usually not unique; the tree just commits to one parent per vertex, which is why f's parent could be d or e. Ordering by distance is what level sets do, and that comes next."
+      }
+    },
+    {
+      "chunk": 5,
+      "topic": "AUDIENCE:",
+      "visual": "graph-traversal",
+      "emphasis": "The learner has the graph-traversal explorer open, set to BFS from A — teach against it. First finish the audience question honestly, because it is a real property of shortest paths: adding one edge, say a to d, can change the shortest-path tree everywhere, and so can changing the source. The response for now is simply to recompute; incremental algorithms exist but are not this course. Then the level set, which is the idea of the stretch. L_k is the set of vertices whose shortest distance from the source is exactly k: L0 is the source alone, L1 its neighbours, and so on. Solomon's example on the slide has one vertex in each of L0, L1, L2 and then three vertices in L3. Make the point the audience raised — it is the SHORTEST distance, so a vertex that could be reached in 5 steps by wandering but in 2 directly is in L2. Now put it on the screen. Tell them to press Step once so A is visited, then look at the dashed rings: B and D are waiting in the queue with the tag L1, and nothing else has been discovered. Say that the queue at any moment is the current level set plus whatever of the next level has been found so far, and that the explorer takes neighbours in alphabetical order, which is why B is ahead of D. Have them press Step until the readout shows level 2, and read the level sets off the tags: L1 is B and D, L2 is C, E and G. Say that computing every level set is the same thing as computing every shortest distance, and that the algorithm that does it is called breadth-first search, coming in the next stretch.",
+      "quiz": {
+        "question": "In the explorer, BFS from A has visited A, B and D, and C, E and G are waiting in the queue tagged L2. What does the L2 tag mean?",
+        "options": [
+          "The shortest distance from A to each of those vertices is exactly 2 edges",
+          "Those vertices were discovered second, after the first batch, whatever their distance",
+          "Each of them has degree 2"
+        ],
+        "answer": 0,
+        "explain": "L_k is defined by shortest distance: a vertex is in L2 when the fewest edges from the source to it is two. C, E and G were each first discovered from a vertex in L1, so they are exactly two edges from A, and no shorter route exists because BFS visited everything within one edge first. Discovery order matches distance in BFS precisely because it works level by level, but the tag reports the distance, not a rank. Degree has nothing to do with it — G has degree 2 and so does C, but E has degree 3 and is in L2 all the same."
+      }
+    },
+    {
+      "chunk": 6,
+      "topic": "AUDIENCE:",
+      "visual": "graph-traversal",
+      "emphasis": "The algorithm, with the explorer on screen. Start where Solomon starts: L0 is the source; its distance to itself is 0; the parent array is empty because the source needs no parent. Then the loop, and say it is an induction — level i is built from level i−1. While the previous level is not empty: for every vertex u in it, for every neighbour v of u that has not been seen in any earlier level, put v in L_i, set its distance to i, and set its parent to u. Explain each guard: a neighbour already seen belongs to an earlier level and must not be added again, which is why the explorer draws a dashed ring on a discovered vertex and never enqueues it twice; and the parent is u because u is the vertex in the previous level the path came through. Now have them work it. Tell them to press Reset, then, before each Step, click the node they believe comes out of the queue next, and press Step to check. Say plainly what the queue is: the front holds the oldest discovery, and BFS always takes the front — that is what makes it breadth-first. The moment to catch is the third step, where a learner who thinks of the frontier as a stack expects C and the queue delivers D. When the walk finishes, have them read the accent edges: they are exactly the parent pointers, the shortest-path tree of the previous stretch, and the visit order in the readout is A B D C E G F H I. Then the runtime. Allocating the parent and distance arrays costs O(V). The loop visits every vertex once and looks at each of its neighbours, which is the degree sum from earlier — O(E). Total O(V + E), and say why both terms are kept: with no edges the V term dominates, with many the E term can reach V². The lecture calls this linear time, meaning linear in the size of the graph's own representation; Solomon says he finds that a little fishy, and that honesty is worth passing on.",
+      "task": {
+        "prompt": "Press Reset, keep BFS and start A, and step the walk to the end. Before each Step, click the node you expect the queue to hand over next — the third one is the one people get wrong. Every step after the first needs a prediction — running it without one does not count.",
+        "goal": [
+          { "field": "algorithm", "equals": "bfs" },
+          { "field": "start", "equals": "A" },
+          { "field": "done", "equals": true },
+          { "field": "visitedInOrder", "equals": "A B D C E G F H I" },
+          { "field": "predictAttempts", "atLeast": 8 }
+        ],
+        "hint": "The queue is listed front to back under the visit order. BFS always takes the front. Neighbours are added in alphabetical order, so B was discovered before D, and both were discovered before C."
+      },
+      "quiz": {
+        "question": "BFS from A has visited A and B, and the queue reads D, C, E front to back. Which vertex is visited next, and why?",
+        "options": [
+          "D — the queue hands over its front, the oldest discovery, and D was discovered from A before C and E were discovered from B",
+          "C — B was just visited, so its first neighbour comes next",
+          "E — the most recently discovered vertex is taken first"
+        ],
+        "answer": 0,
+        "explain": "Breadth-first means finishing a whole level before starting the next, and a queue enforces that by always releasing the oldest entry. D was put in the queue when A was visited, at level 1; C and E were put in when B was visited, at level 2. So D comes out first, and the explorer shows it. Taking C, the most recently visited vertex's neighbour, or E, the newest discovery, is what a stack would do — that is depth-first search, the subject of the next lecture, and the confusion the third step of the task is there to catch."
+      },
+      "exercise": {
+        "prompt": "BFS runs on a simple undirected graph with 9 vertices and 11 edges. Counting the array allocation as 9 units and the neighbour loop as one unit per edge endpoint visited, how many units of work is that?",
+        "answer": { "value": 31, "unit": "units of work", "tolerance": 0 },
+        "explain": "The arrays cost V = 9 units. The loop looks at every neighbour of every vertex, and in an undirected graph that is the degree sum, which is 2E = 22. Together that is 9 + 22 = 31 — the concrete shape of O(V + E). The explorer's graph is exactly this size, so you can check the 22 by counting dashed-ring discoveries and skipped neighbours as you step."
+      }
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+{
+  "course": "6.006",
+  "lecture": "l02-data-structures-and-dynamic-arrays",
+  "title": "Data Structures and Dynamic Arrays",
+  "note": "25 speaker-tag marks in this transcript (lots of short call-and-response with the audience, especially in the resize-factor discussion), so lesson.mjs's boundary rule produces 6 chunks that track the lecture's natural arc closely: interface-vs-structure and the static sequence interface, then the static array solution, then dynamic sequences and linked lists, then their weaknesses, then the doubly-linked fix and the dynamic array setup, then the resize-factor argument and amortized analysis. Chunk boundaries were hand-computed via grep for column-0 speaker tags since node is unavailable this session; topic is omitted from every section for the same reason as the rest of this run's plans -- a hand-reconstructed label risks the drift-error path instead of just its warning. What was hard about this lecture is the resize-factor argument in the final chunk: the doubling case's total cost (1+2+4+...+n = theta(n)) has to be kept sharply distinct from the additive case's cost (resizing every 5 steps is still linear time per operation, just a different constant) -- they sound similar in casual description but only one of them is actually asymptotically better, and that's the entire point of the argument.",
+  "sections": [
+    {
+      "chunk": 0,
+      "emphasis": "Open by fixing the interface-vs-data-structure distinction, which the whole lecture leans on: an interface (or API, or ADT) specifies WHAT operations are supported and what they mean; a data structure specifies HOW to actually store the data and implement those operations efficiently -- the same interface can be solved by many different data structures with different tradeoffs. Name the two interfaces this unit studies (set and sequence) and say today is about sequences. Then state the static sequence interface precisely: n items x_0 through x_{n-1}, with operations build (construct from an iterable, given its length), length, iteration (output items in order, at least linear time), and get_at/set_at (read or write the i-th item). The obvious solution -- get it from the audience -- is a plain array/Python list.",
+      "quiz": {
+        "question": "According to the interface-vs-data-structure distinction opening this lecture, what does an interface specify that a data structure does not?",
+        "options": [
+          "What operations are supported and what they mean, leaving how to actually store the data and implement those operations open",
+          "The exact memory layout and pointer structure used to store the data",
+          "The asymptotic running time every operation must achieve"
+        ],
+        "answer": 0,
+        "explain": "The lecture states this distinction directly: the interface (or API/ADT/specification) says what you want to do -- what operations exist and what they mean -- while the data structure says how you actually represent the data and implement algorithms for those operations. Memory layout and pointer structure are exactly the 'how' that belongs to the data structure, not the interface; and while efficiency matters, the interface itself doesn't mandate a specific running time -- different data structures solving the same interface can have very different running times, which is the whole point of comparing them later in the lecture."
+      }
+    },
+    {
+      "chunk": 1,
+      "emphasis": "Solve the static sequence interface with the static array, and use it to introduce the word-RAM model precisely, since later chunks depend on it. Memory is a big array of w-bit words, randomly accessible in constant time; an array is a CONSECUTIVE chunk of that memory, so accessing index i is just address-of-array plus i -- constant-time offset arithmetic, which is exactly why get_at/set_at are constant time. Land the memory-allocation model as an explicit assumption, not a detail to skip: allocating an array of size n costs theta(n) time (including zero-initializing it), which has the nice side effect that space used is always at most time used -- and it rules out the 'allocate infinite space up front' cheat. Close on why word size w must grow with n: addressing n distinct items requires representing indices up to n, which needs at least log(n) bits, so w >= log(n) is a basic requirement of the model, not an arbitrary assumption -- this becomes important later when discussing hashing.",
+      "quiz": {
+        "question": "Why does the word-RAM model require the machine word size w to be at least log(n), where n is the number of items being addressed?",
+        "options": [
+          "To give a distinct index to each of the n items and access any of them in constant time, you need to be able to represent numbers up to n, which requires at least log(n) bits per word",
+          "Because real computers happen to have exactly log(n) bits per word by hardware design",
+          "Because array access would otherwise take more than constant time regardless of word size"
+        ],
+        "answer": 0,
+        "explain": "The lecture's argument is about addressing, not raw access speed: to say 'give me the i-th item' for i ranging up to n, the index i itself must fit in a word, and representing numbers up to n needs at least log(n) bits -- so w >= log(n) is a minimum requirement just to name every item, independent of how fast memory access itself is. It is not a claim about real hardware having a fixed bit width tied to log(n) (real machines have a fixed w that must simply be large enough for whatever n you're processing); and constant-time access is precisely what having a large-enough word size makes possible, not something that fails regardless of it."
+      }
+    },
+    {
+      "chunk": 2,
+      "emphasis": "Define the dynamic sequence interface (static sequence's operations plus insert_at and delete_at anywhere in the middle, plus the convenient special cases insert/delete/get/set-first and -last), stressing the reindexing subtlety: inserting at position 2 shifts every later item's index up by one, so a later get_at(3) after an insert_first now returns what used to be at index 2 -- conceptually simple, but easy to get wrong. Then introduce the linked list as the first attempt to solve it: nodes holding an item and a next pointer, chained together and tracked via a head pointer, relying on the word-RAM fact that pointers (just memory addresses) can be stored in one word and dereferenced in constant time. Note the key structural contrast being set up for the next chunk: arrays are contiguous and support random access well; linked lists are scattered in memory but make reordering (via pointer surgery) cheap without physically moving data.",
+      "quiz": {
+        "question": "After calling insert_at(2, x) on a dynamic sequence, what happens to a subsequent call to get_at(3)?",
+        "options": [
+          "It returns whatever value used to be at index 2 before the insert, because every item from the insertion point onward shifts up by one index",
+          "It returns the same value it would have returned before the insert, since insert_at only affects index 2 itself",
+          "It throws an error, because index 3 is now out of range"
+        ],
+        "answer": 0,
+        "explain": "The lecture works through this reindexing carefully: insert_at(2, x) makes x the new item at index 2, and every item that was previously at index 2 or later shifts up by one position -- so what used to be at index 2 is now at index 3, and get_at(3) after the insert returns that shifted value, not the value that used to occupy index 3 nor an error. This is exactly the subtlety the lecture flags as easy to get wrong when tracking indices through an insert."
+      }
+    },
+    {
+      "chunk": 3,
+      "emphasis": "Analyze both data structures against the dynamic sequence operations, and get the key asymmetry from the audience rather than just stating it. Static array: insert/delete anywhere costs theta(n) -- inserting near the front requires shifting theta(n) elements, but even inserting/deleting at the very END still costs theta(n), NOT because of shifting (there's no shifting there) but because the array's allocated size is exactly n, so any growth requires allocating a brand-new array and copying everything over; this is a real constraint of the memory-allocation model (a memory allocator can't just grow an array in place, since something else may already occupy the adjacent memory). Linked list: insert/delete_first is genuinely constant time (allocate a node, relink the head pointer) -- but get_at/set_at cost theta(i) in the worst case theta(n), since you must walk pointers from the head; even get_last is theta(n) with a plain singly-linked list, since there's no shortcut to the end.",
+      "quiz": {
+        "question": "In a static array, why does even insert_last (adding to the very end, with no shifting required) still cost theta(n) time?",
+        "options": [
+          "The array's allocated size is exactly n, so any growth requires allocating an entirely new array and copying every existing element into it, which is a linear-time operation regardless of where the new item goes",
+          "Because inserting at the end always requires shifting every existing element over by one position",
+          "Because static arrays cannot support insert_last at all, so the question doesn't apply"
+        ],
+        "answer": 0,
+        "explain": "The lecture is explicit about this being a subtlety worth separating from shifting: a static array's size always equals n exactly, so there is never spare room to add one more item, and the memory-allocation model says you cannot simply grow an array in place (adjacent memory may already be occupied) -- so any insertion, even at the very end where no reindexing/shifting is needed, forces allocating a new array and copying every element over, which costs theta(n). Insert_last is a perfectly well-defined and supported operation on a static array; it's just expensive for this allocation reason, not a shifting reason."
+      }
+    },
+    {
+      "chunk": 4,
+      "emphasis": "Two things: fix the linked list's get_last weakness, then set up the dynamic array. First, data structure augmentation: adding a tail pointer (alongside head) to the linked list makes get_last and insert_last constant time too, as long as the tail pointer is kept up to date on every mutation that could move it -- the general pattern of storing extra derived information and maintaining it as an invariant. Then pose today's real goal, dynamic arrays (what Python actually calls a list): get the best of both static arrays (fast random access) and linked lists (fast insert/delete at an end) by relaxing the invariant that array size must equal n exactly. Instead, maintain array size = theta(n) -- specifically at least n, and at most some constant multiple of n -- and track both the array itself and a separate length field, so the first `length` slots hold real data and the rest are unused capacity. With that slack, a naive insert_last becomes trivial: write to a[length], then increment length -- constant time, IF there's room.",
+      "quiz": {
+        "question": "What invariant does a dynamic array relax compared to a static array, and what does it maintain instead?",
+        "options": [
+          "It relaxes the requirement that the array's allocated size exactly equal n, maintaining instead that the size stays theta(n) -- at least n, and at most some constant multiple of n",
+          "It relaxes the requirement that get_at/set_at run in constant time, allowing them to be linear instead",
+          "It relaxes the requirement that items be stored contiguously in memory, scattering them like a linked list"
+        ],
+        "answer": 0,
+        "explain": "The lecture states this precisely: a static array keeps its allocated size exactly equal to n at all times, which is what forces a full reallocation on every single insert; a dynamic array instead allows the allocated size to be theta(n) -- at least n, at most some constant times n -- tracking the true count separately as a length field, so there is usually slack to absorb an insert_last without reallocating at all. Get_at/set_at remain constant time in a dynamic array (that's one of the two goals being pursued), and the array stays a genuine contiguous array throughout, unlike a linked list's scattered nodes."
+      }
+    },
+    {
+      "chunk": 5,
+      "emphasis": "This is the payoff chunk: what happens when the array is actually full (length equals size), and why doubling the size is the right resize factor rather than adding a constant. Walk the audience's wrong guess honestly: resizing by a fixed additive amount (size + 5) means resizing every 5 insertions instead of every 1 -- still linear total cost per operation once constant factors are dropped, no real improvement over a static array's always-resize behavior. Then work the doubling case concretely: starting from an empty array and doing n insert_lasts, resizes happen at sizes 1, 2, 4, 8, 16, ... (powers of 2), and the total resize cost is the geometric series 1+2+4+...+roughly n, which sums to theta(n) -- NOT theta(n log n) -- because a geometric series is dominated by its last term. Since that theta(n) total cost is spread over n operations, each insert_last is constant AMORTIZED time: define t(n) amortized precisely as 'any k of these operations together cost at most k times t(n)', which captures that most individual insert_lasts are cheap (O(1)) while occasionally one is expensive (the resize, O(n)), and the expensive ones are rare enough to average out. Close with the summary table: dynamic arrays get constant-time get_at/set_at (like static arrays) AND constant amortized insert_last/delete_last (like linked lists get for insert/delete_first) -- genuinely the best of both, though insert/delete at an arbitrary middle position remains theta(n) in all three structures.",
+      "quiz": {
+        "question": "Why does doubling the array's size on every resize give theta(n) total resize cost over n insertions, while resizing by a fixed additive amount (like +5 each time) does not give a real asymptotic improvement over a static array?",
+        "options": [
+          "Doubling produces a geometric series of resize costs (1+2+4+...+n) that sums to theta(n), dominated by its last term; a fixed additive resize still requires resizing on a constant fraction of insertions, keeping the total linear-per-operation cost the same as always resizing, just with a smaller constant",
+          "Doubling and additive resizing both give theta(n) total cost, so there is no real difference between them",
+          "Additive resizing is actually asymptotically better because it resizes less aggressively and wastes less memory"
+        ],
+        "answer": 0,
+        "explain": "The lecture derives this explicitly: with doubling, resizes happen at sizes 1, 2, 4, 8, ..., and the total cost of all those resizes is the geometric series 1+2+4+...+(roughly n), which sums to theta(n) because a geometric series is dominated by its largest term -- so the total resize cost across n insertions is linear, making each insertion O(1) amortized. With a fixed additive resize (size + 5), you still resize every 5 insertions -- a constant fraction of them -- so the total cost stays proportional to n (just with a smaller constant than resizing every single time), which is the same asymptotic behavior as a static array's always-resize case, not an improvement. It is specifically the doubling (multiplicative) case that achieves the better amortized bound; wasted memory from doubling is a real tradeoff but not what determines the amortized time bound here."
+      }
+    }
+  ]
+}

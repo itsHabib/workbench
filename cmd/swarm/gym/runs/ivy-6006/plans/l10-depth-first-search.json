@@ -1,0 +1,76 @@
+{
+  "course": "6.006",
+  "lecture": "l10-depth-first-search",
+  "title": "Depth-First Search",
+  "note": "Same constraint as the other plans in this run: node script execution is refused by the sandbox, so chunk boundaries were derived by hand from scripts/lesson.mjs's documented algorithm and could not be checked against check-plans.mjs; topic is left off every section. The graph-traversal visual (spikes/voice-teacher/visuals/graph-traversal.html) supports a 'dfs' mode with the same ivyLessonState seam as l09's BFS plan, so chunk 0 uses it for the walkthrough, but its exact visit order for this particular graph could not be confirmed without running it, so the task's goal deliberately checks algorithm/start/done/predictAttempts rather than an exact visitedInOrder string, to avoid asserting a value that might be wrong. The hardest part of the lecture was chunk 3: it runs the topological-order definition, the finishing-order claim, its two-case proof, cycle detection, and the ancestor-edge argument for actually recovering a cycle all in one uninterrupted stretch of about 170 lines with no audience question to break at.",
+  "sections": [
+    {
+      "chunk": 0,
+      "visual": "graph-traversal",
+      "emphasis": "Open with a quick, honest recap of graph vocabulary from lecture 9 — vertices, directed edges as ordered pairs, simple graphs, outgoing neighbors Adj+, and adjacency-list representation — then land the one new distinction that matters today: breadth-first search draws concentric circles, visiting a whole level set before the next, while depth-first search shoots straight outward until it cannot go further, then backtracks. Introduce the reachability problem as DFS's motivating use case: given a source, which vertices can it reach by following directed edges? Show that shortest-path machinery already solves this (an unreachable vertex just has infinite distance) but at the same v+e cost as before, and pose today's real question — can reachability be solved faster? Define the parent tree P the same way as the shortest-path tree, except the path it recovers need not be shortest, only valid — reachability doesn't care how circuitous the path is. Then give the algorithm itself: visit(u) marks u, then recursively visits every unvisited neighbor of u, setting that neighbor's parent to u first. Walk the worked example on the graph 1, 2, 5, 3, 4, following the recursion explicitly: 1 calls 2; 2 has two neighbors, 3 and 5, and visiting 3 first means the recursion goes all the way to 4 before backtracking out through 3, back to 2, and only then visiting 5. Make the contrast with BFS explicit: DFS never touches 5 until the entire branch through 3 is exhausted and unwound — that is what 'depth' means, and it is not the level-by-level order BFS would produce on the same graph.",
+      "task": {
+        "prompt": "Set the explorer to DFS from A. Before each Step, predict which node the algorithm visits next, then press Step to check — DFS backtracks out of a whole branch before trying the next neighbor, which is the habit to build here. Keep predicting until the walk is done.",
+        "goal": [
+          { "field": "algorithm", "equals": "dfs" },
+          { "field": "start", "equals": "A" },
+          { "field": "done", "equals": true },
+          { "field": "predictAttempts", "atLeast": 8 }
+        ],
+        "hint": "DFS commits to one neighbor and follows it as far as it can before backtracking to try the next one — it does not spread outward level by level the way BFS does."
+      },
+      "quiz": {
+        "question": "In the worked example (source 1, then 2, with 2's neighbors 3 and 5, taken in that order), why does DFS visit 5 only after fully finishing with 3's entire branch, including 4?",
+        "options": [
+          "DFS recurses all the way down one neighbor's branch before returning to try the next — visiting 3 means following everything reachable through 3 first, and only after that recursion unwinds does 2 move on to 5",
+          "5 has a lower priority than 3 because it was discovered later in the adjacency list",
+          "DFS actually visits 5 before 3; the lecture's walkthrough visits neighbors in reverse order"
+        ],
+        "answer": 0,
+        "explain": "The defining behavior of DFS is that visit(u) calls visit recursively on a neighbor and does not return to consider u's next neighbor until that whole recursive call — everything reachable through it — has completed and unwound. So committing to 3 first means the entire branch through 3, including 4, finishes before 2 even looks at 5. This is exactly the backtracking behavior that distinguishes DFS from BFS's level-by-level spread; the order is not about priority or list direction, just about when the recursive call returns."
+      }
+    },
+    {
+      "chunk": 1,
+      "emphasis": "Prove DFS actually solves reachability correctly: every reachable vertex gets visited, and its parent pointer ends up set. Use induction on distance from the source, k. The base case, k = 0, is the source itself — visit(s) is the very first call, so its parent is already correctly set by construction, nothing more to argue. For the inductive step, take a vertex v at distance k+1 from the source (note the audience's correction: it is distance from s to v, since this is a directed graph and direction matters) and let u be the previous vertex on a shortest path from s to v, so u is at distance k and, by the inductive hypothesis, visit(u) is guaranteed to be called at some point. Because v is one of u's outgoing neighbors, visit(u) will consider v — and there are only two cases: either v already has a parent by that point (already handled correctly by an earlier call), or it does not, in which case the very next line sets it. Either way v ends up correctly parented, which completes the induction.",
+      "quiz": {
+        "question": "In the inductive step of DFS's correctness proof, why does the argument pick u to be specifically the previous vertex on a shortest path from s to v, rather than any arbitrary in-neighbor of v?",
+        "options": [
+          "Because the inductive hypothesis only guarantees the property holds for vertices at distance exactly k, and the previous vertex on a shortest path to v is guaranteed to be at distance k — any other in-neighbor might be farther away and not yet covered by the hypothesis",
+          "Because DFS only follows shortest-path edges, so u must lie on a shortest path or visit(u) would never be called at all",
+          "It doesn't matter which in-neighbor is picked; the proof works identically for any of them"
+        ],
+        "answer": 0,
+        "explain": "Induction on distance k only licenses assuming the property for vertices already known to be at distance k — the shortest-path predecessor of v is exactly such a vertex by definition, which is what lets the proof invoke the inductive hypothesis on it. DFS follows every edge it encounters, not just shortest-path edges, so an arbitrary in-neighbor of v could be at some other distance the induction hasn't reached yet, and the argument would not go through for it without extra work."
+      }
+    },
+    {
+      "chunk": 2,
+      "emphasis": "Analyze DFS's runtime and use it to build two more algorithms. First, runtime: because visit() is called at most once per vertex, and each edge is only ever examined from its one 'from' endpoint, every edge is traversed exactly once — so plain DFS from one source costs O(E), not O(V+E) like BFS, precisely because DFS never allocates the upfront O(V) bookkeeping BFS's level-set queue needs, and it never touches a vertex that isn't reachable at all. Field the two audience questions plainly: DFS works on undirected graphs too, by treating each undirected edge as a pair of opposite directed edges (as done since lecture 9); and no, BFS does not visit unreachable vertices either — its extra V term comes purely from reserving space up front, not from touching more vertices. Then introduce connectivity: an undirected graph is connected if every vertex can reach every other; a maximal such clump is a connected component. Show that DFS solves the connected-components problem almost for free — call DFS from an arbitrary unvisited vertex, collect everything it reaches as one component, then wrap a for loop over all vertices to repeat for any that remain unvisited. This is 'full DFS,' and because no edge is ever revisited across the whole sweep (once a vertex is claimed by a component it can't be reclaimed), the total cost across every call is still O(V+E): O(V) for the outer loop, O(E) total for all the edge traversals combined, amortized across every DFS call.",
+      "quiz": {
+        "question": "Full DFS wraps a for loop over every vertex, calling DFS from each unvisited one. Why is its total runtime O(V+E) rather than O(V) times the cost of a single DFS call?",
+        "options": [
+          "Every edge is only ever traversed once across the ENTIRE sweep — once a vertex is claimed by one DFS call it can never be revisited by another, so the per-call edge costs add up to O(E) total, not O(E) per call times V calls",
+          "The for loop itself only costs O(1), so it doesn't affect the total at all",
+          "Full DFS actually skips most vertices after the first call, so only one real DFS call ever happens in practice"
+        ],
+        "answer": 0,
+        "explain": "The key amortization argument is that a vertex claimed by one connected component's DFS call can never be visited again by a later call in the outer loop, so the edges examined across all calls combined still sum to at most E, not E repeated for every call. The O(V) is just the cost of the outer for loop checking each vertex's visited status once. Every unvisited vertex does trigger a real DFS call — that is exactly how separate connected components get discovered."
+      }
+    },
+    {
+      "chunk": 3,
+      "emphasis": "This chunk covers three linked ideas with no natural pause; keep them in sequence. First, DAGs and topological order: a DAG is a directed graph with no cycles (a tree with edges pointed away from the root is the class's example), and a topological order f assigns every vertex an index such that every edge u to v has f(u) < f(v) — note explicitly that such orderings are not unique. Second, the finishing order: run full DFS, and record each vertex the moment its visit() call completes (all its neighbors already handled) — the claim is that the REVERSE of this finishing order is always a valid topological order for a DAG. Prove it by taking any edge (u, v) and splitting into two cases. Case one, u is visited before v: since v is one of u's outgoing neighbors, visit(u) calls visit(v), so visit(v) must complete before visit(u) does — reversing finishing order therefore places u before v, exactly as required. Case two, v is visited before u: because the graph is acyclic, there can be no path from v back to u (that would be the cycle edge closing a loop), so visit(v) completes without ever reaching u, and the same reasoning as case one again places u before v in the reversed order. Third, cycle detection falls straight out of this: run DFS, compute the reverse finishing order, and check every edge against the topological-order property — if the graph really is a DAG this always succeeds, so finding even one edge that violates it proves the graph has a cycle, and checking is an if-and-only-if test for DAG-ness. To actually recover a cycle, not just detect one, use the ancestor argument: if a cycle v0, v1, ..., vk, v0 exists, take v0 to be whichever cycle vertex DFS visits first; everything reachable from v0, including the rest of the cycle up through vk, gets visited inside v0's own recursive call before it returns, so when vk's visit() examines its neighbors it will see the edge back to v0 — an edge from a vertex to one of its own ancestors in the DFS call tree. That is exactly the signal to watch for while DFS runs: the moment an edge points back to an ancestor still on the current call stack, that edge closes the cycle, and the cycle itself is recoverable by walking the call stack from there back up to that ancestor.",
+      "exercise": "Say out loud, in order: what a topological order requires of every edge, why the REVERSE of DFS's finishing order satisfies that requirement in both of the proof's two cases, and what it means for an edge to point from a vertex to one of its ancestors in the DFS call tree.",
+      "quiz": {
+        "question": "Full DFS is run on a directed graph and, when checking the reverse finishing order against every edge, one edge (u, v) is found where u actually comes AFTER v in that reversed order. What does this prove?",
+        "options": [
+          "The graph is not a DAG — it must contain a cycle, since the reverse-finishing-order proof guarantees every edge respects the topological property whenever the graph truly is acyclic",
+          "The DFS implementation has a bug, since reverse finishing order should always be a valid topological order regardless of the graph's structure",
+          "Nothing can be concluded — reverse finishing order is only a topological order for undirected graphs"
+        ],
+        "answer": 0,
+        "explain": "The proof shows reverse finishing order is ALWAYS a valid topological order whenever the graph is a DAG — so finding a single edge that violates the property is a certificate that the premise must be false: the graph cannot be a DAG, meaning it has a cycle. This is exactly the if-and-only-if cycle-detection test the lecture derives. It is not a sign of a bug — the algorithm is working exactly as proven, on a graph that happens not to be acyclic — and the claim was proven for directed graphs specifically, since topological order and DAGs are inherently directed concepts."
+      }
+    }
+  ]
+}

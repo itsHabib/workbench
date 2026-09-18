@@ -1,0 +1,64 @@
+{
+  "course": "6.006",
+  "lecture": "l18-dynamic-programming-part-4-rods-subset-sum-pseudopolynomial",
+  "title": "Dynamic Programming, Part 4: Rods, Subset Sum, Pseudopolynomial",
+  "note": "23 speaker-tag marks in this transcript, mostly short audience Q&A clustered around the rod-cutting negative-values questions and the subset-sum base-case/positivity questions, so lesson.mjs's boundary rule collapses them into just 4 chunks -- chunk 1 alone (lines 86-398) carries the whole rod-cutting example plus the strongly-polynomial digression plus the whole subset-sum setup and DAG example. Chunk boundaries were hand-computed via grep for column-0 speaker tags since node is unavailable this session; topic is omitted from every section for the same reason as the rest of this run's plans. What was hard about this lecture is keeping rod cutting's strongly-polynomial running time (theta L^2, genuinely polynomial in input size) sharply distinguished from subset sum's pseudopolynomial one (theta(nT), NOT polynomial in input size n+1 because T can be exponential in n) -- the two problems look almost identical in structure, and the lecture's whole point is that this resemblance is exactly what makes the distinction worth teaching carefully.",
+  "sections": [
+    {
+      "chunk": 0,
+      "emphasis": "This chunk is a SRTBOT review plus the opening frame for today's theme: pseudopolynomial time, arising from problems whose subproblems are indexed by an integer input value rather than by prefixes/suffixes/substrings of a sequence (the way Fibonacci already did, back at the start of the unit). Recap the general recipe precisely, since it's reused twice today: to find subproblems, ask what feature of the solution you could guess that reduces the problem to something smaller; if that feature has only a polynomial number of possible answers, brute-force all of them (locally) and take the best, relying on memoization to avoid recomputation. Land the SRTBOT checklist by name -- subproblems, relations, topological order, base cases, original problem, time -- and note today adds no new general technique beyond what's already been seen; it applies the existing integer-subproblem idea from Fibonacci to two new problems.",
+      "quiz": {
+        "question": "According to this recap, what is the general procedure for finding a working recurrence relation once you've chosen your subproblems?",
+        "options": [
+          "Identify some feature of the solution you could ask about; if it has only a polynomial number of possible answers, brute-force (guess) all of them locally and take the best, recursing into the resulting smaller subproblems",
+          "Always try every one of the exponentially many possible solutions directly, without ever reducing to smaller subproblems",
+          "Pick whichever single choice looks most promising by intuition and commit to it without trying alternatives"
+        ],
+        "answer": 0,
+        "explain": "The lecture states this as the general recipe: find a question about the solution whose answer set is small (polynomial), then locally brute-force every possible answer to that question and combine (max, min, or, etc.) the results, with memoization ensuring each smaller subproblem is only actually computed once. Trying all exponentially many full solutions directly is exactly what dynamic programming exists to avoid, and committing to a single guessed choice without considering the alternatives is precisely the mistake this technique fixes by trying all of them cheaply."
+      }
+    },
+    {
+      "chunk": 1,
+      "emphasis": "This is the longest chunk in the lecture; walk it in two clearly separated halves. First, rod cutting: given a rod of integer length L and a value v(l) for selling any length-l piece, find the partition of L into pieces that maximizes total value. Show why a greedy bang-for-buck heuristic (maximize v(l)/l) fails on the worked example (7 = 3+2+2 beats both selling it whole and the greedy single-best-ratio choice). Build the DP: subproblems x(l) = best value obtainable from a rod of length l, for l from 0 to L; the relation brute-forces the length p of the first piece cut off (1 to l) and takes max over p of v(p) + x(l-p); topological order is increasing l (since l-p is always strictly smaller); base case x(0)=0; running time is theta(L) subproblems times O(L) work each, giving theta(L^2). Then the crucial follow-up: is L^2 polynomial time? Yes -- and say precisely why, since it sets up the contrast with subset sum: input size here is L+1 words (one L, plus L values), so L^2 genuinely is polynomial IN THE INPUT SIZE; this stronger notion is called strongly polynomial. Second, subset sum: given n integers and a target T, decide if any subset sums exactly to T. Build its DP in parallel: subproblems x(i, t) = can some subset of the suffix A[i:] sum to t, for i from 0 to n and t from 0 to T; the relation brute-forces whether A[i] is included, giving x(i,t) = x(i+1,t) OR (t >= A[i] AND x(i+1, t-A[i])); topological order is decreasing i; base case x(n,t) is true only when t=0; running time is theta(n) times theta(T) subproblems, each constant work, giving theta(nT). Note both use parent pointers to recover an actual solution (which pieces, or which subset), not just the optimal value or yes/no.",
+      "quiz": {
+        "question": "Why must the subset-sum relation include the guard 'A[i] <= t' before allowing the branch that includes A[i] in the subset?",
+        "options": [
+          "Without it, the recursive call could ask about a negative target sum t - A[i], which is not one of the valid subproblems (t only ranges from 0 to T)",
+          "Without it, the algorithm would run in exponential rather than pseudopolynomial time",
+          "Without it, the base case x(n, t) would never be reached"
+        ],
+        "answer": 0,
+        "explain": "The lecture is explicit about this subtlety: subproblems x(i, t) are only defined for t between 0 and T, so calling x(i+1, t - A[i]) with A[i] > t would land on a negative, non-existent subproblem. The guard simply removes that branch from consideration when it isn't valid, rather than changing the algorithm's asymptotic running time (which stays theta(nT) either way) or affecting whether the base case at i=n is reached (that depends on i, not on this guard)."
+      }
+    },
+    {
+      "chunk": 2,
+      "emphasis": "This chunk resolves the running-time question left open in the previous one, and it's the conceptual heart of the lecture: is theta(nT) polynomial? No -- and the reasoning matters more than the answer. Subset sum's input size is n+1 words (n integers plus the target), but its running time depends on T's VALUE, not just on how many words it takes to write T down; since T only has to fit in one machine word (up to 2^w), and the word size w can be arbitrarily larger than log n, T can be exponential in n -- making nT exponential in the true input size n+1. Define the new term precisely: an algorithm is pseudopolynomial when its running time is polynomial in the input size AND the input integers' VALUES (not just the number of bits needed to write them) -- good news exactly when those integer values happen to be polynomially bounded in the input size, which is the same condition that makes radix sort run in linear time. Briefly place it in a hierarchy the lecture sketches but doesn't dwell on: strongly polynomial (polynomial in input size alone, like rod cutting) is best; weakly polynomial (polynomial in input size and the LOG of the integers, like radix sort's n log_n(U) bound) is nearly as good; pseudopolynomial (like subset sum, and also counting sort and direct-access arrays) is 'pretty good' but breaks down badly once the numbers get large.",
+      "quiz": {
+        "question": "Why can subset sum's running time theta(nT) be exponential in the problem's actual input size, even though T is just a single number?",
+        "options": [
+          "T only has to fit in one machine word, and the word size w can be arbitrarily larger than log n, so T's VALUE (up to 2^w) can be exponential in n even though it costs only one word to store",
+          "Because n itself can be exponential in the number of integers given",
+          "Because the algorithm secretly enumerates all 2^n subsets despite appearing to use dynamic programming"
+        ],
+        "answer": 0,
+        "explain": "The lecture's exact argument: input SIZE counts words, not values, and T costs exactly one word regardless of how large its value is (as long as it fits in a word). Since the word-RAM model only requires w to be at least log n, not bounded above by it, w -- and therefore T's value, up to 2^w -- can be far larger than any polynomial in n, making nT exponential in the true input size n+1. n itself is simply the count of given integers, not a value that could itself be exponential; and the DP is explicitly built to avoid ever enumerating all 2^n subsets -- that enumeration is precisely what memoization replaces."
+      }
+    },
+    {
+      "chunk": 3,
+      "emphasis": "The closing retrospective, surveying every DP example across all four lectures by the techniques used; treat this as a map, not new material to derive. Subproblem type: prefixes/suffixes for single sequences (bowling, LCS, LIS); products of suffix spaces for multiple sequences (LCS); smaller integers (Fibonacci, rod cutting, subset sum -- pseudopoly territory); substrings when cutting from both ends or splitting in the middle (the coin game, arithmetic parenthesization); and vertex-indexed subproblems for every shortest-path DP (DAG relaxation, Bellman-Ford, Floyd-Warshall). Constraints and expansion: LIS added a non-expansive constraint (start at a fixed item, same subproblem count); the coin game and parenthesization doubled subproblems (whose-turn-is-it, or min-vs-max); piano/guitar fingering multiplied subproblems by a constant amount of remembered state; Bellman-Ford expanded linearly by number-of-edges-so-far. Branching width in the relation: constant branching for binary yes/no choices (Fibonacci, subset sum, Floyd-Warshall's 'use this vertex or not'); degree-sized branching in graph relaxations (giving the E term in DAG shortest paths and Bellman-Ford); linear branching when guessing an arbitrary next item or split point (LIS, parenthesization, rod cutting). Combination style: most problems just take the single best incoming choice (equivalent to a shortest/longest path in the subproblem DAG); a few (Fibonacci's sum, Floyd-Warshall's path concatenation, parenthesization's prefix-times-suffix) genuinely combine two or more subproblem results together, which is why those don't reduce cleanly to a single shortest-path computation.",
+      "quiz": {
+        "question": "The lecture says most DP problems reduce to finding a shortest (or longest) path in the subproblem DAG, but a few don't. What distinguishes the ones that don't?",
+        "options": [
+          "Their combination step genuinely merges two or more subproblem results together (like concatenating two paths in Floyd-Warshall, or multiplying a prefix's and suffix's solutions in parenthesization), rather than just picking the single best of several incoming options",
+          "They use substrings instead of prefixes or suffixes as their subproblem type",
+          "They have a base case that returns more than one value"
+        ],
+        "answer": 0,
+        "explain": "The lecture draws this line explicitly at the end: problems like Fibonacci (summing two subproblem values), Floyd-Warshall (concatenating two path segments through an intermediate vertex), and parenthesization (combining a prefix's and a suffix's solutions) genuinely merge multiple subproblem results, which is a fundamentally different shape than just picking the best single option along one path -- so they aren't well-represented as a plain shortest-path computation, even though a DAG is still involved. Using substrings (the coin game, parenthesization) is one example among many subproblem-shape choices and doesn't by itself determine combination style; the number of base-case values returned isn't the distinguishing feature named here."
+      }
+    }
+  ]
+}

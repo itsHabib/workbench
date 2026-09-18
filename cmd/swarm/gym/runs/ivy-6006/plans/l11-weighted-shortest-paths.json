@@ -1,0 +1,118 @@
+{
+  "course": "6.006",
+  "lecture": "l11-weighted-shortest-paths",
+  "title": "Weighted Shortest Paths",
+  "note": "No visual for this lecture; seven chunks, straight transcript teaching. No source defects found on a close read. One moment worth flagging for the teacher rather than fixing: at the transcript's line 397 the audience catches Jason mid-example — his worked graph isn't actually a DAG — and he corrects himself on the spot ('This is not a DAG. Thank you. Let's make it a DAG.'). That is a genuine live correction, not a transcription slip, and the emphasis narrates it as the moment it is rather than presenting the corrected DAG as if it were always what he'd drawn. Chunk indexes come from scripts/lesson.mjs and must stay in sync with the bundle.",
+  "sections": [
+    {
+      "chunk": 0,
+      "topic": "JASON KU: Hi, everyone. Welcome to the 11th lecture of 6.006, our first ",
+      "emphasis": "Open with a fast recap, since it sets up exactly what today changes. The last two lectures solved single-source shortest paths (BFS, O(V+E)), single-source reachability (a slightly tighter O(E) bound, since the output only lists reachable vertices), connected components (BFS or DFS wrapped in a for-loop over unvisited vertices, still linear because each component is only ever traversed once), and topological sort (via DFS, only defined for a DAG). In every one of those, distance meant number of edges in a path — say that plainly, because it's exactly what today generalizes. Introduce the weight function w: it maps every edge to an integer (positive, negative, or zero are all allowed), and the weight of a path is just the sum of the weights of its edges — the natural generalization of counting edges, which was really just weighting every edge 1. Motivate why this matters with concrete cases: travel time on a road network's edges, latency on a network's links, even (half-jokingly) how much you like someone in a social graph, which is where negative weights genuinely make sense. Then settle a bookkeeping question before it becomes a distraction: how are weights stored? Either attach the weight to each adjacency-list entry, or keep a separate dictionary from edges to weights — either way, the one assumption every algorithm from here on relies on is that looking up an edge's weight costs O(1).",
+      "quiz": {
+        "question": "Jason generalizes 'distance' from counting edges in a path to summing edge weights along a path. Under that generalization, what does the old, unweighted notion of distance correspond to?",
+        "options": [
+          "The special case where every edge has weight 1 — summing 1 once per edge in the path is exactly the same as counting the edges",
+          "The special case where all edge weights are equal to the number of vertices in the graph",
+          "There is no correspondence; weighted and unweighted shortest paths are unrelated problems that happen to share a name"
+        ],
+        "answer": 0,
+        "explain": "A path's weight is defined as the sum of its edges' weights. If every edge is assigned weight 1, that sum is just a count of how many edges the path has — exactly the old unweighted notion of path length. This is why BFS, which solves the unweighted problem, turns out to still be useful later in the lecture: it is really solving the special case of weighted shortest paths where every weight happens to be 1 (or any single positive constant)."
+      }
+    },
+    {
+      "chunk": 1,
+      "topic": "AUDIENCE: Minus 4.",
+      "emphasis": "Confirm the audience's answer as a quick notational check — the weight from b to f in the example graph is −4, read straight off the diagram — then move to the actual definitions this lecture is built on. The weight of a path π is the sum of the weights of its edges; walk Jason's worked example, the path a→b→f→g, whose weights −5, −4, 2 sum to −7, so this particular path has weight −7. Then define the shortest path between two vertices as, among all paths connecting them, the one with minimum total weight — 'kind of obviously,' as Jason says, since that is the most natural reading of 'shortest' once distance means summed weight rather than edge count. Keep the audience's question live for the next stretch, since it is a real subtlety: does a path revisiting the same edge get charged for it more than once? The short answer, given immediately, is yes — an edge visited twice in π is counted twice in π's weight — but flag that this connects to something more interesting coming up: in certain contexts (which the lecture reaches shortly), a true shortest path is guaranteed to never need to repeat an edge, and that guarantee is exactly what breaks down when negative-weight cycles are in play.",
+      "quiz": {
+        "question": "The weight of a path π from a to b to f to g has edges weighted −5, −4, 2. What is the weight of π?",
+        "options": [
+          "−7 — the weight of a path is the sum of its edges' weights: −5 + (−4) + 2 = −7",
+          "3 — the sum of the absolute values of the edge weights",
+          "−9 — treating each edge as counting twice, since the path has 3 edges but 4 vertices"
+        ],
+        "answer": 0,
+        "explain": "The definition is direct: sum every edge weight along the path. −5 + (−4) + 2 = −9 + 2 = −7. There is no absolute-value step and no double-counting — each edge contributes its own signed weight exactly once, which is why a path can have negative total weight whenever its negative-weight edges outweigh its positive ones, the property the rest of the lecture spends real time on."
+      }
+    },
+    {
+      "chunk": 2,
+      "topic": "AUDIENCE: Can I use the same edge more than once?",
+      "emphasis": "Give the direct answer to the audience's question about repeated edges: yes, for now — a general weighted path is allowed to revisit an edge, and if it does, that edge's weight is counted every time it appears. Flag honestly, without resolving it yet, that this changes in certain contexts with negative weights, and that the lecture is about to show exactly why. Then define the central quantity of the whole unit precisely: δ(s, t), the shortest path weight from s to t, is the minimum, over all paths π from s to t, of π's weight. Two things can go wrong with that definition, and handle them in the order Jason does. First, the same issue BFS already had: if there is no path from s to t at all, there is nothing to minimize over, so by convention δ(s, t) = infinity, exactly as with unweighted distance. Second, a genuinely new problem: it's possible that no finite-weight shortest path exists at all — not because there's no path, but because you can always find a cheaper one by going a little further. When that happens, 'minimum' isn't well-defined in the usual sense (mathematically, it becomes an infimum rather than a minimum), and the convention is to call that δ(s, t) = negative infinity. Set up, without yet answering, exactly when that second failure mode can occur — that's what the next stretch's example is built to show.",
+      "quiz": {
+        "question": "δ(s, t) is defined as the minimum weight over all paths from s to t. Under what two conditions does this lecture say that definition breaks down, requiring a special convention?",
+        "options": [
+          "When there is no path from s to t at all (convention: δ = infinity), and when arbitrarily cheaper paths keep existing with no true minimum (convention: δ = negative infinity)",
+          "Only when there is no path from s to t; every other case has a well-defined finite minimum",
+          "When the graph has more than one shortest path of the same minimum weight, since then the minimum is ambiguous"
+        ],
+        "answer": 0,
+        "explain": "The 'no path' case is the same failure BFS already had to handle, and the fix is the same: infinity by convention, since minimizing over an empty set of paths has nothing to minimize. The second case is new to weighted graphs: if you can always find a strictly cheaper path by going further, there is no path that actually achieves the minimum — only paths that get arbitrarily close to it — so the convention of negative infinity stands in for 'unboundedly cheap.' Multiple paths tying for the minimum weight is not a problem at all; the minimum is still perfectly well-defined, just not achieved by a unique path."
+      }
+    },
+    {
+      "chunk": 3,
+      "topic": "AUDIENCE: b, f, g, c.",
+      "emphasis": "Use the audience's naming of the cycle to drive the example home. Walk it the way Jason does: the direct edge a→b has weight −5, which looks like a great candidate for the shortest path to b — an alternative route through the graph comes out to 14, clearly worse. But the colleague's answer names something real: there is a cycle b→f→g→c→b whose total weight is −4 + 2 + 1 + (−1) = −2, a negative-weight cycle. That changes everything: starting from the −5 edge to b, you can loop around this cycle as many times as you like, subtracting 2 from your path weight every time — so there is no finite minimum-weight path to b at all, and by the convention from the previous stretch, δ(s, b) = negative infinity. State the general rule precisely: if there's a path from s to some vertex v that passes through any vertex on a negative-weight cycle, then δ(s, v) = negative infinity, because you can always detour around the cycle one more time before continuing to v. Say plainly what this means for parent pointers: in this situation there is no shortest path to report, so the algorithm doesn't even try to maintain a parent pointer for v — instead, what you'd actually want returned is evidence of the negative-weight cycle itself, and that's explicitly deferred: 'that's what we're going to talk about next lecture. This lecture, we are not going to talk about that.' Close by being explicit about scope: today's lecture is about weighted shortest paths in the well-behaved case, where this problem doesn't arise.",
+      "quiz": {
+        "question": "The graph has an edge a→b of weight −5, and a cycle b→f→g→c→b of total weight −2. What is δ(s, b), the shortest path weight from s to b (assuming s can reach a)?",
+        "options": [
+          "Negative infinity — once you can reach b, you can loop around the −2-weight cycle as many times as you like, making the path weight arbitrarily small with no true minimum",
+          "−7 — the weight of the direct edge to b plus one trip around the cycle",
+          "−5 — the direct edge to b is already the best option, and cycling back to b afterward doesn't count as reaching b again"
+        ],
+        "answer": 0,
+        "explain": "A path is allowed to revisit edges (and hence vertices) and count their weight every time, so nothing stops a path from reaching b via the −5 edge and then circling the −2-weight cycle indefinitely, subtracting 2 from the total each time around. That means there is no finite path weight that is actually the smallest — for any candidate weight, one more trip around the cycle beats it — so by the lecture's convention this is recorded as δ(s, b) = negative infinity, not any finite number, however large the loop count."
+      }
+    },
+    {
+      "chunk": 4,
+      "topic": "AUDIENCE: Have four edges of weight 1.",
+      "emphasis": "Pull back to the roadmap before diving into today's actual algorithm, and be honest about what is and isn't solved. There are cases where BFS alone already solves weighted shortest paths: if every edge weight is 1, that's just the unweighted problem again; if every edge weight is the same positive constant c, divide every weight by c, run BFS, then multiply the resulting distances back by c. The audience's suggestion extends this further: an edge of weight 4 can be simulated by replacing it with four unit-weight edges in series (not parallel — a chain, so the count of edges crossed equals the original weight). Do that to every edge and BFS solves the transformed unweighted graph — but flag the audience's own objection to this trick: the weights might be very big, and each one blows up the graph's edge count by that much, so this only gives a linear-time algorithm when the sum of all edge weights is asymptotically no larger than V + E. Be direct about what remains open: solving general weighted single-source shortest paths (arbitrary integer weights) in linear time is an open problem — nobody knows how. State the roadmap for the rest of this unit plainly, since it frames everything that follows: today's special case is a DAG, where any set of edge weights (positive, negative, mixed) can be handled in linear time, because acyclic structure alone rules out the negative-cycle problem; next lecture is Bellman-Ford, which handles any graph, even with negative-weight cycles, in roughly quadratic time; two lectures from now is Dijkstra, which handles non-negative weights in close-to-linear (O(E log V)) time by exploiting the absence of negative cycles more cleverly.",
+      "quiz": {
+        "question": "Replacing a weight-4 edge with four weight-1 edges in series lets BFS solve the transformed graph — but why is this not, in general, a good way to get a fast algorithm for weighted shortest paths?",
+        "options": [
+          "Large edge weights blow up the number of edges in the transformed graph proportionally, so the trick only stays linear-time when the sum of all edge weights is asymptotically bounded by V + E — arbitrarily large weights make it slow",
+          "The trick only works for edges of even weight; odd weights cannot be represented as a series of unit edges",
+          "It changes which path is shortest, since chains of unit edges are treated differently from a single weighted edge by BFS"
+        ],
+        "answer": 0,
+        "explain": "The transformation is correct — a chain of k unit-weight edges genuinely simulates one weight-k edge, for any positive integer k, and BFS on the transformed graph gives the right answer. The problem is purely about running time: the transformed graph's size grows with the sum of all the weights, not just V and E, so if weights are large (say, exponential in the number of vertices), the graph becomes far too big for BFS's O(V+E) bound to mean anything useful — which is exactly why this is flagged as only a special-case trick, not a general solution, and why the lecture moves on to structural approaches like DAG relaxation instead."
+      }
+    },
+    {
+      "chunk": 5,
+      "topic": "AUDIENCE: Sum the distance along the edge to the distance of the other.",
+      "emphasis": "Before building today's algorithm, dispatch a piece of bookkeeping that simplifies every algorithm in this unit: given only the correct shortest-path distances δ(s, v) for every finite-distance v, you can reconstruct correct parent pointers in linear time, without the algorithm ever having to track them directly. State the reconstruction rule the audience essentially supplies: for each vertex u with finite δ(s, u), look at each outgoing neighbor v; if v has no parent assigned yet and δ(s, v) equals δ(s, u) plus the weight of edge (u, v), then u must lie on some shortest path to v, so set parent(v) = u. Say why this is worth doing: it means every algorithm in this unit can ignore parent pointers entirely and focus purely on computing distances, since parents are always recoverable afterward in the same O(V + E) shape as BFS and DFS's own bookkeeping. Then build DAG relaxation itself. Maintain a distance estimate d(s, v) for every vertex, distinct from the true answer δ(s, v) — initialize every estimate to infinity except the source, which starts at 0 — and maintain the invariant that every estimate is always an upper bound on the true shortest-path distance, only ever decreasing as the algorithm learns more. Define the triangle inequality precisely, since it's the trigger for every update: for any vertices u, x, v, δ(u, v) can never be more than δ(u, x) + δ(x, v) — restricting to paths through x can only make the minimum worse or equal, never better. An edge (u, v) is relaxed whenever the current estimates violate this: if d(s, u) + w(u, v) is less than d(s, v), that's proof the current estimate for v is wrong, so lower d(s, v) to exactly d(s, u) + w(u, v). Prove, at least informally, why this is always safe to do: by induction, every distance estimate is always either infinity or the exact weight of some real path from s (never something smaller than any real path could achieve) — so relaxing an edge can only ever tighten an estimate toward the truth, never push it below it.",
+      "quiz": {
+        "question": "Relaxing edge (u, v) means: if d(s, u) + w(u, v) is less than the current estimate d(s, v), set d(s, v) equal to d(s, u) + w(u, v). Why is this operation always 'safe' — why can it never make an estimate wrong in the other direction (too low)?",
+        "options": [
+          "By induction, every distance estimate is always either infinity or the exact weight of some real path from s to that vertex; relaxing just replaces d(s, v) with the weight of one specific real path (through u), so the new value is still the weight of an actual path, never an underestimate invented from nothing",
+          "It is safe only because the graph is assumed to have no negative-weight edges, which rules out ever going too low",
+          "It is not always safe; relaxation can occasionally produce an estimate lower than the true shortest path distance, which is corrected later"
+        ],
+        "answer": 0,
+        "explain": "The invariant proved in this stretch is exactly that every d(s, v) is always the weight of some genuine path from s to v (or still infinity, if none has been found yet) — never a number invented out of thin air. Relaxing edge (u, v) sets d(s, v) to d(s, u) + w(u, v), which is precisely the weight of the real path formed by whatever path currently realizes d(s, u), followed by the edge to v — so the new estimate is still the weight of a real path. Since δ(s, v) is a minimum over real path weights, no real path's weight can ever be less than that minimum, which is why relaxation can only push an estimate down toward δ(s, v), never past it. Negative edge weights are explicitly allowed in this argument — DAG relaxation handles them fine."
+      }
+    },
+    {
+      "chunk": 6,
+      "topic": "AUDIENCE: DAG.",
+      "emphasis": "Start with the moment worth narrating honestly: partway through drawing a worked example, the audience catches that Jason's graph isn't actually a DAG, and he corrects course on the spot — 'This is not a DAG. Thank you. Let's make it a DAG.' Keep that correction in the telling rather than presenting the fixed graph as though it were the original drawing; it's a small, genuine moment of live debugging. With a genuine DAG and its topological order (a, b, e, f, g, h, d, c), state DAG relaxation's full algorithm plainly: initialize every distance estimate to infinity except the source, which is 0; then process every vertex once, strictly in topological order, and for each one, relax every one of its outgoing edges. Walk the numeric trace starting from source e, the way Jason does: vertices before e in the topological order (a, b) can never be reached from e, so they're skipped entirely and correctly stay at infinity — that's not a special case, it's just what 'no path exists yet' looks like under this ordering. From e, relax the edge to f (weight 3): d(f) drops from infinity to 3. Processing f, relax its outgoing edges: 3+8=11 to h, 3+2=5 to g. Processing g next: 5+1=6 to h, which beats the previous 11, so h updates to 6; and 5+(−2)=3 to d. Processing d: 3+9=12 to c is worse than nothing yet so it sets c to 12 (still an improvement over infinity), and 3+4=7 to... whichever vertex follows, confirm it's worse than an existing better estimate where one exists. State and prove the correctness claim by induction on topological order: for the k-th vertex v in the order, look at v's predecessor u on some true shortest path to v — u must appear earlier than v in the topological order (otherwise the graph would have a cycle), so by the induction hypothesis d(s, u) is already exactly δ(s, u) by the time u is processed; when u is processed, relaxing the edge (u, v) sets d(s, v) to no more than d(s, u) + w(u, v) = δ(s, u) + w(u, v) = δ(s, v), and it can never be forced any lower than δ(s, v) by the safety argument from the previous stretch — so it lands exactly on δ(s, v). Close on the runtime: this is one pass over every vertex, doing constant work per outgoing edge, so the whole algorithm is O(V + E) — genuinely linear time, matching BFS and DFS, even with negative edge weights allowed, precisely because the DAG structure rules out negative-weight cycles by construction.",
+      "quiz": {
+        "question": "DAG relaxation processes vertices strictly in topological order and relaxes each one's outgoing edges exactly once. Why does processing in topological order — rather than any other order — guarantee every distance estimate is exactly correct by the time the algorithm finishes?",
+        "options": [
+          "Any vertex v's predecessor u on a true shortest path must come before v in topological order (or the graph would have a cycle), so by the time v is processed, u's distance is already final — meaning the edge (u, v) is relaxed with u's correct distance, forcing v's estimate down to exactly δ(s, v)",
+          "Topological order guarantees every vertex has the same number of incoming edges, which bounds the number of relaxations needed",
+          "It doesn't actually require topological order — any order that visits every vertex once would give the same correctness guarantee, topological order is just used for convenience"
+        ],
+        "answer": 0,
+        "explain": "The induction is load-bearing on topological order specifically: a DAG's topological order guarantees that every edge points from earlier to later in the order, so a shortest path to v's predecessor u is fully finished — processed and relaxed — before v is ever reached. That means when u's outgoing edges are relaxed, d(s, u) is already exactly δ(s, u), so relaxing (u, v) drives d(s, v) down to exactly δ(s, u) + w(u, v), which is δ(s, v) itself. Processing in any other order could reach v before its true shortest-path predecessor u has its final distance, giving v a wrong (too high) estimate that nothing later would necessarily fix — which is exactly the harder problem Bellman-Ford and Dijkstra have to solve for graphs without a topological order to lean on."
+      },
+      "exercise": {
+        "prompt": "Running DAG relaxation from source e in the lecture's example: after processing e (edge to f, weight 3) and f (edges to h, weight 8, and g, weight 2), the estimates are d(f)=3, d(h)=11, d(g)=5. Now process g, whose outgoing edges are g→h with weight 1 and g→d with weight −2. What does d(h) become after g is processed?",
+        "answer": { "value": 6, "unit": "distance estimate for h", "tolerance": 0 },
+        "explain": "Relaxing g→h compares the current estimate d(h)=11 against the candidate d(g) + w(g,h) = 5 + 1 = 6. Since 6 < 11, the triangle inequality is violated by the old estimate, so h's estimate is lowered to 6. This is the same step the lecture walks through by hand — d(d) becomes 5 + (−2) = 3 at the same time, since g's other outgoing edge is relaxed independently — and it's a clean example of why negative weights are perfectly fine for DAG relaxation: the algorithm only ever compares sums and keeps the smaller one, regardless of sign."
+      }
+    }
+  ]
+}

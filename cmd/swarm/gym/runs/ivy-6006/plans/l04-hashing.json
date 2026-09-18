@@ -1,0 +1,140 @@
+{
+  "course": "6.006",
+  "lecture": "l04-hashing",
+  "title": "Hashing",
+  "note": "Same constraint as l03: node script execution (scripts/lesson.mjs, scripts/check-plans.mjs) is refused by the sandbox's permission guard in this run with no approval arriving, so chunk boundaries were derived by hand from the documented algorithm (column-0 marks, TARGET=38, no *** topic: markers in this transcript) and could not be checked with check-plans.mjs. topic is left off every section for the same reason. The hardest part of the lecture to compress was the universal-hashing stretch (chunks 7-9): it moves from the division method, to why a fixed deterministic hash function is always beatable by an adversary, to the universal-family definition, to the expected-chain-length proof via indicator random variables and linearity of expectation, all in one continuous argument with no natural pause — that had to be split at the TARGET-line boundary rather than at a conceptual one.",
+  "sections": [
+    {
+      "chunk": 0,
+      "emphasis": "Frame today against what Tuesday's lecture already established: the set interface can be implemented with an unsorted array (linear scan, everything order n) or a sorted array plus binary search (find drops to log n, but building the sorted array costs n log n). State the question of the day plainly: can find beat log n? Answer it in two parts — first prove you cannot, in a restricted model, then show how you actually can outside that model. Define the comparison model precisely: items are black boxes, and the only operation allowed on two keys is a comparison (equal, less than, greater than), each with exactly two possible outcomes. Note that every sorting algorithm seen so far lived in this model. Introduce the decision tree as the way to reason about any comparison-model algorithm: internal nodes are comparisons, each branching into exactly two children depending on true or false, and the algorithm's execution is a root-to-some-leaf walk.",
+      "quiz": {
+        "question": "In the comparison model, what is the only thing an algorithm is allowed to do with two keys?",
+        "options": [
+          "Compare them — ask whether they are equal, or which is bigger — nothing else about their actual values is visible",
+          "Compare them or use one as a memory address to jump directly to its data",
+          "Compare them or compute a hash of one to redirect the search"
+        ],
+        "answer": 0,
+        "explain": "The comparison model treats keys as black boxes: comparison is the only operation, and it produces one of two outcomes, which is exactly what makes an algorithm in this model representable as a binary decision tree. Using a key as a direct memory address, or hashing it, are the RAM-model operations the lecture introduces later specifically because the comparison model forbids them."
+      }
+    },
+    {
+      "chunk": 1,
+      "emphasis": "Establish what a decision tree's leaves represent: outputs, not intermediate steps. A correct search algorithm over n stored items must be able to output any one of the n items, plus one more possibility — key not found — so it needs at least n+1 leaves; fewer than that and some possible answer could never be produced, which breaks correctness. Then connect leaves to runtime: the number of comparisons the algorithm performs in the worst case is the length of the longest root-to-leaf path, which is exactly the height of the tree. That reframes the runtime question as a purely combinatorial one: what is the minimum possible height of any binary tree with at least n+1 leaves?",
+      "quiz": {
+        "question": "Why must a correct comparison-model search algorithm's decision tree have at least n+1 leaves, not just n?",
+        "options": [
+          "n leaves for the n items it might return, plus one more leaf for the case where the key being searched for is not in the set at all",
+          "n+1 because the tree must also account for the initial comparison before any branching begins",
+          "n+1 is just a safety margin; n leaves would technically still work but risk being incorrect on edge cases"
+        ],
+        "answer": 0,
+        "explain": "Every one of the n stored items is a possible correct output, and 'not found' is a distinct possible output too — an algorithm missing that leaf could never correctly report a search miss. That is exactly n+1 required outcomes, each needing its own leaf, which is why anything short of n+1 leaves cannot be a correct algorithm."
+      }
+    },
+    {
+      "chunk": 2,
+      "emphasis": "Close the lower-bound argument: the minimum height of a binary tree with at least n+1 leaves is Theta(log n), achieved only when the tree is balanced — a linear-height tree, like a plain linear search, also has enough leaves but is far from minimal. So any comparison-model algorithm needs at least logarithmic time for find; that is a real lower bound, not just what the algorithms shown so far happen to achieve. Then pivot to escaping the model: the RAM model's one powerful extra operation is random access — jump to any location in memory in constant time using a number, which is a much larger effective branching factor than any constant comparison could give. Use that to build the first faster structure, the direct access array: store the item with key k directly at index k, so find, insert, and delete are all worst-case constant time by pure random access.",
+      "quiz": {
+        "question": "Why can't a constant branching factor — say, comparing against 3 or 4 things at once instead of 2 — escape the logarithmic lower bound?",
+        "options": [
+          "A tree with any fixed constant branching factor still has height that is a log (base that constant) of the number of leaves, which is still Theta(log n)",
+          "It can escape the bound; the lecture just doesn't cover multi-way comparisons because they're rarely used in practice",
+          "Constant branching factors are illegal in the comparison model by definition, so the question doesn't apply"
+        ],
+        "answer": 0,
+        "explain": "Changing the branching factor from 2 to any other constant only changes the base of the logarithm, and log-base-c(n+1) is still Theta(log n) for any fixed c. What actually breaks the bound is random access, which lets you jump to one of up to u different memory locations in a single constant-time step — a branching factor that can grow with the problem instead of staying fixed."
+      }
+    },
+    {
+      "chunk": 3,
+      "emphasis": "Surface the direct access array's real weakness before moving past the excitement of constant-time everything: it needs an array sized to u, the size of the entire universe of possible keys — not n, the number of items actually stored. Make it concrete with the lecture's own example: MIT IDs are nine-digit numbers, so u is around 10^9, while a single lecture hall might only have 300-400 students actually enrolled — n is tiny compared to u, and the array wastes almost all of its space. Answer the audience's clarifying question directly: a direct access array is a set data structure, not a sequence one, even though it reuses the same array machinery seen with sequences — the semantics (search by key) are what makes it a set.",
+      "quiz": {
+        "question": "Why does a direct access array waste space when storing MIT IDs for a lecture hall of 400 students?",
+        "options": [
+          "The array must be sized to u, the full space of possible nine-digit IDs (about 10^9), even though only n = 400 of those slots are ever filled",
+          "Each student's record requires far more memory than a single array slot can hold",
+          "Direct access arrays always allocate twice the space they need, for amortized-growth headroom"
+        ],
+        "answer": 0,
+        "explain": "The whole mechanism is indexing directly by key value, so the array's size is fixed by the largest possible key — the universe size u — not by how many keys actually get used. With nine-digit IDs, u is about a billion regardless of whether 400 or 4 students are enrolled, which is exactly the gap the lecture flags as the structure's fatal flaw. Amortized growth and per-record size are unrelated to this particular waste."
+      }
+    },
+    {
+      "chunk": 4,
+      "emphasis": "Tie the direct access array's feasibility to the machine model: constant-time random access only works if the universe size u fits inside the machine's word size w — u < 2^w — which is the word-RAM assumption this course leans on whenever it says an array of integers or fixed-size strings is given. Then name the real fix: instead of allocating space proportional to u, allocate space proportional to m, roughly the order of n, the number of items actually being stored, and use a hash function h to map the large key space (0 to u-1) down to the small compressed space (0 to m-1). State the shape of the tradeoff plainly before working out the details: this buys back the space, but it is about to introduce a new problem.",
+      "quiz": {
+        "question": "Instead of sizing the array to u, hashing sizes it to roughly m, on the order of n. What problem does that shrinkage necessarily introduce?",
+        "options": [
+          "Collisions — since m is smaller than u, by the pigeonhole principle multiple distinct keys must sometimes map to the same compressed index",
+          "Slower lookups — checking whether an index is valid now takes an extra comparison against m",
+          "Loss of determinism — a smaller array forces the hash function to behave randomly"
+        ],
+        "answer": 0,
+        "explain": "Mapping a bigger space (u) down onto a smaller one (m) means, by the pigeonhole principle, that some pair of distinct keys is forced to land on the same compressed index — that is a collision, and it is unavoidable for any fixed hash function once u is large enough relative to m. The lookup itself is still one hash computation plus one array access, and determinism is a separate, later concern about adversarial inputs, not a consequence of shrinking the array."
+      }
+    },
+    {
+      "chunk": 5,
+      "emphasis": "Make the pigeonhole argument concrete: any function mapping the large key universe down to a smaller table size m must send at least two distinct keys to the same slot once u is large enough, and if u is bigger than n^2, some fixed function forces n keys to the same place — the goal is a hash function that spreads keys evenly, but even a good one cannot avoid all collisions. Present the two ways to resolve a collision, since only one storage slot exists per index: open addressing, where a colliding item is placed at a different open slot in the same table (mention only that it exists and that it's hard to analyze, so the class skips it), and chaining, where each table slot instead holds a pointer to a small secondary data structure — any sequence structure will do — that can hold every item that collided there.",
+      "quiz": {
+        "question": "With chaining, what actually lives at each slot of the hash table?",
+        "options": [
+          "A pointer to a small secondary data structure holding every item whose key hashed to that slot",
+          "The single most recently inserted item with that hash value, overwriting any earlier one",
+          "A sorted list of every key in the universe that could hash to that slot, precomputed at table build time"
+        ],
+        "answer": 0,
+        "explain": "Chaining's whole idea is that a slot never holds an item directly — it holds a pointer to a chain (a linked list, dynamic array, or similar) collecting every item that collided at that index, so nothing is lost or overwritten on a collision. Precomputing every key that could theoretically hash there would require enumerating the universe, which is exactly the space blowup hashing exists to avoid."
+      }
+    },
+    {
+      "chunk": 6,
+      "emphasis": "Walk a lookup through chaining end to end: hash the key to find its slot, follow the slot's pointer to its chain, then do a plain linear scan of that chain comparing keys until you find a match or exhaust it. Emphasize the design goal driving everything that follows: it does not matter what data structure sits in each chain, because the whole plan is to prove the chains stay short — expected constant size — so scanning one costs expected constant time regardless of its implementation. Note the initialization detail the audience raises: every slot starts pointing at an empty chain, which costs a constant-factor space overhead per slot, still linear overall as long as m stays linear in n.",
+      "exercise": "Hold the talk button. A hash table with chaining has m slots, each holding a chain that is currently empty or has one item. Tell me, in your own words, why a find operation that walks one chain and finds nothing still counts as constant time — what has to be true about that chain's length for that claim to hold?"
+    },
+    {
+      "chunk": 7,
+      "emphasis": "Ask what the simplest possible hash function looks like, and land on the division method: h(k) = k mod m, which wraps the large key space around into the small one. Say plainly what makes it good and what makes it dangerous: if the keys happen to be uniformly distributed, it performs well, and something close to it (plus extra bit-mixing) is what Python actually uses — but it is still a single fixed, deterministic function, which means an adversary who knows it can always construct a set of keys that all collide at the same slot, making every chain length n instead of constant. State the real goal precisely: a runtime guarantee that holds independent of which keys get inserted, not just for typical or random-looking inputs — and note that no single fixed function can deliver that guarantee once u is large, because some adversarial input always exists for it.",
+      "quiz": {
+        "question": "Why can't any single fixed, deterministic hash function guarantee good performance on every possible set of input keys?",
+        "options": [
+          "Because a fixed function maps the same inputs to the same slots every time, so an adversary who knows the function can always construct a set of keys that all collide together",
+          "Because deterministic functions are inherently slower to compute than randomized ones",
+          "Because fixed hash functions only work correctly when u is smaller than m, which is rarely the case in practice"
+        ],
+        "answer": 0,
+        "explain": "Determinism is exactly the weakness: once the function is fixed and known, an adversary can always find inputs that map together, since the pigeonhole argument guarantees such a bad set exists whenever u is large relative to m. This is the entire motivation for randomizing over a family of hash functions next, so the adversary cannot know in advance which one they need to defeat. Computation speed and the relative sizes of u and m are unrelated to why a fixed function is beatable."
+      }
+    },
+    {
+      "chunk": 8,
+      "emphasis": "Introduce randomization as the fix: instead of committing to one hash function up front, pick one at random, from a family, after the adversary has already chosen their keys, so they cannot target it. Present the universal hash family h_{a,b}(k) = ((ak + b) mod p) mod m, built from a fixed large prime p bigger than u and a randomly chosen a (nonzero) and b at table-build time. Define universality precisely: for any two distinct keys in the universe, the probability — over the random choice of hash function — that they collide is at most 1/m. Frame why that property is exactly what is needed next: it lets you bound the expected size of any chain, no matter which keys an adversary throws at the table, because the randomness is in the function, not the input.",
+      "quiz": {
+        "question": "What does the universal hash family's guarantee — Pr[h(x) = h(y)] <= 1/m for any distinct keys x, y — actually promise?",
+        "options": [
+          "For any pair of distinct keys, however chosen, a randomly selected function from the family collides them with probability at most 1/m",
+          "For a fixed hash function from the family, at most 1/m of all key pairs in the universe will ever collide under it",
+          "The hash function will distribute exactly n/m keys to each slot, no matter what the input is"
+        ],
+        "answer": 0,
+        "explain": "Universality is a statement about randomness over the family, holding for every pair of keys no matter how adversarially they were chosen — it says nothing about any one fixed function's behavior on the whole universe, and it does not promise a perfectly even split, only a probabilistic collision bound per pair. That per-pair bound is exactly the tool the next chunk uses to bound expected chain length."
+      }
+    },
+    {
+      "chunk": 9,
+      "emphasis": "Finish the expected-chain-length proof. Define the indicator variable X_ij, over the random choice of hash function, as 1 if keys i and j collide and 0 otherwise; the length of the chain holding key i is then the sum of X_ij over every other key j. By linearity of expectation, the expected chain length is the sum of the expectations of each X_ij. Split that sum: the term where j = i always collides (it's the same key), contributing exactly 1, and every other term, by universality, has expectation at most 1/m. Summing (n-1) such terms gives an expected chain length of at most 1 + (n-1)/m — a constant, as long as m is chosen linear in n. Close with the dynamic case: if n grows past what keeps m linear in it, rebuild the whole table with a larger m, exactly the same idea as a dynamic array's resizing, and (without proving it here) that resizing happens rarely enough not to hurt the amortized cost.",
+      "exercise": "Say out loud, in order: what X_ij represents, why the j = i term contributes exactly 1 to the sum while every other term contributes at most 1/m, and what expected chain length that leaves you with when m is chosen linear in n.",
+      "quiz": {
+        "question": "The expected chain length works out to at most 1 + (n-1)/m. Why does choosing m to be linear in n (m = Theta(n)) make this a constant?",
+        "options": [
+          "Because (n-1)/m becomes a ratio of two quantities growing at the same rate, so it settles to a constant as n grows, leaving the whole expression O(1)",
+          "Because m linear in n forces every chain to have exactly the same length, which must therefore be constant",
+          "Because linearity of expectation only holds when m and n grow at the same rate"
+        ],
+        "answer": 0,
+        "explain": "If m is chosen proportional to n, say m = cn for some constant c, then (n-1)/m approaches 1/c as n grows — a fixed constant, not something that grows with n — so 1 + (n-1)/m stays O(1) regardless of how large the table gets. Expected chain length being constant does not mean every individual chain is the same length, just that the average, over the random hash choice, does not grow; and linearity of expectation holds unconditionally, for any random variables, not just under this particular choice of m."
+      }
+    }
+  ]
+}

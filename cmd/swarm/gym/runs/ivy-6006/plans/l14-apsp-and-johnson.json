@@ -1,0 +1,173 @@
+{
+  "course": "6.006",
+  "lecture": "l14-apsp-and-johnson",
+  "title": "APSP and Johnson",
+  "note": "No visual for this lecture; eleven chunks, straight transcript teaching — this transcript is formatted with frequent paragraph breaks even though it's a single unbroken monologue (no audience turns at all), so lesson.mjs's chunker is splitting on paragraph boundaries rather than speaker changes, and each chunk's topic is therefore just the first sentence of whichever paragraph the chunk happens to start on, not a meaningful heading. No source defects found; Jason does narrate one live self-correction worth keeping rather than smoothing over, at chunk 2 — he draws a numeric example, catches that he set it up wrong ('Man, I really should have done my example beforehand'), and fixes the weights on the board mid-explanation. Chunk indexes come from scripts/lesson.mjs and must stay in sync with the bundle.",
+  "sections": [
+    {
+      "chunk": 0,
+      "topic": "JASON KU: Welcome, everybody, to our lecture 14 of 6.006. This is our la",
+      "emphasis": "Frame this as the last lecture on shortest paths, and pivot from single-source to a new problem: all-pairs shortest paths (APSP). Recap the single-source toolkit built so far, since today's algorithm is built entirely out of it rather than anything new: BFS for unweighted graphs, DAG relaxation for any weights on an acyclic graph, Dijkstra at roughly O(V log V + E) for non-negative weights, and Bellman-Ford at roughly O(VE) for the fully general case, including negative weights. Note the size of that gap explicitly, since it's the whole motivation for today: it's the same shape as the gap between insertion sort's O(n²) and merge sort's O(n log n). Define APSP precisely: given a weighted graph, return the shortest-path distance δ(u, v) for every ordered pair of vertices — and scope today's lecture honestly: assume there is no negative-weight cycle (abort if there is), so every δ(u, v) is a finite number or plain infinity, never negative infinity. Land the lower bound before searching for an algorithm: the output alone has size Θ(V²), one number per pair, so no APSP algorithm can ever run faster than quadratic — unlike single-source shortest paths, where linear time was the ambition. State the obvious first algorithm, the one everything today tries to beat: run a single-source shortest-path algorithm from every vertex, V times.",
+      "quiz": {
+        "question": "Why can no all-pairs shortest paths algorithm run faster than Θ(V²) time, even though single-source shortest paths algorithms like BFS and Dijkstra run in close to linear time?",
+        "options": [
+          "The output of APSP alone — one shortest-path distance for every ordered pair of vertices — already has size Θ(V²), so no algorithm can produce it any faster than it takes to write it down",
+          "APSP is fundamentally a harder computational problem than single-source shortest paths, in the same complexity class as sorting",
+          "It is not actually a hard lower bound — a sufficiently clever algorithm could still solve APSP in O(V + E) time on special graphs"
+        ],
+        "answer": 0,
+        "explain": "Single-source shortest paths only has to output V numbers (one distance per vertex), so linear-in-the-graph-size algorithms like BFS are possible. APSP has to output a distance for every one of the Θ(V²) ordered pairs of vertices, and simply writing down Θ(V²) numbers already takes Θ(V²) time — no algorithm, however clever, can finish before it has produced its own output. This is why today's target is 'no slower than V times a fast single-source algorithm,' not 'linear in the graph.'"
+      }
+    },
+    {
+      "chunk": 1,
+      "topic": "That's why I put this slide up here. Yeah, we could just solve a single ",
+      "emphasis": "Work out what 'run single-source shortest paths V times' actually costs under each of the four single-source algorithms, and compare them carefully, since the comparison is the whole motivation for the rest of the lecture. Running BFS V times costs V·(V+E) and only applies when weights are uniform; running DAG relaxation V times costs the same but only applies to a DAG; running Bellman-Ford V times, the fully general option, costs V·(VE) = O(V²E) — for a sparse graph, that's cubic in V. Running Dijkstra V times, when all weights are non-negative, costs V·(V log V + E) = O(V² log V + VE) — for a sparse graph, that's about V² log V. Make the comparison land the way Jason does: for sparse graphs, V times Bellman-Ford is like V³, while V times Dijkstra is like V² log V — the same qualitative gap as insertion sort versus merge sort, a full linear factor versus a mere logarithmic one. State the goal this sets up plainly: if only Dijkstra's non-negative-weight assumption could somehow be satisfied even when the original graph has negative edges, APSP could always be solved at Dijkstra's better rate — which is exactly the transformation the rest of the lecture builds.",
+      "quiz": {
+        "question": "For a sparse graph, running Bellman-Ford V times costs roughly V³, while running Dijkstra V times costs roughly V² log V. Why does this lecture treat closing that gap as worth an entire new algorithm?",
+        "options": [
+          "The gap between a linear (V) factor and a logarithmic (log V) factor is the same order of improvement as the gap between insertion sort and merge sort — large enough that it's worth finding a way to use Dijkstra's rate even on graphs with negative edges",
+          "The gap is actually negligible in practice; the lecture pursues it mainly as a theoretical exercise",
+          "Bellman-Ford V times and Dijkstra V times are asymptotically the same; the difference only shows up on dense graphs"
+        ],
+        "answer": 0,
+        "explain": "Jason draws the comparison explicitly to sorting: V³ versus V² log V is the same shape of gap as n² versus n log n, which is exactly why merge sort mattered over insertion sort. That's a substantial, practically meaningful improvement, not a rounding error — which is why the rest of the lecture is devoted to finding a way to satisfy Dijkstra's non-negative-weight requirement even starting from a graph that has negative edges, rather than just accepting Bellman-Ford's V times cost as the general-case answer."
+      }
+    },
+    {
+      "chunk": 2,
+      "topic": "So I could just-- if it has any negative edge weights, I could return in",
+      "emphasis": "Narrow the problem to directed graphs first, and say why that narrowing is free: an undirected graph with any negative-weight edge trivially contains a negative-weight cycle (walk that one edge back and forth), so it can be checked and aborted on in linear time — and if there's no negative edge, Dijkstra already applies directly. So the genuinely hard case, the one worth a new algorithm, is a directed graph that may have negative edges but is assumed not to have a negative-weight cycle. Work through Jason's numeric example as the running illustration for the rest of the lecture, including the moment he catches his own setup being wrong mid-example ('Man, I really should have done my example beforehand') and fixes the weights on the board — that live correction is worth voicing, not silently cleaning up, since it's exactly the kind of care the proof later in the lecture depends on getting right. State the plan precisely: find some way to reweight the edges of the graph so that (a) every new weight is non-negative and (b) every shortest path in the reweighted graph is still a shortest path in the original — because if that's achievable, APSP reduces to running Dijkstra V times on the reweighted graph, and then recovering the true distances in the original graph afterward.",
+      "quiz": {
+        "question": "Why does this lecture restrict its attention to directed graphs, saying the undirected case is 'free'?",
+        "options": [
+          "In an undirected graph, a single negative-weight edge already forms a negative-weight cycle (traverse it back and forth), so it can be detected and aborted on in linear time; with no negative edges, Dijkstra already solves it directly — no new algorithm is needed either way",
+          "Undirected graphs cannot have negative edge weights by definition, so the problem doesn't arise",
+          "Undirected APSP is strictly harder than directed APSP, so it is deferred to a future lecture instead"
+        ],
+        "answer": 0,
+        "explain": "An undirected edge is really two directed edges pointing opposite ways with the same weight, so a single negative-weight undirected edge is itself a length-2 cycle with negative total weight — trivially detectable by scanning all edges once, in linear time, and grounds for aborting immediately under this lecture's no-negative-cycle assumption. If every edge weight is non-negative instead, Dijkstra V times already gives the target running time with no further work. Either way, there is nothing left for a new algorithm to do — which is exactly why the rest of the lecture only has to handle directed graphs."
+      }
+    },
+    {
+      "chunk": 3,
+      "topic": "So that's the claim. Claim-- we can compute distances in G-- so we're go",
+      "emphasis": "Spell out precisely what needs to be true for the reduction plan to work, and prove the one direction that's easy first. If a reweighted graph G′ exists with non-negative weights and the same shortest paths as G, then APSP on G reduces to: run Dijkstra V times on G′ to get all shortest-path distances and shortest-path trees in G′, then recover the true distances in G by walking those same trees' edges in the original graph — since the trees' shape didn't change, only a linear-time BFS/DFS walk per source is needed, costing V·(V+E) total, which is cheaper than the Dijkstra term and so doesn't dominate the final running time. That's the payoff if reweighting works — now show when it's even possible. Claim: no valid reweighting can exist if G contains a negative-weight cycle. Prove it by contradiction: a shortest path that has to pass through a negative-weight cycle can be made arbitrarily cheap by circling the cycle more times, so its true shortest-path distance is negative infinity and is realized only by a non-simple path (one that repeats vertices); but the previous lecture already established that shortest paths in a graph with non-negative weights are always simple, coming straight from a shortest-path tree. A negative-weight cycle in G would force a non-simple shortest path to survive into a graph where all shortest paths must be simple — a contradiction, so reweighting is impossible whenever a negative cycle exists.",
+      "quiz": {
+        "question": "Why is it impossible to reweight a graph G into a non-negative-weight G′ with the same shortest paths, if G contains a negative-weight cycle?",
+        "options": [
+          "A vertex on a negative-weight cycle has a shortest-path distance of negative infinity, realized only by a non-simple (cycle-repeating) path — but shortest paths in a non-negative-weight graph are always simple, so no reweighted G′ could have the same shortest path as G's",
+          "Reweighting is always possible; the claim only applies when the cycle's total weight is exactly zero, not strictly negative",
+          "It is impossible because a negative-weight cycle makes the graph disconnected, and reweighting requires connectivity"
+        ],
+        "answer": 0,
+        "explain": "The contradiction is precise: in G, a vertex reachable through a negative-weight cycle has no true shortest path at all — you can always go around the cycle once more and do better, so the 'shortest path' is only approached by non-simple paths, with distance negative infinity. But any G′ with non-negative weights can only ever have simple shortest paths (a result from the previous lecture, since non-negative weights make shortest-path trees the right structure). Those two facts can't both describe the same pair of vertices, so no valid reweighting can exist whenever G has a negative-weight cycle — which is exactly why this lecture assumes negative-weight cycles are ruled out from the start."
+      }
+    },
+    {
+      "chunk": 4,
+      "topic": "So that's a contradiction. So this is not possible. So given a graph wit",
+      "emphasis": "With negative cycles ruled out, search for a reweighting scheme that preserves shortest paths — and work through the first, tempting, wrong idea before the right one, since seeing why it fails is what makes the right idea land. Bad idea: add a large constant (say, the negative of the most negative edge weight) to every edge in the graph, to force everything non-negative. Walk Jason's counterexample precisely: doing this to a 3-edge shortest path and a 4-edge non-shortest path changes their weights by different total amounts (3 edges each gain the constant three times, 4 edges gain it four times), so a path that used to be shorter can end up longer than a path that used to be longer — the transformation biases toward paths with fewer edges, not smaller weight, and can flip which path is actually shortest. Say plainly why this matters: any reweighting scheme that touches every edge uniformly is doomed for the same reason, since it always favors low edge-count over low total weight. The better idea, which turns out to be the load-bearing trick behind Johnson's algorithm and much of graph transformation generally: pick a single vertex v, add some amount h to every edge leaving v, and subtract that same h from every edge entering v. State the key observation that makes this promising: every path either avoids v entirely, passes through it in the middle, or starts or ends at it — and each of those cases can be reasoned about separately, which the next stretch does carefully.",
+      "quiz": {
+        "question": "Adding the same large constant to every edge in the graph makes all weights non-negative, but the lecture calls this a bad idea. What specifically goes wrong?",
+        "options": [
+          "It biases the reweighting toward paths with fewer edges rather than smaller total weight — a path with more edges gains the constant more times than a path with fewer edges, which can flip which of two paths is actually shortest",
+          "It makes some edge weights become negative again, defeating the purpose",
+          "It is computationally too expensive, requiring more than linear time to apply to every edge"
+        ],
+        "answer": 0,
+        "explain": "Jason's worked example shows the failure directly: a shortest 3-edge path and a longer, non-shortest 4-edge path both gain the added constant once per edge, so the 4-edge path's total increases by more than the 3-edge path's does — enough, in the example, to make the formerly-longer path cheaper after reweighting. That's not a minor numerical quirk; it's structural, since ANY uniform per-edge addition scales with edge count, which has nothing to do with which path was actually shortest by weight. It is cheap to compute (that's not the problem) — the problem is that it changes the answer to the question being asked."
+      }
+    },
+    {
+      "chunk": 5,
+      "topic": "That's a claim. Idea-- this is a better idea. Given vertex v, add-- I'm ",
+      "emphasis": "Prove the single-vertex reweighting scheme is correct: pick a vertex v and some amount h, add h to every edge leaving v, subtract h from every edge entering v, and argue path-by-path that shortest paths are preserved for any choice of h. If a path never touches v, nothing about it changed, full stop. If a path passes through v in the middle, it uses exactly one outgoing edge from v (which gained h) and one incoming edge to v (which lost h) — those cancel exactly, so the path's total weight is unchanged. The only real effect is at the endpoints: if v is a path's start vertex, every path leaving v gains h, uniformly — since every possible path out of v is shifted by the exact same amount, whichever was shortest before is still shortest now, just h heavier (or lighter). Symmetrically, if v is a path's end vertex, every path arriving at v loses h uniformly, again preserving which one was shortest. Land the conclusion cleanly: this single-vertex transformation preserves shortest paths for any h, no matter how large — a much more powerful and flexible tool than the failed uniform-constant idea, precisely because it only touches the edges around one vertex and does so in a way that's guaranteed to cancel for any path passing through.",
+      "quiz": {
+        "question": "The single-vertex reweighting adds h to all edges leaving v and subtracts h from all edges entering v. Why does a path that passes through v in the middle (neither starting nor ending there) have its total weight completely unchanged?",
+        "options": [
+          "Such a path uses exactly one outgoing edge from v (gaining +h) and exactly one incoming edge to v (losing −h) as it passes through, and those two changes exactly cancel",
+          "The transformation only applies to v's edges when v is a path's endpoint, so a pass-through path is untouched by definition",
+          "It is not actually unchanged — the lecture only claims paths starting or ending at v are unaffected"
+        ],
+        "answer": 0,
+        "explain": "A path passing through v enters via one edge incoming to v and leaves via one edge outgoing from v — those are the only two edges of the path that the transformation touches, and by construction they change by exactly +h and −h respectively, canceling to a net zero change in the path's total weight. This cancellation, not any special-casing, is the mechanism that makes the whole scheme work — it's also exactly the reasoning the next stretch generalizes from one vertex's potential to every vertex's potential simultaneously, where interior cancellations happen at every vertex along a path, not just at v."
+      }
+    },
+    {
+      "chunk": 6,
+      "topic": "So this is the potential h of v. And then we're going to make a graph, G",
+      "emphasis": "Generalize from reweighting around one vertex to reweighting around every vertex simultaneously, using a potential function h that assigns an independent integer h(v) to every vertex, and reweight every edge (u, v) by adding h(u) and subtracting h(v). Prove this preserves shortest paths with the telescoping argument, since that's the technique worth teaching carefully. Take a path v0, v1, ..., vk; its original weight is the sum of the original edge weights along it. Its reweighted weight is the sum of (original edge weight) + h(vi−1) − h(vi), summed over each edge. Separate that sum into two pieces: the original edge weights sum to the original path weight, unchanged — and the added/subtracted potential terms telescope, because each interior vertex vi (for 1 ≤ i ≤ k−1) appears once as the +h(vi) contribution of the edge leaving it and once as the −h(vi) contribution of the edge entering it, and those cancel exactly. What survives is only the very first +h(v0) (the start) and the very last −h(vk) (the end) — the telescoping leaves exactly h(v0) − h(vk), a constant depending only on the path's two endpoints, not on which route between them was taken. So every path between the same two vertices shifts by the exact same constant under this reweighting, for any choice of h whatsoever — which means shortest paths between any pair of vertices are preserved no matter what potential function is chosen, so long as it's applied consistently.",
+      "quiz": {
+        "question": "Reweighting every edge (u, v) by w(u,v) + h(u) − h(v), for an arbitrary potential function h over all vertices, changes a path v0...vk's total weight by exactly h(v0) − h(vk). Why does every interior vertex's potential term disappear from that total?",
+        "options": [
+          "Each interior vertex vi contributes +h(vi) as the outgoing endpoint of the edge before it, and −h(vi) as the incoming endpoint of the edge after it — those two contributions telescope and cancel, leaving only the start and end vertices' terms",
+          "Interior vertices don't have a potential value assigned to them; h is only defined at the path's start and end",
+          "The cancellation only happens if h is chosen to be the same value at every vertex, not truly arbitrary"
+        ],
+        "answer": 0,
+        "explain": "Every edge in the path contributes +h(source of that edge) − h(target of that edge). For an interior vertex vi, it is the target of one edge in the path (contributing −h(vi)) and the source of the very next edge (contributing +h(vi)) — those two appearances cancel exactly, for any value of h(vi) whatsoever, which is why h can be a completely arbitrary function of the vertex and the cancellation still holds. Only v0, which is never a target within the path, and vk, which is never a source within the path, have their potential terms survive uncancelled — leaving the clean h(v0) − h(vk) result that makes the whole reweighting scheme work regardless of what h actually is."
+      }
+    },
+    {
+      "chunk": 7,
+      "topic": "Awesome. OK, so the name of the game here is now, we have this really fl",
+      "emphasis": "Now use this flexible tool to actually find a potential function h that makes every reweighted edge non-negative — the goal deferred since the start of the lecture. State the requirement precisely: for every edge (u, v), w′(u, v) = w(u, v) + h(u) − h(v) must be ≥ 0. Rearrange it, the way Jason does, into h(v) ≤ h(u) + w(u, v) — and notice this is exactly the shape of the triangle inequality on shortest-path distances from some fixed vertex: δ(s, v) ≤ δ(s, u) + w(u, v) always holds, for any vertex s, because a shortest path to v can never be longer than a path that first reaches u and then takes the direct edge to v. So setting h(v) = δ(s, v), the true shortest-path distance from some chosen vertex s, automatically satisfies the non-negativity requirement on every edge, by the triangle inequality alone — as long as those distances are all finite. That last caveat is the catch worth naming honestly: s might not be able to reach every vertex in the graph (the graph might not even be connected), in which case some h(v) would be infinite, and an infinite potential breaks the whole scheme — there's no sensible way to compare or cancel against infinity. So the remaining problem, going into the next stretch, is purely about guaranteeing that some vertex can reach everything.",
+      "quiz": {
+        "question": "Setting h(v) = δ(s, v), the true shortest-path distance from some vertex s, is shown to make every reweighted edge non-negative. What property of shortest-path distances makes this work?",
+        "options": [
+          "The triangle inequality: δ(s, v) ≤ δ(s, u) + w(u, v) always holds, since a shortest path to v can never be worse than going through u and then taking the direct edge — rearranging this is exactly the condition needed for w(u,v) + h(u) − h(v) ≥ 0",
+          "Shortest-path distances are always non-negative numbers themselves, so subtracting one from another can never produce a negative result",
+          "It works only because Dijkstra's algorithm guarantees the distances it computes satisfy non-negativity by construction"
+        ],
+        "answer": 0,
+        "explain": "The requirement w(u,v) + h(u) − h(v) ≥ 0 rearranges to h(v) ≤ h(u) + w(u,v), and that is precisely the triangle inequality applied to shortest-path distances from a fixed source s: δ(s,v) can never exceed δ(s,u) + w(u,v), since one path to v is simply going to u first and then taking the edge. That inequality holds unconditionally, for any graph and any valid distances — it doesn't rely on Dijkstra specifically, and shortest-path distances themselves can certainly be negative (that's the whole reason reweighting is needed). The only gap is that δ(s,v) needs to be finite for every v, which requires s to be able to reach the entire graph."
+      }
+    },
+    {
+      "chunk": 8,
+      "topic": "So a minimum weight path is going to be no bigger than 0. If it's finite",
+      "emphasis": "Close the connectivity gap with the trick that gives Johnson's algorithm its shape: add a brand-new auxiliary vertex s to the graph, with a directed, 0-weight edge from s into every existing vertex — call this augmented graph Gs. Now s can reach every vertex by construction, no matter how disconnected the original graph was, which is exactly what the previous stretch needed. Run a single-source shortest-path computation from this new s, and because Gs can still contain negative edges (it inherits all of G's original edges), that has to be Bellman-Ford, not Dijkstra — this is the one and only place in the whole algorithm that Bellman-Ford is needed. Note the easy bound this setup guarantees: every δ(s, v) is automatically ≤ 0, since the direct 0-weight edge from s is itself always an available path. Handle the two possible outcomes precisely. If any δ(s, v) comes back as negative infinity, that means a negative-weight cycle exists — and it must have existed in the original graph G, not been introduced by adding s, because s has no incoming edges at all, so no cycle can possibly pass through it; abort in that case, exactly as promised at the start of the lecture. Otherwise, every δ(s, v) is a finite, non-positive number, satisfying the triangle inequality by the previous stretch's argument — so setting h(v) = δ(s, v) is now a fully valid potential function, with no infinities left to worry about.",
+      "quiz": {
+        "question": "Adding a super-source vertex s with 0-weight edges to every vertex, then running Bellman-Ford from s, can reveal δ(s, v) = negative infinity for some v. Why does that mean the negative-weight cycle was in the original graph G, and not accidentally created by adding s?",
+        "options": [
+          "The new vertex s has no incoming edges at all, so no cycle — which by definition must return to where it started — can ever pass through s; any negative-weight cycle detected must therefore already have existed entirely within the original graph",
+          "It doesn't necessarily mean that; the cycle could involve s if s happens to be reachable from one of the vertices it points to",
+          "Negative infinity distances from s always indicate a bug in the algorithm rather than a real property of the graph"
+        ],
+        "answer": 0,
+        "explain": "A cycle is a path that returns to its starting vertex, which requires at least one edge coming back into every vertex on the cycle. s was constructed with only outgoing edges (into every other vertex) and no incoming edges whatsoever, so it is structurally impossible for any cycle to include s. That means any negative-weight cycle detected by Bellman-Ford from s must be made entirely of the original graph's edges — a genuine negative-weight cycle in G, exactly the condition the whole algorithm is designed to abort on."
+      }
+    },
+    {
+      "chunk": 9,
+      "topic": "So I'm going to add delta s, u, and subtract delta s, v. That's our rewe",
+      "emphasis": "Assemble the whole procedure end to end — this is Johnson's algorithm. Step one: build Gs by adding the super-source s with 0-weight edges into every vertex, O(V + E), since it's just one new vertex and V new edges. Step two: run Bellman-Ford once from s on Gs to compute δ(s, v) for every vertex, O(VE) — the one place the algorithm pays Bellman-Ford's cost, exactly once, not V times. If any δ(s, v) is negative infinity, abort; a negative-weight cycle exists in G. Step three: reweight every edge (u, v) of the original graph using h(v) = δ(s, v), giving w′(u, v) = w(u, v) + δ(s, u) − δ(s, v) — O(E), guaranteed non-negative by the triangle inequality proved two stretches ago. Step four: with all weights now non-negative, run Dijkstra V times on the reweighted graph to get all-pairs shortest-path distances and trees in the reweighted graph, O(V² log V + VE) — the term that dominates everything else. Step five: recover the true distances in the original graph G by walking each of those V shortest-path trees along the original edges, O(V(V+E)), which is smaller than the Dijkstra term and so doesn't change the total. Sum it all up and the Bellman-Ford, reweighting, and tree-walking steps are all dominated by the V-times-Dijkstra term — so the final running time is exactly the O(V² log V + VE) target set at the start of the lecture, now correct even for graphs with negative edge weights, at the one-time cost of a single Bellman-Ford pass to build the potentials.",
+      "quiz": {
+        "question": "Johnson's algorithm runs Bellman-Ford exactly once and Dijkstra V times. Why doesn't the one Bellman-Ford run cost as much as running Bellman-Ford V times, the way the naive V-times-Bellman-Ford approach did?",
+        "options": [
+          "Bellman-Ford is only needed once, to compute the potentials h(v) = δ(s,v) from the single super-source s — after reweighting, every remaining shortest-path computation uses the now-non-negative-weight graph, so it can use Dijkstra instead, and V runs of Dijkstra is what the whole algorithm was built to afford",
+          "Bellman-Ford is actually run V times in Johnson's algorithm too, but each run is cheaper because the graph has already been reweighted",
+          "Johnson's algorithm avoids Bellman-Ford's O(VE) cost entirely by using a faster negative-cycle detection method"
+        ],
+        "answer": 0,
+        "explain": "The entire point of the reweighting machinery built over the previous several stretches — the single-vertex trick, the telescoping multi-vertex generalization, the triangle-inequality choice of h, and the super-source fix for disconnected graphs — is to need Bellman-Ford only once, to establish valid potentials from one super-source. Every one of the V all-pairs shortest-path computations that follows runs on the reweighted, now non-negative graph, so it can use Dijkstra's faster rate instead. That's precisely why the total running time collapses to V times Dijkstra's cost plus one Bellman-Ford pass, rather than V times Bellman-Ford's cost."
+      }
+    },
+    {
+      "chunk": 10,
+      "topic": "We'll be having a review and problem session about how to solve problems",
+      "emphasis": "Close by summing the running times explicitly, the way Jason does on the board: reconstructing Gs is linear, O(V+E); the single Bellman-Ford pass is O(VE); checking for negative infinity is O(V); reweighting every edge is O(E); running Dijkstra V times is O(V² log V + VE); and recovering the original distances afterward is O(V(V+E)), smaller than the Dijkstra term. Land the conclusion: the V-times-Dijkstra term dominates every other term, so Johnson's algorithm solves signed all-pairs shortest paths — negative edges allowed, negative cycles ruled out — in essentially the same time as if every edge had been non-negative to begin with, paying only a one-time Bellman-Ford cost rather than V times that cost. Then step back and give the honest framing of what was actually built today: correctness needed no new induction or new base algorithm at all — the entire lecture is a reduction, a piece of 'glue' that transforms a hard instance (negative edges) into an easy one (non-negative edges) using nothing but Bellman-Ford and Dijkstra as subroutines and a clever reweighting proof to bridge them. Use this to close out the whole graphs unit: reachability, connected components, cycle detection, topological sort, negative-cycle detection, single-source shortest paths (BFS, DAG relaxation, Bellman-Ford, Dijkstra), and now, today, all-pairs shortest paths via Johnson's reduction — and preview what's next: not a single new algorithm, but a general technique for designing your own algorithms, dynamic programming.",
+      "quiz": {
+        "question": "Jason describes Johnson's algorithm as needing 'no proof by induction' and being 'really just glue.' What does he mean by that, in contrast to algorithms like BFS or Dijkstra?",
+        "options": [
+          "Johnson's algorithm doesn't introduce any new base algorithm for finding shortest paths — its correctness rests entirely on the reweighting proof (which paths are preserved and why weights become non-negative) that lets it reduce the problem to calling Bellman-Ford once and Dijkstra V times as subroutines, rather than proving a new traversal or relaxation process correct from scratch",
+          "It means Johnson's algorithm doesn't actually need to be proven correct at all, since it's just a combination of existing tools",
+          "It means the algorithm has no loops or recursive structure, unlike BFS or Dijkstra, which both rely on induction over the number of vertices processed"
+        ],
+        "answer": 0,
+        "explain": "BFS, Dijkstra, and Bellman-Ford each needed their own correctness proofs, typically by induction on the order vertices are finalized or processed. Johnson's algorithm doesn't add a new process like that — instead, its correctness proof is entirely about the reweighting transformation: showing that shortest paths are preserved under any per-vertex potential shift, and that choosing potentials equal to shortest-path distances from a super-source makes every edge non-negative. Once those facts are established, the algorithm simply calls Bellman-Ford once and Dijkstra V times as already-proven subroutines — 'glue' connecting existing correct algorithms rather than a new algorithm with its own from-scratch correctness argument."
+      }
+    }
+  ]
+}

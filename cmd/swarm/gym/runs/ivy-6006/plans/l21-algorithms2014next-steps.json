@@ -1,0 +1,83 @@
+{
+  "course": "6.006",
+  "lecture": "l21-algorithms2014next-steps",
+  "title": "Algorithms—Next Steps",
+  "note": "A three-instructor farewell lecture with frequent handoffs, so lesson.mjs's boundary rule (cut at a column-0 speaker tag once the running chunk passes ~38 lines) produces 6 chunks of very uneven size -- chunk 4 alone spans lines 325-659, covering both Erik's picture-hanging puzzle and almost all of Justin Solomon's segment (computer graphics, simplicial complexes, ray casting/tracing, scene-graph DAGs, and political redistricting). `topic` is omitted from every section for the same reason as the other hand-chunked plans in this run: chunk marks were reconstructed by grep for column-0 speaker lines rather than by running lesson.mjs (node is unavailable this session), so a guessed exact topic string risks the drift-error path instead of just its warning. What was hard about this lecture is chunk 4's sheer breadth -- it is a tour of four or five loosely related research areas in one chunk, and the emphasis had to be organized as a sequenced list of distinct topics rather than one coherent idea, or it would read as an incoherent jumble to a voice teacher following it.",
+  "sections": [
+    {
+      "chunk": 0,
+      "emphasis": "This chunk is scene-setting, not technical content: it names the follow-on classes 6.006 feeds into (specialized courses on graphs, models of computation, randomness, complexity, plus application areas like biology, cryptography, graphics, and geometry) and introduces the day's format -- three instructors, each a geometer, each giving a personal tour of their own research area. Jason's personal thread is origami: he designed origami models by intuition in high school before he had the algorithmic vocabulary for what he was doing, and only in grad school connected that intuition to algorithms and computer science, eventually working on foldable structures for real engineering uses like deployable space and shelter structures. Land the framing idea plainly, since it recurs all lecture: reconfigurable matter (a phone that folds itself into its own next generation instead of being thrown away) is offered as the aspirational payoff of taking folding algorithms seriously.",
+      "quiz": {
+        "question": "According to Jason's opening, what changed for him between designing origami models in high school and studying them later in grad school?",
+        "options": [
+          "He had already been using algorithmic techniques by intuition as an artist; grad school gave him the mathematical language and the connection to computer science to describe what he'd been doing",
+          "He switched from origami entirely to a new, unrelated field of computer science",
+          "He discovered in grad school that his high-school origami designs had all been mathematically incorrect"
+        ],
+        "answer": 0,
+        "explain": "Jason is explicit that the procedures he used to design origami models as a teenager already were algorithms -- he just lacked the mathematical language for it, working instead on artist's intuition. It was only in grad school, talking with Erik Demaine, that this became formal algorithmic work on foldable and deployable structures. He never left origami behind; the change was vocabulary and formalism, not subject matter or correctness."
+      }
+    },
+    {
+      "chunk": 1,
+      "emphasis": "Erik takes over with computational origami and geometric folding algorithms (class 6.849). Name the two directions of the field precisely: origami design goes from a target shape to a crease pattern (his running example: a 3D-extruded logo, folded via an algorithm that outputs the crease pattern); foldability goes the other way, asking whether a given crease pattern folds into anything at all -- and state the hardness result plainly, because it's the one concrete theorem in this chunk: Erik and Jason proved foldability is NP-hard in general. That's why the field focuses on design instead, where there is better news: an old (1990s) result proves you can fold ANY shape from a large enough square of paper, by first folding a long thin strip and zigzagging it along the target surface -- wasteful of material but a genuine existence proof, provable in a short algorithmic argument. Close on the state of the art it motivated: Origamizer, a modern algorithm/software (Tachi, analyzed by Demaine and Ku) that folds a given 3D model far more efficiently -- their example used only 22% of the paper's area -- opening the door to real fabrication from steel and other creasable sheet materials.",
+      "quiz": {
+        "question": "Why does the field of computational origami focus mostly on the design direction (shape to crease pattern) rather than foldability (does this crease pattern fold at all)?",
+        "options": [
+          "Because foldability was proven NP-hard in general, while a strong positive result -- any shape is foldable from a large enough square, provably, via an algorithm -- makes the design direction more tractable",
+          "Because foldability is a purely mechanical engineering question with no algorithmic content",
+          "Because no interesting foldable shapes have ever been discovered, so design is the only useful direction"
+        ],
+        "answer": 0,
+        "explain": "The lecture states both halves of the contrast directly: Erik and Jason proved that foldability (given a crease pattern, does it fold into anything) is NP-hard in general, which is bad news for that direction, whereas the design direction has a genuine positive result -- you can always fold any target shape from a big enough square, provably, and modern algorithms like Origamizer do it efficiently. That asymmetry, not a lack of algorithmic content or a lack of interesting shapes, is why design gets the attention."
+      }
+    },
+    {
+      "chunk": 2,
+      "emphasis": "A change of subject: self-assembly using DNA tiles, illustrated by a binary counter built from square tiles with edge 'glues' that only bind to matching or complementary patterns. Explain the key control knob plainly: whether two compatible tiles actually stick together depends on glue strength and temperature -- too hot and nothing sticks, too cold and things stick even when they shouldn't, so a well-tuned system is what makes a tile only attach once ALL of its required neighbors are already glued in place, which is how the binary counter builds up correctly. Name what makes this a genuinely different model of computation from the rest of 6.006: there's no single sequence of instructions running one at a time -- the program is the whole floating conglomerate of squares evolving in parallel. Then land two results that make the model interesting theoretically: any shape can be built using only a constant number of distinct glue types, in a number of parallel mixing steps that is only logarithmic in some measure of the construction; and the same model supports a 'replicator' that builds a mold around an unknown object and then reproduces that shape from the mold, in constant time in the idealized model (even though real experiments take hours to days).",
+      "quiz": {
+        "question": "What makes the DNA self-assembly model a genuinely different model of computation from the word-RAM model used throughout the rest of 6.006?",
+        "options": [
+          "There is no sequence of instructions executed one at a time -- computation is many square tiles floating and gluing together in parallel, and 'the program' is the resulting conglomerate itself",
+          "It is identical to word-RAM except it uses biological molecules instead of silicon",
+          "It can only be used to build binary counters and nothing else"
+        ],
+        "answer": 0,
+        "explain": "The lecture is explicit about this being 'a very different model of computation from what we're used to in this class' precisely because there's no notion of instructions run one at a time -- the tiles float around and glue according to local rules, and the whole assembled conglomerate at any moment IS the computation's state. The binary counter is just one illustrative example; the model is shown to support building arbitrary shapes and even a replicator, so it is far more general than one demonstration."
+      }
+    },
+    {
+      "chunk": 3,
+      "emphasis": "Two things after a brief return to origami (the fold-and-one-straight-cut problem, which gets a wave of applause before this chunk starts). First, advanced data structures (class 6.851): reframe the ordered-set interface from earlier in 6.006 -- insert, delete, find, find-next, find-previous -- and place the structures already seen (hashing for pure find; set AVL trees at O(log n) for the full dynamic-ordered interface) against structures from a stronger model, the word-RAM with word size w: van Emde Boas trees achieve O(log w) (which becomes O(log log n) when w is about log n), and fusion trees achieve O(log n / log w); taking the better of the two gives roughly O(sqrt(log n / log log n)), a real improvement over plain log n, and provably near-optimal. Second, a jump to graph algorithms on planar (or near-planar, e.g. road-network-like) graphs: because such graphs are always sparse (a linear number of edges), Dijkstra-equivalent single-source shortest paths runs in linear time even with negative edges, and a Bellman-Ford-equivalent runs in near-linear time instead of the usual quadratic. Then introduce Baker's technique for approximation on planar graphs: run breadth-first search from a root to build distance layers, delete every k-th layer to shatter the graph into simple constant-layer pieces solvable by dynamic programming, and get a solution within roughly 1/k of optimal -- a PTAS (polynomial-time approximation scheme) that trades a larger k for a better approximation at a polynomial-time cost.",
+      "quiz": {
+        "question": "In Baker's layering technique for approximating a hard problem on a planar graph, what does deleting every k-th BFS layer actually buy you?",
+        "options": [
+          "It shatters the graph into pieces with only a constant number of layers each, which can be solved exactly by dynamic programming, while only costing about a 1/k fraction of solution quality",
+          "It makes the graph exactly k times smaller, so any exact algorithm now runs k times faster with no loss in solution quality",
+          "It converts the NP-hard problem into a problem that is now provably in P for every value of k"
+        ],
+        "answer": 0,
+        "explain": "The lecture is explicit about the trade-off: deleting every k-th BFS layer breaks the graph into components with only a constant number of layers, which is exactly the structure dynamic programming (of the kind seen elsewhere in 6.006) can solve efficiently, and the cost of throwing away those layers is roughly a 1/k degradation from the optimal solution -- not a free speedup and not a claim that the underlying problem becomes polynomial-time solvable in general; it is specifically an approximation scheme (PTAS), trading a larger k for a better approximation at higher, but still polynomial, cost."
+      }
+    },
+    {
+      "chunk": 4,
+      "emphasis": "This is the longest and most varied chunk in the lecture; walk it as a sequence of distinct segments, not one idea. (1) Erik closes with recreational algorithms (class 6.892/whatever it's renamed to): proving games and puzzles NP-hard or even undecidable (Tetris from the earlier hardness lecture, Mario, Portal, Mario Kart, The Witness, and a game called Recurse shown to be undecidable -- no algorithm plays it perfectly), plus balloon-twisting polyhedra as a fun, non-hardness recreational topic, and a live magic-trick puzzle: hang a picture on two or three nails so that removing ANY single nail drops it, which generalizes to encoding any monotone Boolean function of which nails are removed. (2) Justin Solomon introduces his own courses: 6.837 (intro computer graphics) and 6.838, whose central object is the simplicial complex -- a graph extended with a set of triangles, not just vertices and edges. Use his own cautionary example: running plain Dijkstra on the edges of a triangle mesh gives the WRONG shortest path, because straight-line distance can cut across a triangle's interior rather than following mesh edges; the correct algorithm (MMP) extends Dijkstra's idea of distance level sets but has to let those level sets bend across triangle faces, and a much simpler, faster, approximate alternative (fast marching) is what's actually used in practice. (3) A worked example of complexity mattering in graphics: rendering a scene by ray casting (one ray per pixel, find the first object it hits) costs roughly (pixels) x (objects); a real 3D model like the Stanford bunny (69,000 triangles, ~2 million pixels at 1080p) makes that product huge, and the fix -- bounding boxes refined into a recursive space-partitioning tree (like the AVL trees seen earlier in 6.006, but geometric) -- is a genuine application of data-structure thinking, even though the honest big-O speedup (p log n) is a heuristic-driven average case, not a proven worst-case bound; directed acyclic graphs also show up as scene graphs, letting many instances of one object (identical chairs in a room) share a single stored 3D model plus a per-instance transform. (4) Justin's own research example: political redistricting -- gerrymandering as the problem of drawing district boundaries to engineer election outcomes; even in a simplified case like Iowa (99 counties into 4 contiguous districts) the space of valid districtings is astronomically large; there is no single agreed objective function to optimize, and even if there were, finding the best districting under it is NP-hard; his group instead studies whether a PROPOSED districting is typical or an outlier relative to the space of all valid districtings, which requires sampling that space close to uniformly at random -- and that sampling problem itself reduces from Hamiltonian cycle and is computationally hard, assuming P does not equal NP.",
+      "quiz": {
+        "question": "Justin Solomon's own research on political redistricting does NOT try to compute the single 'best' districting plan for a state. Why not, according to the lecture?",
+        "options": [
+          "There is no single agreed-upon objective function to optimize in the first place, and even given one, finding the optimal districting under it is NP-hard -- so the group instead studies whether a proposed plan is typical or unusual relative to the space of all valid districtings",
+          "Because political redistricting has nothing to do with graphs or algorithms",
+          "Because computing the best districting plan has already been solved efficiently by other researchers"
+        ],
+        "answer": 0,
+        "explain": "The lecture gives two distinct obstacles in sequence: first, there is no single 'best' plan because real districting law balances several competing criteria (contiguity, population balance, compactness) with no one clean objective; second, even granting an objective function, optimizing it is NP-hard. Because of both, Justin's group instead asks a statistical question -- how does a proposed plan compare to the broader space of valid districtings -- which itself requires being able to sample that space close to uniformly, a task that turns out to reduce from Hamiltonian cycle and is hard in its own right. It is very much modeled as a graph problem (connected graph partitions), not unrelated to algorithms, and it is explicitly still open, not already solved."
+      }
+    },
+    {
+      "chunk": 5,
+      "emphasis": "The closing farewell: all three instructors thank the class and each other in turn, land the one-sentence theme of the whole lecture -- 'algorithms are everywhere' -- and say goodbye. Nothing new to teach here; treat it as the lecture's closing beat, not a place for a quiz.",
+      "exercise": "No graded exercise for this closing chunk -- if you want a wrap-up prompt, ask the learner in their own words: name one of the three instructors' research areas from today (origami/folding, DNA self-assembly, planar-graph approximation, computer graphics, or political redistricting) and say what 6.006 tool (a data structure, a graph algorithm, DP, or a hardness reduction) it built on."
+    }
+  ]
+}

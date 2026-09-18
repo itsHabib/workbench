@@ -1,0 +1,79 @@
+{
+  "course": "6.006",
+  "lecture": "l12-bellman-ford",
+  "title": "Bellman-Ford",
+  "note": "Same constraint as every other plan added in this run: node script execution is refused by the sandbox with no approval arriving, so chunk boundaries were derived by hand from scripts/lesson.mjs's documented algorithm (column-0 marks, TARGET=38) and could not be checked against check-plans.mjs; topic is left off every section. The hardest part of the lecture was chunk 3 into chunk 4: the witness/negative-cycle proof (summing the triangle inequality around a cycle to a contradiction) runs directly into the graph-duplication construction with no pause, and chunk 4 alone has to carry the induction proof that the duplicated-graph distances equal the k-edge distances, the algorithm's full runtime accounting, and the closing worked example that actually exhibits a witness and its cycle.",
+  "sections": [
+    {
+      "chunk": 0,
+      "emphasis": "Frame today against last lecture's DAG relaxation, which solved single-source shortest paths in linear time but only for graphs with no cycles. State the real problem plainly: general graphs can have negative-weight cycles, and a vertex reachable through one has no well-defined finite shortest-path weight at all — you could loop the cycle forever and keep shrinking the total, so by convention such a vertex gets distance minus infinity. Name today's two goals: compute the shortest-path weight for every vertex (infinity if unreachable, minus infinity if reachable through a negative cycle, finite otherwise), and be able to exhibit one negative-weight cycle if one exists. Warm up with two exercises that set up the real algorithm. Exercise 1: for an UNdirected graph, detecting a negative-weight cycle is trivial and not interesting — any single negative edge is itself a length-2 cycle, since you can walk back and forth across it forever, so the problem is restricted to directed graphs from here on. Exercise 2: if you had an algorithm solving SSSP in O(V·(V+E)) time, you could get the true Bellman-Ford bound of O(V·E) by first running BFS or DFS from the source to discard every unreachable vertex — the remaining reachable component has at most E+1 vertices (otherwise it couldn't stay connected), so V becomes no asymptotically bigger than E and V·(V+E) collapses to O(V·E).",
+      "quiz": {
+        "question": "Exercise 2 says an O(V·(V+E))-time SSSP algorithm can be turned into an O(V·E)-time one by first pruning to the vertices reachable from the source. Why does that pruning make the two bounds match?",
+        "options": [
+          "The reachable component has at most E+1 vertices, so after pruning V is never asymptotically bigger than E, and V·(V+E) reduces to O(V·E)",
+          "Pruning removes all the edges too, so E shrinks to match V exactly",
+          "BFS or DFS itself already solves single-source shortest paths, so no further algorithm is needed after pruning"
+        ],
+        "answer": 0,
+        "explain": "A connected component can have at most one more vertex than it has edges (otherwise it would need to be disconnected), so once unreachable vertices are discarded, V is bounded by O(E) for what remains — that's exactly what lets V·(V+E) simplify down to O(V·E). Pruning removes unreachable vertices, not edges among the reachable ones. And BFS/DFS only finds reachability and unweighted distance, not weighted shortest paths, which is why the exercise still needs the hypothetical algorithm A afterward."
+      }
+    },
+    {
+      "chunk": 1,
+      "emphasis": "Close the exercise 2 audience question (multi-edges are fine — just keep the minimum-weight edge between any pair, since a heavier parallel edge is never useful) and pivot to the structural fact the whole algorithm rests on: if a vertex's shortest-path distance from the source is finite, some shortest path to it is simple — it never repeats a vertex. Prove it by contradiction: suppose every shortest path to some finite-distance vertex had to repeat a vertex, i.e. contained a cycle. That cycle's weight cannot be negative — if it were, looping it would make the distance minus infinity, contradicting finiteness — so its weight is zero or positive, which means removing the cycle from the path never makes it longer. Repeating that removal strips out every cycle and leaves a simple path with no greater weight, so a simple shortest path always exists whenever the distance is finite.",
+      "quiz": {
+        "question": "Why can't a cycle embedded in a finite-weight shortest path have negative total weight?",
+        "options": [
+          "If the cycle's weight were negative, looping around it repeatedly would make the path's total weight unboundedly small, contradicting the assumption that the shortest-path distance is finite",
+          "A cycle's weight is always positive by definition, regardless of the individual edge weights",
+          "Negative cycles are only possible in undirected graphs, and this argument concerns directed graphs"
+        ],
+        "answer": 0,
+        "explain": "The whole reason minus infinity exists as a distance value is that a negative cycle lets you shrink a path's weight without bound by looping it more times — so if a finite-distance shortest path contained a negative cycle, that path wouldn't actually be a shortest path at all, a contradiction. Cycle weight is just the sum of its edge weights and can be negative, zero, or positive depending on those edges; the argument here specifically rules out negative for a cycle sitting inside a genuinely shortest, finite-weight path. And negative cycles are a directed-graph phenomenon precisely because undirected negative edges already trivially form them, as the previous chunk showed."
+      }
+    },
+    {
+      "chunk": 2,
+      "emphasis": "Draw out the corollary that makes the whole algorithm possible: a simple path visits at most V vertices, so it uses at most V-1 edges — meaning that if a shortest-path distance is finite, only paths of length up to V-1 edges ever need to be considered, a finite (if exponential) search space instead of an infinite one. That motivates a new quantity: the k-edge distance, delta_k(s, v), the shortest distance from s to v using at most k edges. If delta_{V-1}(s, v) is finite, it equals the true shortest-path distance, by the simple-path bound just proved. Then state the sharper, more surprising claim that catches negative cycles: if delta_V(s, v) — allowing one more edge than the simple-path bound — is strictly SHORTER than delta_{V-1}(s, v), that shorter V-edge path cannot be simple (it would already be captured by the V-1 bound if it were), so it must run through a cycle, and since it's shorter, that cycle must be negative. Call such a vertex v a witness: finding one certifies a negative-weight cycle exists in the graph. Note carefully what is NOT yet claimed: a vertex with true distance minus infinity need not itself be a witness (the extra-short path might need more than exactly V edges to show up) — but the claim to be proved next is that every minus-infinity vertex is at least reachable FROM some witness.",
+      "quiz": {
+        "question": "A vertex v satisfies delta_V(s, v) < delta_{V-1}(s, v). What does that inequality certify, and why?",
+        "options": [
+          "That v is a witness to a negative-weight cycle — the shorter V-edge path cannot be simple (it would already be counted in the V-1 bound otherwise), so it must pass through a cycle, and being shorter, that cycle must have negative weight",
+          "That v's true shortest-path distance is exactly delta_V(s, v), since V edges is enough to capture any shortest path",
+          "That the graph is disconnected, since a shorter path using MORE edges is otherwise impossible"
+        ],
+        "answer": 0,
+        "explain": "Simple paths never need more than V-1 edges, so any path that only becomes available at V edges and is strictly shorter must be non-simple — it revisits a vertex, meaning it contains a cycle — and since adding that cycle made the path shorter, the cycle's weight must be negative. That is exactly the definition of a witness the lecture sets up. It says nothing about v's true distance (which could still be minus infinity, unresolved by this particular k) and nothing about connectivity, which this inequality doesn't touch at all."
+      }
+    },
+    {
+      "chunk": 3,
+      "emphasis": "Name the audience's identification of the triangle inequality and use it to prove the key structural claim: every negative-weight cycle contains a witness. For any vertex v on a negative cycle C with predecessor v' in the cycle, the triangle inequality gives delta_V(s, v) <= delta_{V-1}(s, v') + weight(v', v). Sum this inequality over every vertex in the cycle: the right side's weight terms sum to exactly the cycle's total weight, which is negative by assumption, so if no vertex in the cycle were a witness (meaning every vertex had delta_V >= delta_{V-1}), the sum of the left sides would have to be at least the sum of the right sides — but the negative cycle weight makes that impossible, a contradiction. So some vertex in the cycle must be a witness. Chain this into the full claim: every negative cycle contains a witness, so every vertex reachable from a negative cycle is reachable from that witness, which is exactly the minus-infinity vertices Bellman-Ford needs to find. With the theory in hand, introduce the actual construction: graph duplication. Build V+1 layers of the graph, where vertex v_k in layer k represents 'reaching v using at most k edges'; connect each original edge (u, v) from u's layer k to v's layer k+1, and add a zero-weight 'stay' edge from every v_k to v_{k+1}. Because every edge moves strictly forward in level, this duplicated graph G' is guaranteed to be a DAG, which is the whole point — DAG relaxation from last lecture can now solve shortest paths in it in linear time.",
+      "quiz": {
+        "question": "Summing the triangle-inequality relation over every vertex in a negative-weight cycle C leads to a contradiction unless at least one vertex is a witness. What produces the contradiction?",
+        "options": [
+          "The weight terms on the right side sum to the cycle's total weight, which is negative — so assuming every vertex satisfies delta_V >= delta_{V-1} would force a sum that is impossible given that negative total",
+          "The cycle has an odd number of vertices, which makes the sum undefined",
+          "Triangle inequality only holds for acyclic paths, so applying it around a cycle is invalid to begin with"
+        ],
+        "answer": 0,
+        "explain": "Summing the per-vertex triangle-inequality relations around the cycle telescopes the delta_{V-1} predecessor terms against the delta_V terms and leaves the sum of edge weights around the cycle — which is negative by the cycle being a negative cycle. If every vertex failed to be a witness, the inequality direction would force the sums to satisfy a relationship that this negative total makes impossible, which is the contradiction; that forces at least one vertex to be a witness. Vertex count parity plays no role, and the triangle inequality here is applied per-edge along the cycle, which is valid regardless of the cycle structure."
+      }
+    },
+    {
+      "chunk": 4,
+      "emphasis": "Finish the construction and close out the algorithm. Answer the audience's self-loop question directly: the zero-weight 'stay at this vertex' edges are not part of the original graph — they represent choosing not to traverse an edge, exactly what's needed to simulate the at-most-k-edges condition. Count the size of G': V·(V+1) vertices and V² + V·E edges (V self-stay edges per layer, plus V copies of every original edge across layers), buildable in O(V·(V+E)) time. The algorithm: build G', run DAG relaxation from s_0, then for every vertex v set its returned distance to delta(s_0, v_{V-1}). Prove this equals the true k-edge distance delta_k(s, v) by induction on k: base case k=0 matches DAG relaxation's own initialization (0 at the source, infinity everywhere else); the inductive step shows that a shortest path to v_k in G' must arrive either via the 'stay' edge from v_{k-1} (giving delta_{k-1}(s,v)) or via an original edge from some u_{k-1} (giving delta_{k-1}(s,u) + weight(u,v)) — exactly the recursive definition of the k-edge distance itself, so the two coincide at every level by induction. Once distances are correct for k = V-1, find every witness (vertices where delta_V < delta_{V-1}), mark every vertex reachable from any witness as minus infinity, and the algorithm is done. Total runtime: O(V·(V+E)) to build and relax G', matching the exercise 2 bound, which then reduces to the true O(V·E) Bellman-Ford time by pruning to the reachable subgraph first. Close on the worked example: the graph with cycle b-c-d-b (weights -4, 3, -1, total -2) produces a witness at vertex b via the 4-edge path a-b-c-d-b, whose weight (-7) beats every shorter path to b (the direct edge at -5, or the 3-edge path at 8) — and tracing that witnessing path back reveals the actual negative cycle b-c-d-b, exactly as the theory promised.",
+      "exercise": "Say out loud, in order: what a witness vertex certifies, why the inductive step matching G' shortest paths to k-edge distances mirrors the k-edge distance's own recursive definition, and how the algorithm turns a witness into a full set of minus-infinity vertices.",
+      "quiz": {
+        "question": "In the inductive step proving delta(s0, v_k) = delta_k(s, v), a shortest path in G' to v_k is shown to arrive either via the zero-weight stay edge from v_{k-1}, or via an original edge from some u_{k-1}. Why does this match the k-edge distance's own definition?",
+        "options": [
+          "Because the k-edge distance to v is itself defined as the minimum over exactly those two options — reusing at most k-1 edges without adding one (staying), or taking one more edge from some predecessor u at distance k-1 — so the two recursions are literally the same recurrence",
+          "Because DAG relaxation always produces the same answer regardless of how the graph was constructed, so the match is guaranteed for any DAG",
+          "Because G' was built specifically to guarantee shortest paths are unique, which forces the two quantities to agree"
+        ],
+        "answer": 0,
+        "explain": "The k-edge distance to v is, by definition, the best of either not using a k-th edge at all (same as the (k-1)-edge distance) or using one more edge from some neighbor at (k-1)-edge distance — and that is exactly what the stay-edge-or-original-edge split at v_k in G' computes, since those are the only two ways to arrive at v_k. That structural match, not any general property of DAG relaxation or a uniqueness assumption, is what the induction relies on — G' was deliberately built so its layered structure would mirror the k-edge recursion."
+      }
+    }
+  ]
+}

@@ -1,0 +1,449 @@
+{
+  "at": "2026-09-18T21:59:54.506773Z",
+  "shape": "swat",
+  "model": "claude-sonnet-5",
+  "store": "resp:127.0.0.1:56440/ivy1:",
+  "seats": [
+    {
+      "seat": "p1",
+      "role": "peer",
+      "joined_s": 1.204638083,
+      "wall_s": 1315.982073041,
+      "turns": 171,
+      "cost_usd": 8.964418600000002,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p2",
+      "role": "peer",
+      "joined_s": 1.7130623329999999,
+      "wall_s": 1369.192169292,
+      "turns": 173,
+      "cost_usd": 8.309030900000003,
+      "cost_known": true,
+      "wakes": 2
+    },
+    {
+      "seat": "p3",
+      "role": "joiner",
+      "joined_s": 162.455155125,
+      "wall_s": 297.614220875,
+      "turns": 81,
+      "cost_usd": 1.8851830000000005,
+      "cost_known": true,
+      "wakes": 8
+    },
+    {
+      "seat": "p4",
+      "role": "joiner",
+      "joined_s": 182.986498958,
+      "wall_s": 376.004735292,
+      "turns": 69,
+      "cost_usd": 2.021958,
+      "cost_known": true,
+      "wakes": 8
+    },
+    {
+      "seat": "p5",
+      "role": "joiner",
+      "joined_s": 203.738391,
+      "wall_s": 1114.649600334,
+      "turns": 152,
+      "cost_usd": 7.6166758,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p6",
+      "role": "joiner",
+      "joined_s": 304.80080425,
+      "wall_s": 408.084307917,
+      "turns": 70,
+      "cost_usd": 1.7101773000000002,
+      "cost_known": true,
+      "wakes": 8
+    }
+  ],
+  "hidden_passed": 1,
+  "hidden_total": 1,
+  "builds": true,
+  "own_test_files": 0,
+  "wall_s": 1370.9052755,
+  "cost_usd": 30.50744360000001,
+  "turns": 716,
+  "work": [
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:19:48.560124Z",
+      "id": "l01-algorithms-and-computation",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "6.006 plan: l01 Algorithms and Computation"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:21:38.644375Z",
+      "id": "l02-data-structures-and-dynamic-arrays",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "6.006 plan: l02 Data Structures and Dynamic Arrays"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:07:59.601326Z",
+      "id": "l03-sets-and-sorting",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "6.006 plan: l03 Sets and Sorting"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:10:14.136994Z",
+      "id": "l04-hashing",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "6.006 plan: l04 Hashing"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:08:29.163388Z",
+      "id": "l05-linear-sorting",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p5",
+      "holder": "",
+      "title": "6.006 plan: l05 Linear Sorting"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:10:40.578703Z",
+      "id": "l06-binary-trees-part-1",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p5",
+      "holder": "",
+      "title": "6.006 plan: l06 Binary Trees Part 1"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:11:40.771223Z",
+      "id": "l07-binary-trees-part-2-avl",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "6.006 plan: l07 Binary Trees Part 2 AVL"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:12:23.08599Z",
+      "id": "l08-binary-heaps",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p5",
+      "holder": "",
+      "title": "6.006 plan: l08 Binary Heaps"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:13:20.972587Z",
+      "id": "l10-depth-first-search",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "6.006 plan: l10 Depth-First Search"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:14:33.07791Z",
+      "id": "l11-weighted-shortest-paths",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p5",
+      "holder": "",
+      "title": "6.006 plan: l11 Weighted Shortest Paths"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:14:43.544643Z",
+      "id": "l12-bellman-ford",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "6.006 plan: l12 Bellman-Ford"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:16:07.966994Z",
+      "id": "l13-dijkstra",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "6.006 plan: l13 Dijkstra"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:17:47.65901Z",
+      "id": "l14-apsp-and-johnson",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p5",
+      "holder": "",
+      "title": "6.006 plan: l14 APSP and Johnson"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:18:05.559879Z",
+      "id": "l15-dynamic-programming-part-1-srtbot-fib-dags-bowling",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "6.006 plan: l15 DP Part 1"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:17:44.588603Z",
+      "id": "l16-dynamic-programming-part-2-lcs-lis-coins",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "6.006 plan: l16 DP Part 2"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:19:47.59245Z",
+      "id": "l17-dynamic-programming-part-3-apsp-parens-piano",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p5",
+      "holder": "",
+      "title": "6.006 plan: l17 DP Part 3"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:19:38.548253Z",
+      "id": "l18-dynamic-programming-part-4-rods-subset-sum-pseudopolynomial",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "6.006 plan: l18 DP Part 4"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:10:15.35175Z",
+      "id": "l19-complexity",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "6.006 plan: l19 Complexity"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:11:59.07074Z",
+      "id": "l20-course-review",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "6.006 plan: l20 Course Review"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "after": null,
+      "done_at": "2026-09-18T22:14:17.316598Z",
+      "id": "l21-algorithms2014next-steps",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "6.006 plan: l21 Algorithms Next Steps"
+    }
+  ],
+  "requests": 2,
+  "commits_by_author": {
+    "Habib": 137,
+    "Michael": 137,
+    "harness": 1,
+    "p1": 8,
+    "p2": 7,
+    "p5": 7
+  },
+  "grade_note": "no hidden tests: 1/1 means the team's own suite is green on origin main",
+  "receipts": [
+    {
+      "head": "e193b31fa36bc84f497eb9e14b4e537354f52bc6",
+      "author": "harness",
+      "green": true,
+      "at_s": 17.337908917
+    },
+    {
+      "head": "d4901d4aa4a177b142eab1317a6faec5e0ccd2f4",
+      "author": "p1",
+      "green": false,
+      "at_s": 484.30084425
+    },
+    {
+      "head": "b7f5a1be8ca8db1e31d5cafbda169d50359b66a5",
+      "author": "p5",
+      "green": false,
+      "at_s": 514.950156875
+    },
+    {
+      "head": "350c6fdfad9a5d541fca8c146fb23d6560c0829b",
+      "author": "p1",
+      "green": false,
+      "at_s": 620.883551708
+    },
+    {
+      "head": "e50bf9f6ce4793fb0c14a40d62a96b5f9bdbafec",
+      "author": "p5",
+      "green": false,
+      "at_s": 651.562911542
+    },
+    {
+      "head": "bd88132c1de4f958fb737bd16210a4fd4c227917",
+      "author": "p1",
+      "green": false,
+      "at_s": 712.346646
+    },
+    {
+      "head": "6b0b482797eac136a99ffccc79c195e0e6872364",
+      "author": "p2",
+      "green": false,
+      "at_s": 728.060378292
+    },
+    {
+      "head": "3b9731ec35c03c49e6dc6a28cd44ebc0f43af400",
+      "author": "p5",
+      "green": false,
+      "at_s": 758.878352042
+    },
+    {
+      "head": "3b05b89c291aa1816eb0778062a17d91d83889e0",
+      "author": "p1",
+      "green": false,
+      "at_s": 819.814760625
+    },
+    {
+      "head": "329cdeae6ffbc4129f1ecaddfcda3d1ea9cc3ccf",
+      "author": "p2",
+      "green": false,
+      "at_s": 865.735542208
+    },
+    {
+      "head": "35f0d233fbdc922049cff77d830070310f25ab9e",
+      "author": "p5",
+      "green": false,
+      "at_s": 881.608883042
+    },
+    {
+      "head": "4f2753b80966bc42002b572e567dfe2a484a980c",
+      "author": "p1",
+      "green": false,
+      "at_s": 897.482721333
+    },
+    {
+      "head": "967920597fdead2a9ee87f92cda195bd907c3b48",
+      "author": "p2",
+      "green": false,
+      "at_s": 973.520005083
+    },
+    {
+      "head": "97f41f7e222f0ce1e3bb4dd0b58408749f4d107d",
+      "author": "p5",
+      "green": false,
+      "at_s": 1079.769126333
+    },
+    {
+      "head": "b4169c35e00c6b77f1a503115a45dcb35840b864",
+      "author": "p1",
+      "green": false,
+      "at_s": 1095.716608667
+    },
+    {
+      "head": "057082134c6039b8eb02ba3534f40ea76532f7c6",
+      "author": "p2",
+      "green": false,
+      "at_s": 1186.958723333
+    },
+    {
+      "head": "9cc11dab25129a1d4ef6c05c3b755c97a0c71a6c",
+      "author": "p1",
+      "green": false,
+      "at_s": 1203.022151083
+    },
+    {
+      "head": "275cad07b26be21cbcd73123a9544cf844a6b02c",
+      "author": "p1",
+      "green": false,
+      "at_s": 1279.268604625
+    },
+    {
+      "head": "87fd4b5a06bf29d5b323ef4d8298961f4186895f",
+      "author": "p5",
+      "green": true,
+      "at_s": 1295.469193917
+    },
+    {
+      "head": "545587eb117825d25523508f59d5863cbc991cbb",
+      "author": "p2",
+      "green": true,
+      "at_s": 1311.606471708
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "course": "6.006",
+  "lecture": "l13-dijkstra",
+  "title": "Dijkstra",
+  "note": "Hand-computed chunking from lesson.mjs's documented rule (same approach as the other plans in this run, since node is unavailable in this session): grep for column-0 speaker-tag lines gave 8 marks, producing 4 chunks, the last of which (lines 217-411) carries the algorithm's pseudocode, a full worked example, the two-observation correctness proof, AND the running-time analysis across three priority-queue implementations -- a lot to hold in one chunk. `topic` is omitted from every section so a hand-reconstructed label can't trigger check-plans' drift error, only its warning. What was hard about this lecture is keeping the two setup observations (non-negative weights make distance monotone along shortest paths; DAG relaxation works if vertices are visited in increasing-distance order) clearly separate from the actual algorithm they justify, since the transcript interleaves a live audience Q&A about zero-weight edges into the middle of building that justification.",
+  "sections": [
+    {
+      "chunk": 0,
+      "emphasis": "Open with the recap, because it sets up exactly why today's algorithm is needed: BFS-based expansion solves weighted shortest paths only when weights are small positive integers (replacing each weight-w edge with w unit edges blows up the graph otherwise); DAG relaxation solves it in linear time when the graph has no cycles; Bellman-Ford handles the fully general case, including detecting negative-weight cycles, but costs O(VE) -- quadratic for sparse graphs, cubic for dense ones. Name today's restriction and its payoff precisely: with non-negative weights (no negative cycles possible), we can get close to linear, O(V log V + E) rather than O(VE). Then build the key insight that makes this possible, observation 1: with non-negative weights, distance is monotonically non-decreasing along any shortest path -- if u lies on the shortest path from s to v, then the shortest distance to u is at most the shortest distance to v, because the remaining subpath from u to v cannot have negative weight. Say plainly why this fails with negative weights: a very negative edge could put a far vertex inside a supposedly-smaller distance boundary, breaking the whole 'grow a sphere outward' idea BFS relied on.",
+      "quiz": {
+        "question": "Why does BFS's trick of replacing a weight-w edge with w unit edges fail to give a good algorithm in general, even for non-negative weights?",
+        "options": [
+          "If the weights are large relative to V and E, that expansion blows up the size of the graph, so the algorithm's running time is no longer linear in the graph's own combinatorial size",
+          "It fails because BFS cannot handle any graph that contains a cycle",
+          "It fails because the resulting expanded graph would contain a negative-weight cycle"
+        ],
+        "answer": 0,
+        "explain": "The lecture is explicit: this approach only works well when the sum of the weights is linear in V + E; if the weights are large, replacing each edge with that many unit edges makes the graph itself huge, so you're no longer running in time linear in the graph's original size -- the same N-vs-U issue as radix sort. Cycles are not the obstacle (BFS-based shortest paths can still apply to cyclic graphs as long as weights are small positive integers), and nothing about non-negative weights introduces a negative cycle."
+      }
+    },
+    {
+      "chunk": 1,
+      "emphasis": "This chunk resolves a live audience question about the one exception to observation 1: a zero-weight edge can go 'backwards' in distance order without breaking anything, since distance is only guaranteed non-decreasing, not strictly increasing. Walk the fix concretely, since it is what makes observation 1 usable for building a DAG: vertices tied together by zero-weight edges at the same distance can simply be reordered (or, in the case of a zero-weight cycle, coalesced into a single vertex, since reaching any one of them means reaching all of them) so that every remaining edge that could ever matter to a shortest path points strictly forward in the ordering. Every edge that still points backwards after that fix is positive-weight and therefore provably useless for any shortest path, so it can simply be discarded. The payoff, stated at the end: this construction turns the graph into a genuine DAG in linear time, on which DAG relaxation (from two lectures ago) then computes shortest paths in linear time too -- IF you already know the vertices' correct increasing-distance order, which is exactly the piece still missing.",
+      "quiz": {
+        "question": "Why is it safe to reorder two vertices connected by a zero-weight edge, when reordering vertices connected by a positive-weight edge would not be safe?",
+        "options": [
+          "A zero-weight edge connects vertices at the exact same shortest distance from the source, so swapping their order preserves the non-decreasing-distance property; a positive-weight edge implies a strictly smaller distance on one side, so swapping would violate it",
+          "Zero-weight edges are always removed from the graph before the algorithm starts, so their order never matters",
+          "Reordering is never actually safe; it is only used as a rough approximation"
+        ],
+        "answer": 0,
+        "explain": "Observation 1 says distance is non-decreasing, with equality exactly when there is a zero-weight connection -- so two vertices joined by a zero-weight edge are honestly tied in distance, and which one is listed first is arbitrary; reordering them (or coalescing a whole zero-weight cycle into one vertex) doesn't break the increasing-order property the DAG construction depends on. A positive-weight edge, by contrast, forces a strict distance gap, so reordering those two vertices would misstate which one is actually closer to the source. Zero-weight edges are handled by reordering or coalescing, not simply deleted -- deleting them would lose real graph structure."
+      }
+    },
+    {
+      "chunk": 2,
+      "emphasis": "Two things land here. First, close the loop from the previous chunk: since we don't know the increasing-distance order in advance, observation 2 is the fix -- relax edges from vertices in increasing order of their CURRENT distance estimate, discovered one at a time, using a data structure that can always hand back the next-closest undiscovered vertex. Second, introduce that data structure by name and by its exact interface: a changeable priority queue, which differs from an ordinary priority queue by supporting decrease_key(id) in addition to build and delete_min -- each stored item has both a key (its distance estimate, what the queue minimizes on) and a separate unique id (used to find and lower that item's key later, when a shorter path to it is discovered). Show how to build one on top of an ordinary priority queue: keep the items in a regular priority queue Q', cross-linked with a dictionary D mapping each id to its location in Q' -- and since vertex ids here are just the integers 0..V-1, that dictionary can be a direct-access array for true constant-time lookup, no hashing needed.",
+      "quiz": {
+        "question": "What operation does a changeable priority queue support that an ordinary priority queue does not, and why does Dijkstra need it?",
+        "options": [
+          "decrease_key(id) -- Dijkstra needs to lower a vertex's stored distance estimate in place whenever a shorter path to it is found, using its id to find it",
+          "insert(item) -- Dijkstra needs to add brand-new vertices to the queue partway through the algorithm",
+          "peek() -- Dijkstra needs to look at the minimum item without removing it"
+        ],
+        "answer": 0,
+        "explain": "The lecture names decrease_key(id) as exactly the new, third operation beyond build and delete_min, and explains why it's needed: every time an edge relaxation lowers a vertex's distance estimate, the priority queue's own record of that vertex's key has to be updated to match, using the vertex's id to locate it. All vertices are already inserted once during build (there is no need to insert new ones mid-algorithm), and delete_min already returns the minimum, so a separate peek is not the missing piece."
+      }
+    },
+    {
+      "chunk": 3,
+      "emphasis": "This chunk has four parts; keep them distinct. (1) The algorithm itself: initialize every distance estimate to infinity except d(s)=0 (which is never updated again, since non-negative weights can't beat 0); build the changeable priority queue on all vertices keyed by distance estimate; while the queue is non-empty, delete the minimum vertex u and relax every outgoing edge from u, calling decrease_key whenever a relaxation actually lowers some d(v). (2) Walk the worked example on the board exactly as given: starting from s, repeatedly pop the minimum-distance-estimate vertex, relax its outgoing edges, and let each relaxation trigger a decrease_key -- ending with the correct final distances to every vertex. (3) The correctness proof, in two pieces: relaxation is 'safe' (from lecture 11) so an estimate can only decrease, and once it decreases to the TRUE shortest distance it can never decrease further past that (there is no shorter path to undercut it); then by induction on the order vertices are popped from the queue, when a vertex v' is popped its estimate must already equal its true shortest distance, because the vertex y just before it on v's own shortest path was necessarily popped earlier (with a correct estimate, by the induction hypothesis) and non-negative weights force the true distance to v' to be at least as large as the estimate at y — while the priority queue popped v' precisely because its estimate was the smallest available, pinning all these quantities to the same value. (4) The running time, expressed generically as B (build) + V*M (delete-min) + E*D (decrease-key), then specialized three ways: a plain array gives O(V^2) — great for dense graphs; a binary heap gives O(E log V) — good for sparse graphs; and a Fibonacci heap (not covered in this course, just named) achieves O(E + V log V) in every case, which is the bound to quote for a theory problem even though real implementations usually just pick the array or the heap based on density.",
+      "exercise": "Hold the talk button. Walk the worked example by hand: starting the changeable priority queue with only s at distance 0 and every other vertex at infinity, pop the minimum each round and relax its outgoing edges, updating (decrease_key-ing) any distance estimate that improves. Say out loud, before each pop, which vertex you expect to come out and why -- it should always be whichever remaining vertex currently has the smallest distance estimate.",
+      "quiz": {
+        "question": "In the correctness proof's inductive step, why must the vertex y immediately before v' on v's shortest path already have the correct distance estimate when v' is popped?",
+        "options": [
+          "y was necessarily popped from the queue before v', so the induction hypothesis (true for all earlier pops) already guarantees y's estimate equals its true shortest distance",
+          "y's estimate is correct by definition, since y is adjacent to the source vertex s",
+          "y's estimate is correct because relaxation always sets every vertex's estimate correctly the first time, regardless of order"
+        ],
+        "answer": 0,
+        "explain": "The proof is explicitly an induction on the order vertices are popped from the queue: for the argument to reach v' (the k'-th vertex popped), it relies on every vertex popped before it -- including y, which the proof argues must have been popped earlier -- already satisfying the claim, by the induction hypothesis. It is not a base fact about adjacency to s (only s itself is the base case, at k=1), and relaxation being 'safe' only guarantees an estimate never becomes too small, not that it's correct on the first try — correctness at the moment of popping is exactly what the induction has to establish."
+      }
+    }
+  ]
+}

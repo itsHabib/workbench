@@ -1,0 +1,219 @@
+{
+  "course": "6.006",
+  "lecture": "l15-dynamic-programming-part-1-srtbot-fib-dags-bowling",
+  "title": "Dynamic Programming, Part 1: SRTBOT, Fib, DAGs, Bowling",
+  "note": "Same constraint as every other plan in this run: node script execution is refused by the sandbox with no approval arriving, so chunk boundaries were derived by hand from scripts/lesson.mjs's documented algorithm (column-0 marks, TARGET=38) and could not be checked against check-plans.mjs; topic is left off every section. This transcript is formatted as prose paragraphs rather than speaker-tagged dialogue turns, so nearly every paragraph break is itself a column-0 mark — that produced 15 chunks, the most of any plan added in this run, and each emphasis had to stay tighter than usual to fit the pace of covering three distinct worked examples (merge sort as SRTBOT, Fibonacci with memoization, DAG shortest paths, and bowling) across that many short sections.",
+  "sections": [
+    {
+      "chunk": 0,
+      "emphasis": "Frame today as the start of a new kind of material: not another algorithm to apply, but a paradigm for DESIGNING one from scratch — dynamic programming, a recursive algorithm design technique. Introduce the acronym SRTBOT as the checklist for specifying any recursive algorithm: Sub-problems, Relations, Topological order, Base case, Original problem, Time. Land the first and hardest step: define the sub-problems — usually a polynomial number of smaller instances related to the problem you actually want, and often the original problem is itself one of them, built up from the smaller ones.",
+      "quiz": {
+        "question": "SRTBOT starts with Sub-problems. What is the lecture's warning about this first step specifically?",
+        "options": [
+          "It is usually the hardest step — the sub-problems are open-ended to choose and there is no fixed recipe, unlike later steps such as base case",
+          "It is the easiest step, since sub-problems are always just smaller copies of the exact same problem",
+          "It can be skipped entirely for problems that already have a known recurrence relation"
+        ],
+        "answer": 0,
+        "explain": "The lecture is explicit that defining sub-problems is usually the hardest part of designing a recursive algorithm, precisely because it's open-ended — there's no formula for it, only judgment about what smaller structure the problem naturally decomposes into. It's not a mechanical restatement of the same problem at smaller size (Fibonacci's sub-problems are individual values f(i), not smaller Fibonacci problems), and it can never be skipped — the relation, topological order, and base case all depend on having sub-problems defined first."
+      }
+    },
+    {
+      "chunk": 1,
+      "emphasis": "Continue SRTBOT: Relate sub-problems with a recurrence — a recursive rule for solving one sub-problem using smaller ones. Picture the sub-problems as a graph, with an edge for each dependency; for the recursion to ever terminate, this subproblem graph must be a DAG, and a Topological order (often just a for-loop in the right direction) is how you guarantee no cyclic, infinite recursion. Round out the acronym: Base case (recursion has to bottom out somewhere), solve the Original problem in terms of the sub-problems, and analyze the Time. Open the first worked example, merge sort, recast in this frame: the sub-problems are S(i,j), sorting the sub-array from i to j.",
+      "quiz": {
+        "question": "Why must the subproblem graph (vertices = sub-problems, edges = dependencies) be a DAG for a recursive algorithm to work?",
+        "options": [
+          "A cycle in the dependency graph means some sub-problem depends, directly or indirectly, on itself, which produces infinite recursion that never terminates",
+          "A DAG is required only so the algorithm's running time can be expressed as a simple sum",
+          "It isn't actually required — cycles are fine as long as memoization is used"
+        ],
+        "answer": 0,
+        "explain": "If sub-problem A's solution depends on sub-problem B's, which depends back on A's, no base case is ever reached along that cycle and the recursion runs forever — that's exactly why acyclicity is non-negotiable, independent of whether memoization is used. Memoization only avoids RECOMPUTING a sub-problem already solved; it does nothing to rescue a genuinely circular dependency. The DAG requirement is about termination, not about how the running time later gets computed."
+      }
+    },
+    {
+      "chunk": 2,
+      "emphasis": "Finish merge sort's SRTBOT: the relation is S(i,j) = merge(S(i,m), S(m,j)) for the midpoint m; the topological order is simply increasing sub-array length (j-i), which guarantees the recursive calls are always on strictly smaller ranges; the base case is the empty array; and the running time is exactly the familiar n log n recurrence solved before. Pivot to a second worked example built specifically to illustrate the next big idea: Fibonacci numbers. State the natural sub-problems (f(i) for i from 1 to n) and the obvious recurrence, f(i) = f(i-1) + f(i-2) — a direct translation of the Fibonacci recurrence itself into an algorithm.",
+      "quiz": {
+        "question": "For merge sort's SRTBOT framing, why is 'increasing sub-array length' a valid topological order for the sub-problems S(i,j)?",
+        "options": [
+          "Because the midpoint m is strictly between i and j, so both recursive calls S(i,m) and S(m,j) always operate on strictly shorter sub-arrays than S(i,j) itself",
+          "Because merge sort always processes the array from left to right, index by index",
+          "Because sorting is commutative, so any order of sub-array lengths works equally well"
+        ],
+        "answer": 0,
+        "explain": "Since m sits strictly between i and j, both halves S(i,m) and S(m,j) are shorter than the original range S(i,j) — so ordering sub-problems by increasing length guarantees every recursive call is already scheduled before the problem that needs it, which is exactly what a valid topological order requires. Merge sort's recursive structure has nothing to do with left-to-right index scanning, and commutativity of sorting is unrelated to why this particular ordering is valid."
+      }
+    },
+    {
+      "chunk": 3,
+      "emphasis": "Complete Fibonacci's SRTBOT — topological order is increasing i (a for-loop), base case f(1) = f(2) = 1, original problem is f(n) — and then hit the payoff of doing the runtime analysis honestly. Written naively and recursively, the algorithm's own running time T(n) obeys T(n) = T(n-1) + T(n-2) + O(1) — the SAME recurrence shape as Fibonacci itself. Since Fibonacci numbers grow exponentially (roughly the golden ratio to the n), so does this naive algorithm's running time: a terrible, exponential-time way to compute a number that a closed-form-adjacent recurrence should make cheap.",
+      "quiz": {
+        "question": "Why does the naive recursive Fibonacci algorithm's running time T(n) end up growing exponentially, just like the Fibonacci numbers themselves?",
+        "options": [
+          "T(n) satisfies the same recurrence shape, T(n) = T(n-1) + T(n-2) + O(1), as the Fibonacci sequence, so it inherits the same exponential (golden-ratio-based) growth rate",
+          "Because computing large integers is inherently exponential regardless of the algorithm used",
+          "Because the base case f(1) = f(2) = 1 is set incorrectly, causing extra unnecessary recursive calls"
+        ],
+        "answer": 0,
+        "explain": "The running time recurrence mirrors the Fibonacci recurrence exactly (up to a constant-time addition per call), so solving it gives the same exponential growth as the numbers being computed — that structural match is the whole reason it's so bad. It isn't about integer arithmetic being inherently expensive (that's a separate, later concern about bit-width); and the base case is stated correctly — the blowup comes from redundant recursive calls, not a wrong base case."
+      }
+    },
+    {
+      "chunk": 4,
+      "emphasis": "Introduce the fix: memoization — remembering and reusing sub-problem solutions instead of recomputing them. Draw the recursion tree for naive Fibonacci and point out the collision: computing f(n-1) and f(n-2) both eventually require f(n-3), and the naive algorithm computes it twice, redundantly, at exponentially compounding cost as n grows. Answer the audience's question about f(n-2) the same way: shared sub-problems appear across different levels of the recursion tree too, not just within one level. Introduce the memo table as a dictionary (often just a direct access array) mapping a sub-problem to its already-computed solution, and sketch the generic memoized recursive function: check whether the sub-problem is already in the memo and return it if so; otherwise handle the base case or recurse, and store the result before returning.",
+      "quiz": {
+        "question": "In the Fibonacci recursion tree, f(n-3) gets computed more than once by the naive algorithm. What does memoization change about that?",
+        "options": [
+          "The first call to compute f(n-3) stores its result in the memo table; every later call for the same sub-problem finds it already there and returns it directly, with no further recursion",
+          "Memoization changes the recurrence relation itself, so f(n-3) is no longer needed by both f(n-1) and f(n-2)",
+          "Memoization only helps by computing f(n-3) faster the second time, not by avoiding the recomputation entirely"
+        ],
+        "answer": 0,
+        "explain": "The memo table is purely a cache: the mathematical recurrence relation is untouched, and f(n-3) is still needed by both branches — what changes is that the first computation gets recorded, so every subsequent request for that exact sub-problem is an O(1) lookup instead of a fresh recursive computation. It doesn't make the recomputation faster; it eliminates it outright, which is the entire mechanism behind the speedup."
+      }
+    },
+    {
+      "chunk": 5,
+      "emphasis": "Trace what memoization actually does to the recursion tree: once the left branch (say, computing f(i-1) all the way down) has populated the memo table, the parallel right-branch calls (needing f(i-2), f(i-3), and so on) become instant lookups rather than fresh recursion — the tree collapses to essentially one path downward plus free lookups. State the general principle for analyzing any memoized algorithm: because each distinct sub-problem is solved at most once, total running time is at most the number of distinct sub-problems times the non-recursive work per sub-problem (ignoring recursive calls, since those are accounted for elsewhere in the sum). For Fibonacci: n sub-problems, O(1) non-recursive work each (one addition) — so O(n) total, a huge improvement over exponential.",
+      "quiz": {
+        "question": "The general memoization runtime bound is: total time <= (number of distinct sub-problems) x (non-recursive work per sub-problem). Why is it safe to ignore the cost of recursive calls when computing 'non-recursive work per sub-problem'?",
+        "options": [
+          "Because each recursive call, once it resolves, is itself counted as its own separate sub-problem's total cost elsewhere in the same sum — counting it again inside the caller would double-count it",
+          "Because recursive calls in a memoized algorithm always cost exactly zero time",
+          "Because the formula only applies to algorithms that never actually recurse, like a pure for-loop"
+        ],
+        "answer": 0,
+        "explain": "The sum is organized so every sub-problem contributes its own non-recursive work exactly once, as its own term in the sum — a recursive call to sub-problem X's cost is already accounted for in X's own term, so including it again at the call site would double-count that work. Recursive calls aren't free (the first time a sub-problem is solved, real work happens), but memoization guarantees no sub-problem is solved more than once, which is what makes the accounting clean. The formula applies precisely to genuinely recursive memoized algorithms, not only to for-loops."
+      }
+    },
+    {
+      "chunk": 6,
+      "emphasis": "Add a careful word-RAM caveat specific to Fibonacci: since Fibonacci numbers grow exponentially, writing down f(n) actually takes Theta(n) bits — likely far more than one machine word — so an n-bit addition costs O(n/w) time, not O(1), making the true running time O(n + n^2/w): still polynomial, just not quite the clean O(n) the naive analysis suggested. Then generalize the earlier runtime formula's usefulness by (deliberately, over-cautiously) applying it to merge sort, which doesn't actually benefit from memoization since its sub-problems never overlap: treating sub-arrays S(i,j) as O(n^2) distinct sub-problems, each costing O(j-i) to merge, sums to a loose O(n^3) bound — correct but far from the true Theta(n log n), illustrating that the sub-problem-counting formula always gives a valid polynomial upper bound, even when it isn't tight.",
+      "quiz": {
+        "question": "Applying the memoization runtime formula to merge sort gives an O(n^3) bound, even though merge sort is actually Theta(n log n). What does this illustrate about the formula?",
+        "options": [
+          "The formula (sub-problem count times per-sub-problem work) always gives a valid upper bound, but it can be loose — especially when, as in merge sort, sub-problems never actually overlap and memoization has nothing to reuse",
+          "The formula is simply wrong and should not be applied to algorithms like merge sort",
+          "O(n^3) means merge sort has a hidden bug that memoization would fix"
+        ],
+        "answer": 0,
+        "explain": "The formula is a sound but sometimes loose upper bound; it treats every possible sub-problem as if it might need solving, but merge sort's sub-arrays S(i,j) never repeat, so memoization buys nothing there and the count-based bound (O(n^2) sub-problems times O(n) merge work each) overshoots the true Theta(n log n). It isn't a wrong formula, just not always tight, and there's no bug — merge sort is correct and efficient as already proven; this chunk is explicitly a cautionary illustration of the formula's looseness, not a recommendation to actually memoize merge sort."
+      }
+    },
+    {
+      "chunk": 7,
+      "emphasis": "Transition to a third worked example that ties everything together: DAG shortest paths, reframed explicitly as a dynamic program. State the general definition plainly: dynamic programming just means recursion plus memoization — write a recursive function, check the memo table first, fall back to the base case or the recurrence, and store the result. Apply this template to single-source shortest paths in a DAG: the sub-problems are exactly delta(s, v) for every vertex v, and solving all of them IS the original problem — no separate combination step needed at the end.",
+      "quiz": {
+        "question": "The lecture defines dynamic programming generically as 'recursion plus memoization.' What role does the earlier SRTBOT checklist play relative to that definition?",
+        "options": [
+          "SRTBOT is the design process for specifying the recursion (sub-problems, relation, order, base case) that memoization then gets layered on top of to make a full dynamic program",
+          "SRTBOT and memoization are two competing, mutually exclusive techniques, and only one applies to any given problem",
+          "SRTBOT is only used for problems that don't need memoization at all, like merge sort"
+        ],
+        "answer": 0,
+        "explain": "SRTBOT is how you design the recursive algorithm's structure in the first place — the sub-problems, how they relate, in what order, and the base case; memoization is the one additional idea, layered on top of an already-specified SRTBOT recursion, that turns it into a genuinely efficient dynamic program. They aren't competing techniques — SRTBOT without memoization is just plain recursion (as with merge sort, where memoization adds nothing useful), and memoization without a well-designed SRTBOT recursion has nothing to memoize."
+      }
+    },
+    {
+      "chunk": 8,
+      "emphasis": "Write the DAG shortest-paths recurrence: delta(s, v) is the minimum, over every incoming edge (u, v), of delta(s, u) + weight(u, v) — throwing infinity into the set to handle a vertex with no way in. The topological order needed is simply the DAG's own topological order (computable by DFS, as seen earlier in the course), since computing delta(s, v) requires already knowing delta(s, u) for every in-neighbor u. Base case: delta(s, s) = 0. For the running time, apply the sub-problem-counting formula honestly this time: the non-recursive work for vertex v is proportional to its in-degree plus one (for the infinity), and summing that over every vertex counts every edge once — giving O(V + E), exactly matching the DAG relaxation algorithm from the earlier lecture, just derived from the opposite direction.",
+      "quiz": {
+        "question": "Summing 'in-degree(v) + 1' over every vertex v gives the DAG shortest-paths dynamic program's running time. Why does that sum work out to O(V + E)?",
+        "options": [
+          "Summing in-degree over every vertex counts every edge exactly once (each edge has exactly one target), giving O(E); the '+1' per vertex adds another O(V), for a combined O(V + E)",
+          "Because every vertex in a DAG has the same in-degree, so the sum is just V times a constant",
+          "Because DFS, which computes the topological order, already runs in O(V + E), and no other work is needed"
+        ],
+        "answer": 0,
+        "explain": "Every edge has exactly one destination vertex, so summing in-degree across all vertices tallies every edge exactly once, contributing O(E); the '+1' per vertex (for the infinity placeholder) contributes O(V) more, together giving O(V + E). In-degree varies freely across vertices in a general DAG — nothing forces it to be uniform. And while DFS for the topological order is indeed O(V + E), that is a separate cost from the dynamic program's own relaxation work being tallied here; both happen to share the same asymptotic bound."
+      }
+    },
+    {
+      "chunk": 9,
+      "emphasis": "Surface a genuinely striking structural insight before moving on: the generic memoized recursive algorithm — check the memo, else recurse — is SECRETLY performing a depth-first search over the (reversed) sub-problem graph, with the memo table playing the exact role of DFS's visited-check. Because the sub-problem graph here literally is the input DAG, this means the algorithm computes its own topological order for free, as a side effect of the recursion's finishing order, with no separate topological-sort step required. Close the loop: the lecture has now shown two genuine dynamic programs (Fibonacci, DAG shortest paths) and one degenerate case that technically fits the template but gains nothing from memoization (merge sort, since its sub-problems never overlap). Open the next example with a change of pace: a made-up bowling game, based on a 1908 puzzle, where n pins stand in a line and a bowler can knock down either one pin or two adjacent pins per throw.",
+      "quiz": {
+        "question": "Why does the lecture say the generic memoized recursive DAG shortest-paths algorithm doesn't need a separately computed topological order, even though the SRTBOT design explicitly calls for one?",
+        "options": [
+          "The memoized recursion is itself performing a depth-first search over the sub-problem graph, and DFS's own finishing order automatically produces a valid topological order as a side effect",
+          "DAGs never actually require a topological order in practice; SRTBOT's requirement is only theoretical",
+          "The topological order was already computed earlier, during the graph's construction, so it doesn't need recomputing"
+        ],
+        "answer": 0,
+        "explain": "The insight is that recursion-with-memoization structurally IS a depth-first search over the sub-problem graph (memo table = visited-check), and DFS's finishing order is already known, from the earlier DFS lecture, to give a valid topological order on a DAG — so the SRTBOT requirement for a topological order is satisfied automatically, for free, rather than needing a separate explicit computation. The requirement is very real, not merely theoretical, which is exactly why this free byproduct is worth calling out as elegant; and nothing about the graph's construction computes an order in advance."
+      }
+    },
+    {
+      "chunk": 10,
+      "emphasis": "Lay out the bowling game's rules precisely: hitting a single pin i scores v_i points; hitting two adjacent pins i and i+1 together scores the PRODUCT v_i times v_{i+1}, not the sum — and once hit, a pin is gone, so pairings can never overlap. Work through a concrete example to build intuition: a pair of high value-9 pins is worth far more paired (81) than hit separately or mixed with a neighbor; two adjacent 1s are actually better hit SEPARATELY (2 points) than paired (1 point); and two adjacent negative pins, like -5 and -5, are worth pairing since the product of two negatives is a large positive (25). The goal is to maximize total score, and the bowler is not required to hit every pin.",
+      "quiz": {
+        "question": "In the worked example, two adjacent pins both worth -5 are better hit TOGETHER than separately or skipped. Why?",
+        "options": [
+          "Hitting them together scores the product, (-5) x (-5) = 25, a large positive gain, whereas hitting them separately would only add -5 + -5 = -10, and skipping both scores 0",
+          "Negative-valued pins can only ever be hit in pairs; the rules forbid hitting a negative pin alone",
+          "The product rule only applies to positive pins; negative pins are always summed instead"
+        ],
+        "answer": 0,
+        "explain": "The product of two negative numbers is positive, so pairing two -5 pins turns what would be a loss into a solid gain of 25 — strictly better than hitting them separately (a loss of 10) or skipping them (0 points). There is no such restriction in the rules; a negative pin can be hit alone, skipped, or paired, exactly like any other pin — it's the arithmetic of the product rule that makes pairing negatives-with-negatives attractive, not a special rule about negative values."
+      }
+    },
+    {
+      "chunk": 11,
+      "emphasis": "Note in passing that a genuinely harmful pin (like an isolated -3 with no good pairing) is simply skipped, since hitting isn't mandatory — then pivot into real algorithmic design mode: what should the sub-problems be? Offer a general-purpose tool for sequence inputs: three standard families of sub-problems — prefixes (x up to index i, giving Theta(n) sub-problems), suffixes (x from index i onward, also Theta(n)), and substrings/sub-arrays (x from i to j, giving Theta(n^2) sub-problems). Explicitly rule out sub-SEQUENCES (arbitrary subsets of items, preserving order but allowing gaps) as a sub-problem family — there are 2^n of them, an exponential blowup that defeats the entire purpose of choosing sub-problems in the first place.",
+      "quiz": {
+        "question": "Why are sub-sequences explicitly ruled out as a candidate sub-problem family for sequence-based dynamic programs, while prefixes, suffixes, and substrings are all fine?",
+        "options": [
+          "There are 2^n possible sub-sequences of an n-item sequence (each item independently included or excluded), which is exponential, while prefixes and suffixes are Theta(n) and substrings are Theta(n^2) — all polynomial",
+          "Sub-sequences are fine in theory but are simply harder to compute than substrings",
+          "Sub-sequences don't preserve the original order of items, so they can't be used to build a valid recurrence"
+        ],
+        "answer": 0,
+        "explain": "The entire point of choosing a sub-problem family is to keep the total number of sub-problems polynomial, so memoization pays off; sub-sequences number 2^n since each of the n items is independently in-or-out, which is exponential and defeats the whole design goal, regardless of how 'hard' any individual sub-sequence is to compute. Sub-sequences do preserve relative order (that's what distinguishes them from arbitrary subsets) — the disqualifying issue is purely their exponential count, not an ordering problem."
+      }
+    },
+    {
+      "chunk": 12,
+      "emphasis": "Commit to suffixes for the bowling problem (a stylistic preference for working left to right) and define the sub-problem precisely: b(i) is the maximum score achievable if the game only offered pins i, i+1, ..., n-1 — the suffix of pins starting at i. State explicitly why this suffices: since the whole pin sequence is itself one particular suffix (the one starting at 0), solving every b(i) solves the original problem too, which is exactly b(0). Begin building the recurrence by naming the key structural fact that makes suffixes work here: removing one or two items from the FRONT of a suffix always leaves another, smaller suffix — which is precisely the reduction a recurrence needs.",
+      "quiz": {
+        "question": "Why does the lecture stress that 'define what the sub-problem means before saying how to compute it' as a common mistake to avoid, right when introducing b(i)?",
+        "options": [
+          "Without a precise statement of what b(i) represents (the best score achievable using only the suffix starting at i), it's impossible to verify a proposed recurrence is even solving the right question, let alone correctly",
+          "It's a stylistic preference with no real consequence for correctness, just for readability of the notes",
+          "The recurrence for b(i) can be written correctly without ever stating its meaning, since the math speaks for itself"
+        ],
+        "answer": 0,
+        "explain": "A recurrence is only verifiably correct relative to a clearly stated goal — without pinning down that b(i) means 'the best achievable score using only pins i onward,' there is no way to check whether the proposed max-of-three-options recurrence actually computes that quantity, or something else entirely. This is a substantive correctness safeguard, not mere notes style, and skipping it is exactly the kind of mistake that lets a wrong recurrence look plausible on paper."
+      }
+    },
+    {
+      "chunk": 13,
+      "emphasis": "Finish the bowling recurrence by enumerating everything that can happen to pin i, the front of the current suffix: skip it entirely, leaving b(i+1); hit it alone, scoring v_i plus b(i+1); or hit it paired with pin i+1, scoring v_i times v_{i+1} plus b(i+2) — and take the max of these three options, since the goal is to maximize score. Note each option costs only constant non-recursive work (one or two arithmetic operations), so with a linear number of suffix sub-problems, the total running time is O(n) — linear. Complete SRTBOT: the topological order is decreasing i (compute the empty suffix first, working backward to the full sequence), and the base case is b(n) = 0, the empty suffix scoring nothing.",
+      "exercise": "Say out loud, in order: the three options the recurrence considers for pin i, why each one reduces to a strictly smaller suffix sub-problem, and why the topological order has to run in DEcreasing i rather than increasing i.",
+      "quiz": {
+        "question": "The bowling recurrence b(i) = max(b(i+1), b(i+1) + v_i, b(i+2) + v_i * v_{i+1}) requires computing sub-problems in DEcreasing order of i. Why?",
+        "options": [
+          "Every term on the right side references a suffix starting strictly later than i (i+1 or i+2), so those smaller suffixes must already be solved before b(i) can be computed — which means starting from the largest i (the empty suffix) and working down",
+          "Increasing order would work equally well; the direction is purely a matter of coding style",
+          "Decreasing order is required only because pin values can be negative"
+        ],
+        "answer": 0,
+        "explain": "Every option in the recurrence depends on a suffix that starts strictly after i, so those later (and therefore already-smaller) sub-problems must be available first — which forces computing b(n), then b(n-1), and so on down to b(0), the reverse of the increasing order Fibonacci or DAG shortest paths used. This is a genuine dependency requirement, not a style choice, and has nothing to do with whether pin values happen to be negative."
+      }
+    },
+    {
+      "chunk": 14,
+      "emphasis": "Introduce bottom-up DP as the non-recursive twin of the same recurrence: write the base case first as a plain assignment (b(n) = 0), then loop i from n down to 0 in the topological order already established, computing the relation directly each iteration (guarding the two-pin option so it's only tried when at least two pins remain), and finally return b(0). Frame this as the natural way to actually implement a dynamic program — no recursive call overhead, just one for loop. Close with the big-picture intuition for why any of this works at all: dynamic programming is 'local brute force' — for each sub-problem, try every possible thing that could happen to one small, well-chosen feature of it (here, what happens to the very first pin of a suffix), recurse on whichever smaller sub-problem that choice leaves behind, and combine with min or max as appropriate. It only stays polynomial because the number of distinct sub-problems — and therefore the number of times any given piece of work is actually redone — stays polynomial, even though the space of overall strategies being implicitly considered is exponential.",
+      "quiz": {
+        "question": "The lecture calls dynamic programming 'local brute force.' What does that phrase capture about how the bowling recurrence was designed?",
+        "options": [
+          "It brute-forces every option for one small, well-chosen feature (what happens to the very first pin of the current suffix) rather than every option for the entire remaining sequence, then recurses on the smaller sub-problem each choice leaves behind",
+          "It means the algorithm tries every possible strategy for the whole sequence of pins exhaustively, and dynamic programming is just a faster way to run that exhaustive search",
+          "It refers to brute-forcing the choice of sub-problem family (prefixes vs suffixes vs substrings) by trying all three and keeping whichever runs fastest"
+        ],
+        "answer": 0,
+        "explain": "The 'local' in 'local brute force' is the key word: only the first pin's handling (three options) gets brute-forced at each step, with everything past it handled by recursing into an already-defined, smaller sub-problem — that's what keeps the total work polynomial despite implicitly covering an exponential space of overall strategies. It is not literally trying every whole-sequence strategy (that would still be exponential), and it has nothing to do with comparing prefix, suffix, and substring choices against each other at runtime — that choice is made once, at design time."
+      }
+    }
+  ]
+}

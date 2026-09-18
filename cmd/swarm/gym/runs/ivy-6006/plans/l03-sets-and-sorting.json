@@ -1,0 +1,154 @@
+{
+  "course": "6.006",
+  "lecture": "l03-sets-and-sorting",
+  "title": "Sets and Sorting",
+  "note": "Chunk boundaries could not be produced by scripts/lesson.mjs in this run: every `node` invocation (interpreted script execution) was refused by the sandbox's permission guard with 'This command requires approval', and no approval arrived (many retries, including python3 -c as a control, were refused the same way, so the block is general, not lesson.mjs-specific). Chunk starts were instead derived by hand from the documented algorithm in scripts/lesson.mjs's header comment (chunk.mjs: walk column-0 lines, i.e. unindented lines that are not markdown headings or `_Source:` front matter; this transcript has no `*** topic:` markers so every break is the TARGET-line rule, accumulating physical lines between column-0 marks until >=38, then breaking at the next mark; a trailing chunk under MIN=14 lines folds into its predecessor). That hand derivation could not be checked against node scripts/check-plans.mjs for the same reason, so `topic` is deliberately left off every section: an unverifiable guess at the chunk's exact label risks a false drift ERROR, while an absent topic only warns. The hardest part of the lecture itself was the long stretch (roughly lines 449-538) that runs the prefix-max induction proof straight into the selection-sort runtime derivation and the merge-sort setup with no natural break — that is chunk 9 here and it is unusually dense for one section.",
+  "sections": [
+    {
+      "chunk": 0,
+      "emphasis": "Open with the distinction the whole lecture is built on, restated from lecture 1: an interface is a specification — a set of operations a caller can rely on — and a data structure is one way to actually implement it underneath. Use the set interface itself to make it concrete: a set is a big pile of things, each one a whole object x with one piece singled out as its key k, and the interface lets a caller build a set from an iterable, ask its size, and query, insert, delete, or find an object by key, plus find the min and max key. Land the point that this description says nothing about how any of that is implemented — no array, no loop, nothing behind the curtain yet — and that today's goal is to fill in that behind-the-curtain part for one interface, the set, by comparing data structures on efficiency, storage, and correctness.",
+      "quiz": {
+        "question": "A set interface lets you insert an object x that carries a key k. What is the interface promising, and what is it silent about?",
+        "options": [
+          "It promises operations like insert, find, and delete by key will work as specified; it says nothing about how they are implemented underneath",
+          "It promises the operations run in constant time, since that is what makes a set different from a list",
+          "It promises the objects are stored in an array, since that is the simplest way to hold a pile of things"
+        ],
+        "answer": 0,
+        "explain": "An interface is a specification of behavior, not of mechanism — that separation is the whole point of drawing the line between interface and data structure. Nothing about the set interface says how fast an operation is or what storage backs it; those are choices left to whichever data structure implements it, which is exactly what the rest of the lecture goes on to compare."
+      }
+    },
+    {
+      "chunk": 1,
+      "emphasis": "Answer the audience question about insert plainly: insert(x) takes the whole object x — every field it carries — and adds it to the set, with the understanding that later searches use only its key k, the one field singled out for that purpose. Then introduce the first concrete data structure: an unordered array, just a big block of memory holding every x in the set in no particular order. Say why it is a reasonable starting point — it is the easiest possible thing to build, you just make an array and dump everything in — and set up the question the rest of the stretch answers: is it actually an efficient way to implement the interface?",
+      "quiz": {
+        "question": "In the set interface, what does insert(x) do with the key k?",
+        "options": [
+          "Nothing at the moment of insertion — k is just one field of x that later searches will use to look the object up",
+          "It uses k to decide where in the array to place x, keeping the array sorted by key as it grows",
+          "It hashes k immediately to compute a storage slot for x"
+        ],
+        "answer": 0,
+        "explain": "Insert just adds the whole object x to the set; k only matters later, when find(k) needs to know which field to compare against. An unordered array does not use k to choose a position at all — that is exactly why it is called unordered, and why searching it later takes work. Keeping it sorted by key, or hashing it, are different data structures the lecture has not introduced yet."
+      }
+    },
+    {
+      "chunk": 2,
+      "emphasis": "Walk the unordered-array search argument to its conclusion. An audience member's suggestion — sort once, then binary search — is real but answers a different question: if you only ever search once, sorting first costs n log n plus a log n search, which is worse than just scanning the n elements directly once. The straightforward algorithm for an unordered array is the obvious one: walk from the front, compare each element's key to the one you want, stop when you find it. In the worst case the object you want is last, so you touch every element — that is order n time — and the audience's instinct that this is inefficient is correct if you are going to search many times, not just once.",
+      "quiz": {
+        "question": "Searching an unordered array of n objects for a given key, why is the worst-case running time order n rather than order 1 or order log n?",
+        "options": [
+          "The object you want could be the very last one checked, so in the worst case every element has to be examined once",
+          "The array has to be sorted first before any search can begin, which is what costs the extra time",
+          "Order n only happens if the key is not in the set at all; a successful search is always faster"
+        ],
+        "answer": 0,
+        "explain": "With no order to exploit, the only correct algorithm is to walk the array and compare keys one at a time; nothing rules out the target being last, so the worst case touches all n elements. Sorting first is a different, more expensive strategy the lecture considers and sets aside for a single search. And a successful search can also land on the last element, so 'found' does not shortcut the worst case."
+      }
+    },
+    {
+      "chunk": 3,
+      "emphasis": "Close out the unordered array's story before opening the sorted one. Every set operation on an unordered array costs order n in the worst case: build costs n (reserve memory, copy everything in), insert/delete cost n because of the amortized argument from an earlier lecture when the array grows dynamically, find-min or find-max costs n because with no order you have to scan everything and keep the best-so-far, and even replacing an existing key costs n because you first have to find it. Say plainly that this is a complete, correct implementation of the interface — nothing is missing — it is just slow across the board. Then pivot: instead of a disorganized array, keep the items ordered by key, smallest key first, biggest key last. Say why this matters immediately even before naming an algorithm: order is not for arithmetic on keys, it is purely so later searches can exploit it.",
+      "quiz": {
+        "question": "Why does the lecture call the unordered array a correct implementation of the set interface, even though every operation costs order n?",
+        "options": [
+          "Because correctness is about doing what the interface specifies, and slow-but-right still satisfies every operation the interface promises",
+          "It is not correct — order n operations mean the interface is technically broken and needs a faster structure to work at all",
+          "It is correct only for find and insert, not for delete, which the unordered array cannot support"
+        ],
+        "answer": 0,
+        "explain": "Correctness and efficiency are separate questions: the unordered array answers every query and performs every update exactly as the interface specifies, so it is correct. Its weakness is purely a runtime one — order n across the board — which is precisely the gap the sorted array, and later sorting itself, exists to close. Delete works fine on an unordered array too; it just costs order n like everything else."
+      }
+    },
+    {
+      "chunk": 4,
+      "emphasis": "Show what order buys you. In a sorted array, find-min is order 1 — look at the first slot — and find-max is order 1 — look at the last. Search drops from order n to order log n via binary search: compare your key to the middle, and go left or right depending on which side it falls on, halving the remaining range each time. Make the scaling argument concrete with the lecture's own numbers: at 400 students, unordered search versus binary search is a modest gap; at a billion students, unordered search costs roughly a billion comparisons and binary search costs about log of a billion, a difference that is no longer modest at all. Then name the cost this defers: building the sorted array in the first place is not free — it takes n log n time, more than the order n it takes to just dump everything into an unordered array — so there is a genuine tradeoff between cheap-to-build-and-slow-to-query and expensive-to-build-and-fast-to-query. State the lecture's goal plainly: today is about that build step — sorting — taking a disorganized list and putting it into sorted order.",
+      "quiz": {
+        "question": "Why does the lecture say building a sorted array costs more than building an unordered array, even though both end up holding the same n objects?",
+        "options": [
+          "An unordered array just needs everything copied in, order n; a sorted array additionally needs the objects put into sorted order, which the lecture is about to show costs n log n",
+          "A sorted array needs more memory than an unordered array to hold the same n objects",
+          "Building a sorted array requires binary search to run once for every object as it is inserted"
+        ],
+        "answer": 0,
+        "explain": "Both arrays store the same n objects, so the memory and copy-in cost is the same order n baseline. What a sorted array adds is the work of actually sorting, which the lecture is about to show costs n log n — that is the tradeoff: pay more up front to sort, and get order log n search instead of order n. Binary search is what you get to use once the array is sorted; it is not part of how the array gets built."
+      }
+    },
+    {
+      "chunk": 5,
+      "emphasis": "Introduce two vocabulary words precisely, because sorting algorithms will be described in these terms for the rest of the lecture. A destructive sort overwrites its input array A with the sorted result, rather than writing into a fresh array B and leaving A untouched. An in-place sort is destructive and additionally uses no extra memory beyond a constant amount — no array-sized scratch space, only things like loop counters, which is why they count as order 1 rather than scaling with n. Make the distinction stick with the lecture's own worked example: the 'world's dumbest' destructive sort is to run a non-destructive sort and then copy the result back into A, but that copy costs order n space, so it is destructive without being in-place. Then open the first algorithm: permutation sort, chosen because its correctness is nearly free to see — a sorted array is by definition some permutation of the input, so list every permutation and check each one for sorted order until you find it.",
+      "quiz": {
+        "question": "A sort copies its non-destructive result back into the original array A, using an order n temporary array along the way. Is it destructive, in-place, both, or neither?",
+        "options": [
+          "Destructive, but not in-place — A ends up overwritten with the sorted result, but the algorithm used order n extra space to get there",
+          "In-place, but not destructive — using extra space is fine as long as A ends up sorted",
+          "Both destructive and in-place — any algorithm that overwrites A counts as in-place by definition"
+        ],
+        "answer": 0,
+        "explain": "Destructive only asks whether A ends up holding the sorted result instead of a separate output array B — this algorithm does that, so it is destructive. In-place adds the stronger requirement of no more than constant extra space, and an order n scratch array blows that budget, so it is not in-place. This exact example is the lecture's own illustration of why the two words are not synonyms."
+      }
+    },
+    {
+      "chunk": 6,
+      "emphasis": "Finish the runtime argument for permutation sort and be precise about the Omega. Enumerating all permutations of n numbers costs at least n factorial time, because there are n factorial of them and just naming that many things takes that long; checking whether one particular permutation is sorted costs order n, one pass comparing each adjacent pair. Multiply the two pieces together across every permutation and the total is at least n factorial times n — worse than n factorial alone. Answer the audience's sharp question directly: it is Omega, a lower bound, and not big O, because no algorithm for generating the permutations has actually been given — only the fact that the list of permutations itself has n factorial entries, so the true cost could be even higher. Call the algorithm what it is, uselessly slow, and pivot to the first sensible algorithm: selection sort. Walk the worked example 8, 2, 4, 9, 3 — find the biggest number, 9, and swap it into the last slot, leaving everything to the right of that swap in sorted order by induction.",
+      "quiz": {
+        "question": "The lecture says permutation sort's runtime is Omega(n! · n), not O(n! · n). Why the lower-bound symbol specifically?",
+        "options": [
+          "Because no algorithm was actually given for generating the permutations, only the fact that there are n! of them — the true cost could be higher, so only a lower bound is justified",
+          "Because n! · n is already known to be the exact runtime, and Omega is just the conventional way to state exact bounds",
+          "Because permutation sort's runtime depends on the input and can sometimes run faster than n! · n"
+        ],
+        "answer": 0,
+        "explain": "Omega commits to a floor without claiming it is tight: n! permutations must exist and checking each costs at least order n, so the total is at least n! · n, but the lecture never specifies how the permutations get generated, so a genuinely slower generator could push the real cost higher. Big O would claim an upper bound, which nothing here has earned. The runtime argument has nothing to do with the input varying — it is about an unspecified sub-algorithm, not input-dependent behavior."
+      }
+    },
+    {
+      "chunk": 7,
+      "emphasis": "Set up selection sort's recursive shape, the way 6.006 will keep writing it: split the work into finding the biggest element among the first i elements, and then swapping it into place at index i before recursing on everything to its left. Introduce the helper this leans on, prefix max: given an array and an index i, return the biggest element between index 0 and index i inclusive. Say explicitly why this version looks unfamiliar even to a learner who has written selection sort with two for loops before — it is written this way specifically because the course wants to prove correctness and runtime cleanly, not because it is how you would write it in practice.",
+      "exercise": "Hold the talk button. Selection sort swaps the biggest remaining element into place at index i, then recurses on indices 0 through i minus 1. Tell me why that recursive range is i minus 1 and not i — what has to already be true about index i once the swap happens?"
+    },
+    {
+      "chunk": 8,
+      "emphasis": "Derive prefix max's correctness from one deep-sounding but simple observation: the biggest element among indices 0 through i is either at index i itself, or it is not — in which case it must be among indices 0 through i minus 1. That is a tautology, and it is also exactly the recursive case: compute the biggest element in the first i minus 1 slots, compare it to the element at index i, and return whichever is bigger. Walk the worked example 8, 3, 5, 7, 9 — the biggest of the first four is 8, compare it to the last element 9, and 9 wins. Then frame the base case: an array of one element has only itself as a candidate, so it is trivially its own max.",
+      "quiz": {
+        "question": "Prefix max on array 8, 3, 5, 7, 9 with i pointing at the last index recurses to find the max of 8, 3, 5, 7 first, which is 8. What does it do with that 8?",
+        "options": [
+          "Compare it to the element at index i (9) and return whichever is bigger — here, 9",
+          "Return the 8 directly, since the recursive call already found the answer",
+          "Add it to the element at index i to get the final answer"
+        ],
+        "answer": 0,
+        "explain": "The whole algorithm rests on the two-case split: the overall max is either the element at index i or it is the max of everything before it, and you settle that by comparing the two candidates. The recursive call handing back 8 is only half the answer — it still has to be compared against the element actually at index i, which is 9, and 9 is bigger. Returning the recursive result unexamined, or combining the two by arithmetic, ignores that comparison entirely."
+      }
+    },
+    {
+      "chunk": 9,
+      "emphasis": "This is the longest and densest stretch; keep the three pieces distinct in the telling. First, finish prefix max's correctness by induction: the base case i=0 is a one-element array, trivially its own max; the inductive step assumes the recursive call correctly finds the max of indices 0 through i-1, and the two-case argument from the previous chunk finishes the proof. Second, derive prefix max's runtime: each call does one comparison and recurses on one smaller index, so S(n) = S(n-1) + Theta(1); guess S(n) = cn, substitute both sides, and the constants work out, confirming order n. Third, carry that same substitution technique into selection sort's own runtime: each level calls prefix max, order n work, then recurses on one fewer element, so T(n) = T(n-1) + Theta(n); this is the familiar 1 + 2 + ... + n sum, so guess T(n) = cn^2, substitute, and the linear terms cancel out consistently, confirming order n^2 — worse than the n log n the lecture promised, so selection sort is not the destination. Mention insertion sort only in passing — same idea in reverse, also n^2, left for the learner to work out at home — and then open merge sort with its founding observation: an array of length 1 is trivially sorted, so double the size of already-sorted chunks by merging neighboring pairs, using the worked example 7, 1, 5, 6, 2, 4, 9, 3, where pairs get sorted first and then merged two at a time. Introduce the two-finger merge technique by name and intuition: build the merged array backwards by comparing the last remaining elements of each side and placing the bigger one, sliding that side's finger inward, without ever needing to look left of either finger because both sides are already sorted.",
+      "quiz": {
+        "question": "Selection sort's runtime recurrence is T(n) = T(n-1) + Theta(n). Substituting the guess T(n) = cn^2 makes both sides consistent. What does that confirm about selection sort's runtime?",
+        "options": [
+          "Theta(n^2) — worse than the n log n the lecture is building toward, which is exactly why the lecture moves on to merge sort",
+          "Theta(n log n) — the same target runtime as merge sort, just reached by a different algorithm",
+          "Theta(n) — the Theta(n) term in the recurrence is the whole answer, since the recursive call adds nothing extra"
+        ],
+        "answer": 0,
+        "explain": "The substitution check is exactly how the lecture confirms the guess: plugging cn^2 into both sides of T(n) = T(n-1) + Theta(n) leaves a consistent relationship, so selection sort really is Theta(n^2). That is precisely why it is not the algorithm the lecture is building toward — it promised n log n, and n^2 is worse for large n, which motivates introducing merge sort next. Ignoring the recursive call would undercount all the work done at smaller levels of the recursion."
+      }
+    },
+    {
+      "chunk": 10,
+      "emphasis": "Finish the two-finger merge worked example — merging 1, 5, 6, 7 with 2, 3, 4, 9 places the 9 first, since it is the bigger of the two current last elements, then slides that finger inward and compares 7 against 4, placing the 7 next, and so on until every element has been placed. Then give the formal, backward-framed algorithm: merge sort picks a middle index c, recursively sorts the left half from a to c and the right half from c to b, then merges the two already-sorted halves with the two-finger technique, using an extra index b to track where in the output array the next placed element goes. State the merge runtime plainly: each recursive call places one element and recurses with one index decremented, so like prefix max it is S(n) = S(n-1) + Theta(1), which is Theta(n) — linear, because the two fingers together touch every element exactly once. Close with the full merge sort recurrence and its resolution: T(n) = 2T(n/2) + Theta(n), guess T(n) = cn log n, substitute using log(a/b) = log a - log b to simplify the two recursive n/2 terms, and the cn log n terms on both sides cancel, leaving a consistent Theta(n) = cn log 2, confirming merge sort runs in Theta(n log n) — the runtime the lecture promised at the start.",
+      "exercise": "Say out loud, in order: what the merge step's runtime is and why (name the recurrence and resolve it), then what the full merge sort recurrence is and why the two n/2 recursive calls plus the merge combine to n log n rather than n squared.",
+      "quiz": {
+        "question": "Merge sort's recurrence is T(n) = 2T(n/2) + Theta(n). Why does this resolve to Theta(n log n) rather than Theta(n^2), the way selection sort's T(n) = T(n-1) + Theta(n) resolves to Theta(n^2)?",
+        "options": [
+          "Because the problem is split into two halves at each level rather than shrunk by one element at a time, so the recursion only needs log n levels, each doing Theta(n) total work across its calls",
+          "Because merging two sorted lists is faster than finding a single maximum, so the Theta(n) term is smaller for merge sort",
+          "Because merge sort is in-place and selection sort is not, and in-place algorithms are always faster"
+        ],
+        "answer": 0,
+        "explain": "The shape of the recursion is what changes the answer: selection sort peels off one element per level, so it needs n levels of Theta(n) work each, giving n^2; merge sort halves the problem at each level, so it only needs log n levels, and the substitution method confirms the constants stay consistent at Theta(n) work per level, giving n log n total. The Theta(n) merge step and the Theta(n) prefix-max step cost the same order of work — the difference is entirely in how many levels the recursion has. In-place-ness is a separate property from asymptotic runtime and does not by itself change either bound."
+      }
+    }
+  ]
+}
