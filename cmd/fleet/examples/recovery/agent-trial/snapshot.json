@@ -1,0 +1,321 @@
+{
+  "observed_at": 1789341748.277805,
+  "repo": "itsHabib/workbench",
+  "pull_requests": [
+    {
+      "headRefOid": "d9ca988176bd47beb6afc33a70b31092b4302e0e",
+      "isDraft": false,
+      "mergeStateStatus": "UNKNOWN",
+      "number": 334,
+      "reviewDecision": "",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T14:45:36Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34763412570/job/103740063911",
+          "name": "check",
+          "startedAt": "2026-09-13T14:41:58Z",
+          "status": "COMPLETED",
+          "workflowName": "CI"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T14:42:35Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34763412572/job/103740063972",
+          "name": "seats (macos-latest)",
+          "startedAt": "2026-09-13T14:42:05Z",
+          "status": "COMPLETED",
+          "workflowName": "Fleet portability"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T14:42:50Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34763412572/job/103740064125",
+          "name": "seats (windows-latest)",
+          "startedAt": "2026-09-13T14:41:59Z",
+          "status": "COMPLETED",
+          "workflowName": "Fleet portability"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T14:43:17Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34763412570/job/103740064079",
+          "name": "fuzz",
+          "startedAt": "2026-09-13T14:41:59Z",
+          "status": "COMPLETED",
+          "workflowName": "CI"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T14:42:13Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34763412570/job/103740064031",
+          "name": "hygiene",
+          "startedAt": "2026-09-13T14:41:59Z",
+          "status": "COMPLETED",
+          "workflowName": "CI"
+        }
+      ],
+      "title": "fix(fleet): keep provider preparation failures retryable",
+      "url": "https://github.com/itsHabib/workbench/pull/334"
+    },
+    {
+      "headRefOid": "6aa2c9430f221e3895b16da4683c199e6e76f284",
+      "isDraft": true,
+      "mergeStateStatus": "UNKNOWN",
+      "number": 337,
+      "reviewDecision": "",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T22:13:47Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34786157295/job/103801903535",
+          "name": "claude",
+          "startedAt": "2026-09-13T22:13:47Z",
+          "status": "COMPLETED",
+          "workflowName": "Claude Code"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T22:11:42Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34785859391/job/103801092909",
+          "name": "check",
+          "startedAt": "2026-09-13T22:07:55Z",
+          "status": "COMPLETED",
+          "workflowName": "CI"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T22:08:21Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34785859481/job/103801092996",
+          "name": "seats (macos-latest)",
+          "startedAt": "2026-09-13T22:07:58Z",
+          "status": "COMPLETED",
+          "workflowName": "Fleet portability"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T22:13:52Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34786157336/job/103801903136",
+          "name": "signal",
+          "startedAt": "2026-09-13T22:13:49Z",
+          "status": "COMPLETED",
+          "workflowName": "gate-review-signal"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T22:08:46Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34785859481/job/103801093125",
+          "name": "seats (windows-latest)",
+          "startedAt": "2026-09-13T22:07:54Z",
+          "status": "COMPLETED",
+          "workflowName": "Fleet portability"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T22:09:16Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34785859391/job/103801092927",
+          "name": "fuzz",
+          "startedAt": "2026-09-13T22:07:53Z",
+          "status": "COMPLETED",
+          "workflowName": "CI"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T22:08:02Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34785859391/job/103801092838",
+          "name": "hygiene",
+          "startedAt": "2026-09-13T22:07:53Z",
+          "status": "COMPLETED",
+          "workflowName": "CI"
+        }
+      ],
+      "title": "POC: Fleet work intent, reviewed plans and replayable apply",
+      "url": "https://github.com/itsHabib/workbench/pull/337"
+    },
+    {
+      "headRefOid": "3836bd742421f5c8d03665a72f974fadc4414dc0",
+      "isDraft": true,
+      "mergeStateStatus": "UNKNOWN",
+      "number": 338,
+      "reviewDecision": "",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T22:24:19Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34786503541/job/103802847717",
+          "name": "check",
+          "startedAt": "2026-09-13T22:20:35Z",
+          "status": "COMPLETED",
+          "workflowName": "CI"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T22:22:02Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34786503541/job/103802847553",
+          "name": "fuzz",
+          "startedAt": "2026-09-13T22:20:35Z",
+          "status": "COMPLETED",
+          "workflowName": "CI"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T22:20:42Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34786503541/job/103802847676",
+          "name": "hygiene",
+          "startedAt": "2026-09-13T22:20:35Z",
+          "status": "COMPLETED",
+          "workflowName": "CI"
+        }
+      ],
+      "title": "fix(review): recognize shared authenticated completion evidence",
+      "url": "https://github.com/itsHabib/workbench/pull/338"
+    },
+    {
+      "headRefOid": "f3ddb66a258f1954e850659674b1809f8c6b0e2c",
+      "isDraft": true,
+      "mergeStateStatus": "UNSTABLE",
+      "number": 339,
+      "reviewDecision": "",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34789498488/job/103810972293",
+          "name": "check",
+          "startedAt": "2026-09-13T23:22:07Z",
+          "status": "IN_PROGRESS",
+          "workflowName": "CI"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34789498488/job/103810972172",
+          "name": "fuzz",
+          "startedAt": "2026-09-13T23:22:08Z",
+          "status": "IN_PROGRESS",
+          "workflowName": "CI"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T23:22:17Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34789498488/job/103810972255",
+          "name": "hygiene",
+          "startedAt": "2026-09-13T23:22:07Z",
+          "status": "COMPLETED",
+          "workflowName": "CI"
+        }
+      ],
+      "title": "Gate: discover and reuse existing merge grants",
+      "url": "https://github.com/itsHabib/workbench/pull/339"
+    },
+    {
+      "headRefOid": "d8c66cfa2a38105a4ee7f82d933b44cee79fbc47",
+      "isDraft": true,
+      "mergeStateStatus": "CLEAN",
+      "number": 340,
+      "reviewDecision": "",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T23:16:50Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34789240446/job/103810269527",
+          "name": "claude",
+          "startedAt": "2026-09-13T23:16:50Z",
+          "status": "COMPLETED",
+          "workflowName": "Claude Code"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T23:13:31Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34788895627/job/103809326550",
+          "name": "check",
+          "startedAt": "2026-09-13T23:09:51Z",
+          "status": "COMPLETED",
+          "workflowName": "CI"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T23:10:31Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34788895634/job/103809326680",
+          "name": "seats (macos-latest)",
+          "startedAt": "2026-09-13T23:09:59Z",
+          "status": "COMPLETED",
+          "workflowName": "Fleet portability"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T23:16:57Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34789240420/job/103810268976",
+          "name": "signal",
+          "startedAt": "2026-09-13T23:16:53Z",
+          "status": "COMPLETED",
+          "workflowName": "gate-review-signal"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T23:10:34Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34788895634/job/103809326816",
+          "name": "seats (windows-latest)",
+          "startedAt": "2026-09-13T23:09:51Z",
+          "status": "COMPLETED",
+          "workflowName": "Fleet portability"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T23:11:18Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34788895627/job/103809326648",
+          "name": "fuzz",
+          "startedAt": "2026-09-13T23:09:51Z",
+          "status": "COMPLETED",
+          "workflowName": "CI"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T23:10:01Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/itsHabib/workbench/actions/runs/34788895627/job/103809326634",
+          "name": "hygiene",
+          "startedAt": "2026-09-13T23:09:52Z",
+          "status": "COMPLETED",
+          "workflowName": "CI"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-13T23:10:15Z",
+          "conclusion": "NEUTRAL",
+          "detailsUrl": "https://cursor.com/docs/bugbot",
+          "name": "Cursor Bugbot",
+          "startedAt": "2026-09-13T23:10:14Z",
+          "status": "COMPLETED",
+          "workflowName": ""
+        }
+      ],
+      "title": "POC: recover complete Fleet checkpoints through inspect",
+      "url": "https://github.com/itsHabib/workbench/pull/340"
+    }
+  ]
+}

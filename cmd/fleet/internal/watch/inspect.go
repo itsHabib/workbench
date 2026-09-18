@@ -21,17 +21,14 @@ func Inspect(address string) (fleet.Rec, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := fleet.Rec{"at": at, "agent": row, "handoff": nil, "role_handoff": "", "messages": []fleet.Rec{}}
+	out := fleet.Rec{"at": at, "agent": row, "handoff": nil, "role_handoff": "", "role_handoff_record": nil, "messages": []fleet.Rec{}}
 	if fleet.S(row, "head_error") == "" {
 		cwd, branch := fleet.S(row, "cwd"), fleet.S(row, "branch")
 		if branch != "" {
 			out["handoff"] = fleet.ReadJSON(fleet.KeyFile("handoff", fleet.Scope(cwd, branch)))
 		}
-
 	}
-	if info, err := os.Stat(fleet.S(row, "cwd")); err == nil && info.IsDir() {
-		out["role_handoff"] = fleet.RoleHandoffLine(fleet.Rec{"cwd": row["cwd"]})
-	}
+	inspectRoleHandoff(out, row)
 	inspectMail(out, row)
 	trace, err := traceForRow(row)
 	if err != nil {
@@ -41,6 +38,34 @@ func Inspect(address string) (fleet.Rec, error) {
 	delete(trace, "data")
 	out["trace"] = trace
 	return out, nil
+}
+
+func inspectRoleHandoff(out, row fleet.Rec) {
+	// The board cwd is the configured/bound launch directory, not a session's
+	// changing working directory. A stale configured address must not read the
+	// checkpoint of whichever role now occupies that path.
+	role, tenant, slot := fleet.MapRowsFor(fleet.S(row, "cwd"))
+	address := fleet.S(row, "address")
+	if slot != "" && slot == address {
+		return // pooled seats have branch context, not a shared role checkpoint
+	}
+	if role != address || tenant == "" || tenant != fleet.S(row, "tenant") || slot != "" {
+		out["role_handoff_error"] = "inspected address does not match the current role binding"
+		return
+	}
+	// Role continuity needs the retained binding, not a surviving Git checkout.
+	// Carry the captured identity through: a concurrent map rewrite must not
+	// substitute another role's checkpoint. Role names need not be mail addresses.
+	r, err := fleet.ReadRoleHandoff(tenant, role)
+	if err != nil {
+		out["role_handoff_error"] = err.Error()
+		return
+	}
+	if r != nil {
+		// Preserve the untyped nil: DumpJSON renders a typed nil map as {}.
+		out["role_handoff_record"] = r
+		out["role_handoff"] = fleet.RoleHandoffSummary(r)
+	}
 }
 
 func inspectMail(out, row fleet.Rec) {
