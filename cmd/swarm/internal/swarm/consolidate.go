@@ -2,7 +2,6 @@ package swarm
 
 import (
 	"context"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -86,8 +85,7 @@ func (s *State) headVerified(worktree, head, branch, verify string) bool {
 		return rec.Pass
 	}
 	pass := verifies(worktree, verify)
-	_ = os.MkdirAll(s.path("receipts"), 0o755)
-	_ = writeJSON(s.receiptPath(head), &Receipt{Tip: head, Branch: branch, Cmd: verify, Pass: pass, At: Now()})
+	_ = s.PutReceipt(&Receipt{Tip: head, Branch: branch, Cmd: verify, Pass: pass})
 	return pass
 }
 

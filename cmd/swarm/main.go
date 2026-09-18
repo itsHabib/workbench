@@ -101,7 +101,7 @@ type cli struct {
 	s    *swarm.State
 	seat string
 
-	title, files, result, head string
+	title, files, result, head, verdict, tail string
 
 	as, scope, question, options, needs, ruling, evidence, supersedes, to, why        string
 	operator, lead, verifier, diskMin, resource, dir, cmd, wakeModel, wakeTools, base string
@@ -148,7 +148,7 @@ func parse(verb string, args []string) (*cli, error) {
 	fs.StringVar(&c.lead, "lead", "", "lead name(s)")
 	fs.StringVar(&c.verifier, "verifier", "", "verifier name(s)")
 	fs.StringVar(&c.dir, "dir", "", "repository directory")
-	fs.StringVar(&c.cmd, "cmd", "", "swarm binary path for the hook")
+	fs.StringVar(&c.cmd, "cmd", "", "swarm binary path for the hook; receipt: the verification command recorded")
 	fs.BoolVar(&c.wake, "wake", false, "resume seats that have notes and are between turns")
 	fs.StringVar(&c.wakeModel, "wake-model", "", "model for wakes")
 	fs.StringVar(&c.wakeTools, "wake-tools", "", "allowed tools for wakes")
@@ -158,6 +158,8 @@ func parse(verb string, args []string) (*cli, error) {
 	fs.DurationVar(&c.window, "window", time.Hour, "load window")
 	fs.StringVar(&c.title, "title", "", "work title")
 	fs.StringVar(&c.files, "files", "", "comma-separated paths the work touches")
+	fs.StringVar(&c.verdict, "verdict", "", "pass or fail")
+	fs.StringVar(&c.tail, "tail", "", "last lines of the verifier output")
 	fs.StringVar(&c.head, "head", "", "commit that carries the finished unit")
 	fs.StringVar(&c.result, "result", "", "what was done")
 	fs.StringVar(&c.into, "into", "", "split children as branch:title|branch:title")
@@ -195,6 +197,10 @@ var verbs = map[string]func(*cli) error{
 	"who":          (*cli).who,
 	"take":         (*cli).take,
 	"work":         (*cli).work,
+	"receipt":      (*cli).receipt,
+	"receipts":     (*cli).receipts,
+	"review":       (*cli).review,
+	"reviews":      (*cli).reviews,
 	"idle":         (*cli).idleWait,
 	"drop":         (*cli).drop,
 	"admit":        (*cli).admit,
@@ -636,6 +642,63 @@ func (c *cli) idleWait() error {
 	return nil
 }
 
+func (c *cli) receipt() error {
+	tip := c.arg(0)
+	if c.verdict == "" {
+		rec := c.s.Receipt(tip)
+		if rec == nil {
+			return c.record(&swarm.Refusal{Code: "no_receipt", Msg: "no receipt for " + tip})
+		}
+		return c.emit(rec)
+	}
+	if c.verdict != "pass" && c.verdict != "fail" {
+		return fmt.Errorf("--verdict pass|fail")
+	}
+	rec := &swarm.Receipt{Tip: tip, Branch: c.seat, Cmd: c.cmd, Pass: c.verdict == "pass", Tail: c.tail}
+	if err := c.s.PutReceipt(rec); err != nil {
+		return c.record(err)
+	}
+	fmt.Printf("receipt %s: %s\n", tip, c.verdict)
+	return nil
+}
+
+func (c *cli) receipts() error {
+	rs, err := c.s.Receipts()
+	if err != nil {
+		return c.record(err)
+	}
+	if c.jsonOut {
+		return c.emit(rs)
+	}
+	for _, r := range rs {
+		fmt.Printf("%-5s %s %-12s %s\n", map[bool]string{true: "pass", false: "FAIL"}[r.Pass], shortTip(r.Tip), r.Branch, r.Cmd)
+	}
+	return nil
+}
+
+func (c *cli) review() error {
+	r, err := c.s.Review(c.arg(0), c.seat, c.verdict, c.why)
+	if err != nil {
+		return c.record(err)
+	}
+	fmt.Printf("review %s by %s: %s\n", shortTip(r.Tip), r.By, r.Verdict)
+	return nil
+}
+
+func (c *cli) reviews() error {
+	rs, err := c.s.Reviews(c.arg(0))
+	if err != nil {
+		return c.record(err)
+	}
+	if c.jsonOut {
+		return c.emit(rs)
+	}
+	for _, r := range rs {
+		fmt.Printf("%-5s %s by %-10s %s\n", r.Verdict, shortTip(r.Tip), r.By, r.Why)
+	}
+	return nil
+}
+
 func (c *cli) take() error {
 	r, err := c.s.Take(c.arg(0), c.seat, c.ttl)
 	if err != nil {
@@ -800,4 +863,11 @@ func hasFlatHook(entries []any) bool {
 		}
 	}
 	return false
+}
+
+func shortTip(tip string) string {
+	if len(tip) > 12 {
+		return tip[:12]
+	}
+	return tip
 }

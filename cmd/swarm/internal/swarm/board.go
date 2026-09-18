@@ -364,11 +364,16 @@ func (s *State) classify(row *Row, opts BoardOptions) {
 		row.State = "pin_invalid"
 		return
 	}
+	// Ancestry, not equality: the pin must be an ancestor of the tip, and
+	// what the tip adds beyond the pin must be either the RESULT file or
+	// content the base branch already has (a merge of main, a rebase onto
+	// it). Anything the seat itself changed after pinning is a violation.
 	changed, _ := gitLines(s.Repo, "diff", "--name-only", res.HeadSHA, row.Tip)
 	for _, f := range changed {
-		if f != row.ResultPath {
-			row.Extra = append(row.Extra, f)
+		if f == row.ResultPath || sameAsBase(s.Repo, opts.Base, row.Tip, f) {
+			continue
 		}
+		row.Extra = append(row.Extra, f)
 	}
 	switch {
 	case len(row.Extra) > 0:
@@ -378,6 +383,16 @@ func (s *State) classify(row *Row, opts BoardOptions) {
 	default:
 		row.State = "landed"
 	}
+}
+
+// sameAsBase is true when the file's content at tip is exactly what the
+// base branch holds, so the change came from the base and not the seat.
+func sameAsBase(dir, base, tip, file string) bool {
+	if _, err := Git(dir, "rev-parse", "--verify", "-q", base+"^{commit}"); err != nil {
+		return false
+	}
+	_, err := Git(dir, "diff", "--quiet", base, tip, "--", file)
+	return err == nil
 }
 
 func isAncestor(dir, ancestor, descendant string) bool {

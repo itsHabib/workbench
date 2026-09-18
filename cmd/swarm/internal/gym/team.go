@@ -120,7 +120,7 @@ type teamRun struct {
 	goal, self, seatCmd      string
 	goalFile, module         string
 	reconcile                bool
-	twist                    string
+	twist, twistTest         string
 	twistAfter               time.Duration
 	wakes                    int
 	turns                    int
@@ -145,6 +145,7 @@ func teamCmd(args []string) int {
 	goal := fl.String("goal", "kvlab", "which sandbox goal: a directory under testdata")
 	goalFile := fl.String("goal-file", "", "a goal of your own (a markdown file); no hidden tests, graded on build and the team's own tests")
 	twist := fl.String("twist", "", "a requirement change delivered by note to every live seat partway through")
+	twistTest := fl.String("twist-test", "", "a Go test file the customer lands on main with the twist, under customer/; red until the team meets the change")
 	twistAfter := fl.Duration("twist-after", 4*time.Minute, "when the twist is delivered")
 	reconcile := fl.Bool("reconcile", false, "a controller verifies every landing on origin main and nudges its author when red")
 	wakes := fl.Int("wakes", 8, "most times a stopped seat is resumed")
@@ -169,7 +170,7 @@ func teamCmd(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), *wall)
 	defer cancel()
 	self, _ := os.Executable()
-	r := &teamRun{twist: *twist, twistAfter: *twistAfter, goalFile: *goalFile, reconcile: *reconcile, module: "goal", seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
+	r := &teamRun{twistTest: *twistTest, twist: *twist, twistAfter: *twistAfter, goalFile: *goalFile, reconcile: *reconcile, module: "goal", seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
 	r.env = append(childEnv(filepath.Dir(self), filepath.Join(abs, "fleet-state")), "SWARM_STORE="+*store)
 	if err := r.seed(); err != nil {
 		fmt.Fprintln(os.Stderr, "seed:", err)
@@ -241,6 +242,13 @@ func (r *teamRun) twister() {
 	if err == nil {
 		_, _ = f.WriteString("\n\n## Change from the customer\n\n" + r.twist + "\n")
 		_ = f.Close()
+		if r.twistTest != "" {
+			if data, err := os.ReadFile(r.twistTest); err == nil {
+				_ = os.MkdirAll(filepath.Join(seed, "customer"), 0o755)
+				_ = os.WriteFile(filepath.Join(seed, "customer", "customer_test.go"), data, 0o644)
+				_ = hgit(seed, "add", "customer")
+			}
+		}
 		_ = hgit(seed, "commit", "-q", "-am", "customer change")
 		_ = hgit(seed, "push", "-q", "origin", "HEAD:main")
 	}
@@ -275,6 +283,8 @@ func (r *teamRun) reconciler() {
 		}
 		seen = head
 		ok, out := r.verifyHead(head)
+		verdict := map[bool]string{true: "pass", false: "fail"}[ok]
+		_ = r.swarm("reconciler", "receipt", head, "--verdict", verdict, "--cmd", "go build+vet+test", "--tail", tail(out, 400))
 		r.mu.Lock()
 		r.receipts = append(r.receipts, receipt{Head: head, Author: author, Green: ok, At: time.Since(r.start).Seconds()})
 		r.mu.Unlock()
@@ -283,8 +293,16 @@ func (r *teamRun) reconciler() {
 			continue
 		}
 		fmt.Printf("[%4.0fs] reconcile: %s by %s RED, nudging\n", time.Since(r.start).Seconds(), head[:8], author)
+		r.mu.Lock()
+		targets := append([]string{}, r.live...)
+		r.mu.Unlock()
+		msg := "Landing " + head[:8] + " by " + author + " is red on a fresh clone of origin main. Whoever owns the failing area fixes it before taking new work; if it is the customer's acceptance test, add a unit for it:\n" + tail(out, 1500)
 		if author != "" && author != "harness" {
-			_ = r.swarm("reconciler", "nudge", author, "Your landing "+head[:8]+" is red on a fresh clone of origin main. Fix it before taking new work:\n"+tail(out, 1500))
+			targets = []string{author}
+			msg = "Your landing " + head[:8] + " is red on a fresh clone of origin main. Fix it before taking new work:\n" + tail(out, 1500)
+		}
+		for _, seat := range targets {
+			_ = r.swarm("reconciler", "nudge", seat, msg)
 		}
 	}
 }

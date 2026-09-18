@@ -858,3 +858,30 @@ func TestConsolidateMergesCleanAndListsConflicts(t *testing.T) {
 		t.Fatalf("rerun = %+v", res)
 	}
 }
+
+// Verification is ancestry, not equality. A later stage that moves the
+// branch by merging main into it (or rebasing onto it) does not turn a
+// landing into a violation; only the seat's own change after the pin does.
+func TestLandedSurvivesMergeFromMain(t *testing.T) {
+	main := repo(t)
+	s := open(t, main)
+	landed := branch(t, main, "l", "b.go")
+	land(t, landed, "l")
+	write(t, main, "shared.go", "package a\n// moved on\n")
+	must(t, main, "add", "-A")
+	must(t, main, "commit", "-q", "-m", "main moves")
+	must(t, landed, "merge", "-q", "--no-edit", "main")
+	b, err := s.Board(BoardOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rowOf(t, b, "l"); got.State != "landed" || len(got.Extra) != 0 {
+		t.Fatalf("after merging main: state %s extra %v", got.State, got.Extra)
+	}
+	write(t, landed, "b.go", "package a\n// touched after the pin\n")
+	must(t, landed, "commit", "-q", "-am", "sneaky")
+	b, _ = s.Board(BoardOptions{})
+	if got := rowOf(t, b, "l"); got.State != "pin_violation" {
+		t.Fatalf("own change after the pin: state %s", got.State)
+	}
+}
