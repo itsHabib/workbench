@@ -107,17 +107,18 @@ func (c *teamRun) seedBranch(parent *teamRun) error {
 	if err := hgit(seed, "checkout", "-q", "-b", c.branch, "origin/"+parent.branch); err != nil {
 		return err
 	}
+	// The brief goes in a file of the team's own, never appended to SPEC.md:
+	// every child branch touching the same lines of one file is a merge
+	// conflict for every child but the first.
 	decisions := parent.decisionsText()
-	f, err := os.OpenFile(filepath.Join(seed, "SPEC.md"), os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
+	brief := fmt.Sprintf("# Your team's part\n\nYou are one team inside a team of teams. SPEC.md is the whole goal; build only this part, on branch `%s`. The rest is being built by other teams on their branches and merged into `%s` by the founders. Assume the shared foundation on `%s` as it is when you start, and pull it again before you land.\n\n%s\n", c.branch, parent.branch, parent.branch, c.brief)
+	if decisions != "" {
+		brief += "\n## Decisions the founders already made (binding)\n\n" + decisions
+	}
+	if err := os.WriteFile(filepath.Join(seed, "TEAM.md"), []byte(brief), 0o644); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(f, "\n\n## Your team's part\n\nYou are one team inside a team of teams. Build only this part, on branch `%s`; the rest is being built by other teams on their branches and merged into `%s` by the founders. Assume the shared foundation on `%s` as it is when you start, and pull it again before you land.\n\n%s\n", c.branch, parent.branch, parent.branch, c.brief)
-	if decisions != "" {
-		_, _ = fmt.Fprintf(f, "\n## Decisions the founders already made (binding)\n\n%s\n", decisions)
-	}
-	_ = f.Close()
-	for _, step := range [][]string{{"commit", "-q", "-am", "team " + c.branch + ": brief"}, {"push", "-q", "origin", c.branch}} {
+	for _, step := range [][]string{{"add", "TEAM.md"}, {"commit", "-q", "-m", "team " + c.branch + ": brief"}, {"push", "-q", "origin", c.branch}} {
 		if err := hgit(seed, step...); err != nil {
 			return err
 		}

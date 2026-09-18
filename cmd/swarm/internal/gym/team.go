@@ -95,7 +95,11 @@ Your session ends when your turn ends. Never leave a command running in the back
 One shell command per tool call; no && and no ;. Do not look for files named zz_hidden_test.go.`
 
 func teamPrompt(shape, branch, role, seat string, roster []string) string {
-	return strings.ReplaceAll(teamPromptText(shape, role, seat, roster), "BRANCH", branch)
+	text := teamPromptText(shape, role, seat, roster)
+	if branch != "main" {
+		text = strings.Replace(text, "what SPEC.md describes", "your team's part (TEAM.md) of what SPEC.md describes", 1)
+	}
+	return strings.ReplaceAll(text, "BRANCH", branch)
 }
 
 func teamPromptText(shape, role, seat string, roster []string) string {
