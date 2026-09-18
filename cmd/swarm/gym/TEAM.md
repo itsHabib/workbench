@@ -230,3 +230,31 @@ On a goal one team can hold, a team of teams costs more than twice as much and t
 twice as long, which is the expected price of a layer. The mechanism is what this run was for:
 the founders route work down as briefs and results come back up as merged branches, and no
 seat above a team writes code. The goal that needs it is the next one.
+
+## Run 9: megalab, 35 packages, one session against a team of teams
+
+`megalab` is kvlab, shoplab and schedlab as three subsystems of one module plus a bridge
+package that ties them, 186 hidden tests, about 4,000 reference lines. The composite was built
+so that a goal exists that one team cannot hold.
+
+| shape | seats | hidden tests | wall | cost | turns |
+|---|---|---|---|---|---|
+| solo, with subagents | 1 | 185/186 | 901s | $6.55 | 18 |
+| teams | 3 founders + 4 teams, 18 seats | 178/186 | 1295s | $55.90 | 1453 |
+
+One session did it. Eighteen turns, each fanning out to subagents inside the turn, fifteen
+minutes, under seven dollars. The team of teams cost eight times as much and took half as long
+again. Two of its four child branches could not be merged automatically because the harness had
+appended each team's brief to the same lines of SPEC.md (a harness bug, fixed after this run:
+the brief now lives in its own file), so the founders merged them by hand, which is where the
+eight failures and most of the founders' wakes came from. The first attempt at this run was
+stopped after two founders each formed a team for the same subsystem under different names; a
+team unit now names the directories it owns and a second team for the same directory is
+refused. Raw results in `runs/team-megalab/`.
+
+What it settles: for greenfield code against an exact spec, the size at which one session with
+fan-out stops being enough is above 35 packages and 4,000 lines. Every team shape at every size
+tried has cost three to eight times more. The case for a team is not size. It is the things a
+single session structurally cannot do, which the vague-goal and requirement-change runs are the
+only evidence for so far: a decision that binds many hands, a change that arrives mid-way, work
+that outlives a session, a human answering partway.

@@ -1,0 +1,34 @@
+{
+  "at": "2026-09-18T18:05:00.576704Z",
+  "shape": "solo",
+  "model": "claude-sonnet-5",
+  "store": "resp:127.0.0.1:56440/mega1-solo:",
+  "seats": [
+    {
+      "seat": "solo",
+      "role": "solo",
+      "joined_s": 0.171358458,
+      "wall_s": 900.694313375,
+      "turns": 18,
+      "cost_usd": 6.545777300000001,
+      "cost_known": true,
+      "wakes": 0
+    }
+  ],
+  "hidden_passed": 185,
+  "hidden_total": 186,
+  "builds": true,
+  "own_test_files": 36,
+  "wall_s": 900.865961125,
+  "cost_usd": 6.545777300000001,
+  "turns": 18,
+  "work": [],
+  "requests": 0,
+  "commits_by_author": {
+    "harness": 1,
+    "solo": 1
+  },
+  "failed_tests": [
+    "megalab/sched/log.TestHiddenDecodeRejects"
+  ]
+}

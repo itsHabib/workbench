@@ -1,0 +1,1784 @@
+{
+  "at": "2026-09-18T18:10:36.22917Z",
+  "shape": "teams",
+  "model": "claude-sonnet-5",
+  "store": "resp:127.0.0.1:56440/mega1-teams:",
+  "seats": [
+    {
+      "seat": "p1",
+      "role": "peer",
+      "joined_s": 0.169861875,
+      "wall_s": 1226.680262709,
+      "turns": 57,
+      "cost_usd": 3.3213125999999997,
+      "cost_known": true,
+      "wakes": 3
+    },
+    {
+      "seat": "p2",
+      "role": "peer",
+      "joined_s": 0.22721525,
+      "wall_s": 1294.961669958,
+      "turns": 25,
+      "cost_usd": 4.249839,
+      "cost_known": true,
+      "wakes": 2
+    },
+    {
+      "seat": "p3",
+      "role": "joiner",
+      "joined_s": 80.692176958,
+      "wall_s": 1146.502730375,
+      "turns": 27,
+      "cost_usd": 1.4823492000000003,
+      "cost_known": true,
+      "wakes": 2
+    },
+    {
+      "seat": "p1",
+      "role": "peer",
+      "joined_s": 0.19377575,
+      "wall_s": 323.946680125,
+      "turns": 39,
+      "cost_usd": 1.059333,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p2",
+      "role": "peer",
+      "joined_s": 0.309658416,
+      "wall_s": 336.01584525,
+      "turns": 53,
+      "cost_usd": 1.4929138,
+      "cost_known": true,
+      "wakes": 1
+    },
+    {
+      "seat": "p3",
+      "role": "joiner",
+      "joined_s": 60.487780708,
+      "wall_s": 262.442605041,
+      "turns": 23,
+      "cost_usd": 0.5284552,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p1",
+      "role": "peer",
+      "joined_s": 0.207126833,
+      "wall_s": 720.074777542,
+      "turns": 106,
+      "cost_usd": 3.3725677999999997,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p2",
+      "role": "peer",
+      "joined_s": 0.351893416,
+      "wall_s": 709.992285459,
+      "turns": 68,
+      "cost_usd": 2.0104666,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p3",
+      "role": "joiner",
+      "joined_s": 60.536189375,
+      "wall_s": 650.025582791,
+      "turns": 60,
+      "cost_usd": 1.620954,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p4",
+      "role": "joiner",
+      "joined_s": 80.646878083,
+      "wall_s": 630.843718042,
+      "turns": 81,
+      "cost_usd": 2.0147103999999993,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p5",
+      "role": "joiner",
+      "joined_s": 100.775130291,
+      "wall_s": 609.312030458,
+      "turns": 107,
+      "cost_usd": 2.8809780000000007,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p1",
+      "role": "peer",
+      "joined_s": 0.197088959,
+      "wall_s": 919.248231167,
+      "turns": 208,
+      "cost_usd": 7.216926799999999,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p2",
+      "role": "peer",
+      "joined_s": 0.330036125,
+      "wall_s": 926.102442417,
+      "turns": 177,
+      "cost_usd": 5.0171236000000015,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p3",
+      "role": "joiner",
+      "joined_s": 100.623217959,
+      "wall_s": 820.57503225,
+      "turns": 73,
+      "cost_usd": 3.0669504,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p4",
+      "role": "joiner",
+      "joined_s": 120.746180459,
+      "wall_s": 801.463726334,
+      "turns": 248,
+      "cost_usd": 9.597801400000007,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p5",
+      "role": "joiner",
+      "joined_s": 140.881787292,
+      "wall_s": 781.174112458,
+      "turns": 7,
+      "cost_usd": 4.1213558,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p1",
+      "role": "peer",
+      "joined_s": 0.2149495,
+      "wall_s": 1105.956279542,
+      "turns": 39,
+      "cost_usd": 1.1082894,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p2",
+      "role": "peer",
+      "joined_s": 0.37876725,
+      "wall_s": 1116.796574167,
+      "turns": 55,
+      "cost_usd": 1.7355716,
+      "cost_known": true,
+      "wakes": 1
+    }
+  ],
+  "hidden_passed": 178,
+  "hidden_total": 186,
+  "builds": true,
+  "own_test_files": 37,
+  "wall_s": 1295.188939542,
+  "cost_usd": 55.897898600000005,
+  "turns": 1453,
+  "work": [
+    {
+      "team": true,
+      "brief": "Build kv/wal, kv/query, kv/stats, kv/engine per SPEC.md kvlab section. May assume megalab/kv/store (foundation, lands first) exists exactly as spec'd: store.New(now), Set/Get/Delete/Keys/Len. wal imports store; engine imports store,wal,query,stats. Follow spec exactly for names, errors, encoding. Add tests per package.",
+      "id": "kv-rest",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "team-kv-rest",
+      "holder": "",
+      "title": "kv wal/query/stats/engine"
+    },
+    {
+      "team": true,
+      "brief": "Build sched/metrics, sched/lease, sched/queue, sched/log, sched/worker, sched/plan, sched/engine per SPEC.md schedlab section. May assume foundation packages megalab/sched/errs, megalab/sched/clock, megalab/sched/ids, megalab/sched/cron, megalab/sched/dag, megalab/sched/retry, megalab/sched/state exist exactly as spec'd (land first). Respect the stated import layering (a package imports only the packages its section names) and all Shared decisions (clock discipline, sentinel errors, concurrency). Add tests per package.",
+      "id": "sched-rest",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p3",
+      "holder": "",
+      "title": "sched metrics/lease/queue/log/worker/plan/engine"
+    },
+    {
+      "team": true,
+      "brief": "Build shop/outbox, catalog, inventory, shipping, discount, ledger, command, cart, pricing, order, report, app per SPEC.md shoplab section. May assume foundation packages megalab/shop/errs, megalab/shop/money, megalab/shop/sku, megalab/shop/idem exist exactly as spec'd (land first). Respect the stated import layering and Shared decisions (money as integer cents, half-away-from-zero rounding only in money, injected clocks, sentinel errors, concurrency). Add tests per package.",
+      "id": "shop-rest",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p3",
+      "holder": "",
+      "title": "shop outbox..app"
+    },
+    {
+      "team": true,
+      "brief": "Build the bridge package per SPEC.md top section. Depends on megalab/kv/store, megalab/shop/app, megalab/sched/clock, megalab/sched/engine, megalab/sched/plan, megalab/sched/retry, megalab/sched/state — all must be landed on main first (kv-rest, sched-rest, shop-rest units done). Claim only after those three team units are done. Follow the bridge spec exactly: New, Exec, Tick, Fulfilment, Count, Store. Add tests.",
+      "id": "bridge",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "team-bridge",
+      "holder": "",
+      "title": "bridge"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "id": "kv-store",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "kv/store foundation"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "id": "sched-foundation",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "sched foundation: errs,clock,ids,cron,dag,retry,state"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "id": "shop-foundation",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "shop foundation: errs,money,sku,idem"
+    }
+  ],
+  "requests": 1,
+  "commits_by_author": {
+    "harness": 8,
+    "p1": 24,
+    "p2": 14,
+    "p3": 6,
+    "p4": 10,
+    "p5": 8
+  },
+  "failed_tests": [
+    "megalab/kv/query.TestHiddenBasics",
+    "megalab/sched/dag.TestHiddenCycleRefused",
+    "megalab/sched/dag.TestHiddenDiamondDoesNotCycle",
+    "megalab/sched/dag.TestHiddenEdges",
+    "megalab/sched/dag.TestHiddenNodes",
+    "megalab/sched/dag.TestHiddenOrderIsSmallestFirst",
+    "megalab/sched/dag.TestHiddenReady",
+    "megalab/shop/outbox.TestHiddenReadAll"
+  ],
+  "receipts": [
+    {
+      "head": "55d21dc89eb1936d4b21c7ae4489e8000164fe66",
+      "author": "harness",
+      "green": false,
+      "at_s": 15.310550708
+    },
+    {
+      "head": "0320b087319975f8eab3684bfd5de9a4458670a4",
+      "author": "p1",
+      "green": true,
+      "at_s": 121.208095625
+    },
+    {
+      "head": "28007b7962ed8ef11068fd0649befaa41c90e58c",
+      "author": "p1",
+      "green": true,
+      "at_s": 212.92644875
+    },
+    {
+      "head": "6c7d75044c981f2e0a6060fcef060a33e01e05a8",
+      "author": "p2",
+      "green": true,
+      "at_s": 306.327896125
+    },
+    {
+      "head": "0eb69abb15acdcf38e495baf7edd971f61f1ec1b",
+      "author": "harness",
+      "green": true,
+      "at_s": 447.235051333
+    },
+    {
+      "head": "e2882382341fa68e7e518ddc0344f55cf896f373",
+      "author": "p3",
+      "green": true,
+      "at_s": 864.665452458
+    },
+    {
+      "head": "ecd3ace525c1af2da15151d89a6fdcc13622aa98",
+      "author": "harness",
+      "green": true,
+      "at_s": 902.986358
+    },
+    {
+      "head": "67664224dab13dd46d467de57ecfbe85161eb5c8",
+      "author": "p1",
+      "green": true,
+      "at_s": 1090.514266625
+    },
+    {
+      "head": "739ac73604229f4efbffb4d32de69b6fc846e6e2",
+      "author": "harness",
+      "green": true,
+      "at_s": 1233.166581458
+    }
+  ],
+  "children": [
+    {
+      "unit": "kv-rest",
+      "branch": "team/kv-rest",
+      "merged": true,
+      "result": {
+        "at": "2026-09-18T18:11:51.698582Z",
+        "shape": "swat",
+        "model": "claude-sonnet-5",
+        "store": "resp:127.0.0.1:56440/mega1-teams-kv-rest:",
+        "seats": [
+          {
+            "seat": "p1",
+            "role": "peer",
+            "joined_s": 0.19377575,
+            "wall_s": 323.946680125,
+            "turns": 39,
+            "cost_usd": 1.059333,
+            "cost_known": true,
+            "wakes": 0
+          },
+          {
+            "seat": "p2",
+            "role": "peer",
+            "joined_s": 0.309658416,
+            "wall_s": 336.01584525,
+            "turns": 53,
+            "cost_usd": 1.4929138,
+            "cost_known": true,
+            "wakes": 1
+          },
+          {
+            "seat": "p3",
+            "role": "joiner",
+            "joined_s": 60.487780708,
+            "wall_s": 262.442605041,
+            "turns": 23,
+            "cost_usd": 0.5284552,
+            "cost_known": true,
+            "wakes": 0
+          }
+        ],
+        "hidden_passed": 53,
+        "hidden_total": 186,
+        "builds": true,
+        "own_test_files": 12,
+        "wall_s": 341.023619208,
+        "cost_usd": 3.0807019999999996,
+        "turns": 115,
+        "work": [
+          {
+            "team": false,
+            "brief": "",
+            "id": "kv-wal",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p2",
+            "holder": "",
+            "title": "kv/wal: Entry encode/decode/replay"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "kv-query",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p3",
+            "holder": "",
+            "title": "kv/query: Cmd parser"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "kv-stats",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p1",
+            "holder": "",
+            "title": "kv/stats: Percentile and Summary"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "kv-engine",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p2",
+            "holder": "",
+            "title": "kv/engine: Exec/Restore/ValueSizes over store+wal+query+stats"
+          }
+        ],
+        "requests": 1,
+        "commits_by_author": {
+          "harness": 1,
+          "p1": 2,
+          "p2": 1
+        },
+        "failed_tests": [
+          "megalab/bridge.TestHiddenCaseInsensitivePay",
+          "megalab/bridge.TestHiddenCommandsRemembered",
+          "megalab/bridge.TestHiddenFailedPayChangesNothing",
+          "megalab/bridge.TestHiddenPaidOrderBecomesRun",
+          "megalab/bridge.TestHiddenThreeTicksFulfil",
+          "megalab/kv/engine.TestHiddenExpiry",
+          "megalab/kv/engine.TestHiddenLogShape",
+          "megalab/kv/engine.TestHiddenReplies",
+          "megalab/kv/engine.TestHiddenRestoreRoundTrip",
+          "megalab/kv/engine.TestHiddenValueSizes",
+          "megalab/kv/query.TestHiddenBasics",
+          "megalab/kv/query.TestHiddenErrors",
+          "megalab/kv/query.TestHiddenQuotes",
+          "megalab/kv/stats.TestHiddenPercentile",
+          "megalab/kv/stats.TestHiddenPercentileErrorsAndPurity",
+          "megalab/kv/stats.TestHiddenSummary",
+          "megalab/kv/wal.TestHiddenDecodeGarbage",
+          "megalab/kv/wal.TestHiddenReplay",
+          "megalab/kv/wal.TestHiddenReplayBadLine",
+          "megalab/kv/wal.TestHiddenRoundTrip",
+          "megalab/sched/dag.TestHiddenCycleRefused",
+          "megalab/sched/dag.TestHiddenDiamondDoesNotCycle",
+          "megalab/sched/dag.TestHiddenEdges",
+          "megalab/sched/dag.TestHiddenNodes",
+          "megalab/sched/dag.TestHiddenOrderIsSmallestFirst",
+          "megalab/sched/dag.TestHiddenReady",
+          "megalab/sched/engine.TestHiddenCancel",
+          "megalab/sched/engine.TestHiddenCronFiresByPriority",
+          "megalab/sched/engine.TestHiddenFailureCancelsTheRest",
+          "megalab/sched/engine.TestHiddenLeaseExpiryAndStaleResult",
+          "megalab/sched/engine.TestHiddenNewRejects",
+          "megalab/sched/engine.TestHiddenRetryThenSucceed",
+          "megalab/sched/engine.TestHiddenSubmitThenRunToSuccess",
+          "megalab/sched/lease.TestHiddenAcquireAndEpochs",
+          "megalab/sched/lease.TestHiddenCheckAndReleaseFencing",
+          "megalab/sched/lease.TestHiddenConcurrentSingleWinner",
+          "megalab/sched/lease.TestHiddenEpochsNeverGoBack",
+          "megalab/sched/lease.TestHiddenExpiry",
+          "megalab/sched/lease.TestHiddenInvalid",
+          "megalab/sched/log.TestHiddenAppend",
+          "megalab/sched/log.TestHiddenConcurrentAppend",
+          "megalab/sched/log.TestHiddenDecodeRejects",
+          "megalab/sched/log.TestHiddenLastAndLoad",
+          "megalab/sched/log.TestHiddenReadAll",
+          "megalab/sched/log.TestHiddenRoundTrip",
+          "megalab/sched/metrics.TestHiddenConcurrent",
+          "megalab/sched/metrics.TestHiddenCounters",
+          "megalab/sched/metrics.TestHiddenHistogram",
+          "megalab/sched/metrics.TestHiddenNameConflicts",
+          "megalab/sched/metrics.TestHiddenRender",
+          "megalab/sched/plan.TestHiddenCompile",
+          "megalab/sched/plan.TestHiddenCompileRejects",
+          "megalab/sched/plan.TestHiddenNext",
+          "megalab/sched/plan.TestHiddenPlannerDue",
+          "megalab/sched/plan.TestHiddenPlannerRegistry",
+          "megalab/sched/plan.TestHiddenWindow",
+          "megalab/sched/queue.TestHiddenDelay",
+          "megalab/sched/queue.TestHiddenErrors",
+          "megalab/sched/queue.TestHiddenOrdering",
+          "megalab/sched/queue.TestHiddenPushPop",
+          "megalab/sched/queue.TestHiddenRemoveAndConcurrentPop",
+          "megalab/sched/worker.TestHiddenDrain",
+          "megalab/sched/worker.TestHiddenEpochFollowsClaims",
+          "megalab/sched/worker.TestHiddenHandlerFailure",
+          "megalab/sched/worker.TestHiddenLeaseConflictPushesBack",
+          "megalab/sched/worker.TestHiddenNewRejects",
+          "megalab/sched/worker.TestHiddenRunClaimsUnderLease",
+          "megalab/shop/app.TestHiddenCancelAndRefund",
+          "megalab/shop/app.TestHiddenConcurrentCheckoutsNeverOversell",
+          "megalab/shop/app.TestHiddenErrorsChangeNothing",
+          "megalab/shop/app.TestHiddenEventLog",
+          "megalab/shop/app.TestHiddenHappyPath",
+          "megalab/shop/app.TestHiddenIdempotency",
+          "megalab/shop/app.TestHiddenReservationExpiry",
+          "megalab/shop/cart.TestHiddenAddAndLines",
+          "megalab/shop/cart.TestHiddenAddRejects",
+          "megalab/shop/cart.TestHiddenItemsIsACopy",
+          "megalab/shop/cart.TestHiddenPricesAreReadLate",
+          "megalab/shop/cart.TestHiddenSetRemoveClear",
+          "megalab/shop/catalog.TestHiddenConcurrent",
+          "megalab/shop/catalog.TestHiddenListSorted",
+          "megalab/shop/catalog.TestHiddenNotFoundAndRemove",
+          "megalab/shop/catalog.TestHiddenPutGetReplace",
+          "megalab/shop/catalog.TestHiddenPutRejects",
+          "megalab/shop/command.TestHiddenArity",
+          "megalab/shop/command.TestHiddenIdemKey",
+          "megalab/shop/command.TestHiddenParseBasics",
+          "megalab/shop/command.TestHiddenQuoting",
+          "megalab/shop/command.TestHiddenRejectsAndOps",
+          "megalab/shop/discount.TestHiddenAddRejects",
+          "megalab/shop/discount.TestHiddenMaxUsesUnderConcurrency",
+          "megalab/shop/discount.TestHiddenMinSubtotalAndExpiry",
+          "megalab/shop/discount.TestHiddenPercentAndFixed",
+          "megalab/shop/discount.TestHiddenQuoteDoesNotConsume",
+          "megalab/shop/inventory.TestHiddenNoOversell",
+          "megalab/shop/inventory.TestHiddenReceiveAndCounts",
+          "megalab/shop/inventory.TestHiddenReleaseAndCommit",
+          "megalab/shop/inventory.TestHiddenReservationExpiry",
+          "megalab/shop/inventory.TestHiddenReserveAllOrNothing",
+          "megalab/shop/inventory.TestHiddenReserveRejects",
+          "megalab/shop/ledger.TestHiddenConcurrentPosts",
+          "megalab/shop/ledger.TestHiddenPostAndBalances",
+          "megalab/shop/ledger.TestHiddenPostRejects",
+          "megalab/shop/ledger.TestHiddenSameAccountTwice",
+          "megalab/shop/ledger.TestHiddenTxnsAreCopies",
+          "megalab/shop/order.TestHiddenCancelAndRefund",
+          "megalab/shop/order.TestHiddenConcurrentPayOnce",
+          "megalab/shop/order.TestHiddenCreate",
+          "megalab/shop/order.TestHiddenHappyPath",
+          "megalab/shop/order.TestHiddenTransitionTable",
+          "megalab/shop/order.TestHiddenWrongStateAndUnknown",
+          "megalab/shop/outbox.TestHiddenDecodeRejects",
+          "megalab/shop/outbox.TestHiddenLogAppend",
+          "megalab/shop/outbox.TestHiddenLogConcurrent",
+          "megalab/shop/outbox.TestHiddenNilFieldsAndDeterminism",
+          "megalab/shop/outbox.TestHiddenReadAll",
+          "megalab/shop/outbox.TestHiddenRoundTrip",
+          "megalab/shop/pricing.TestHiddenFreeShippingUsesDiscountedSubtotal",
+          "megalab/shop/pricing.TestHiddenRatesAreCopied",
+          "megalab/shop/pricing.TestHiddenRejects",
+          "megalab/shop/pricing.TestHiddenSpecExample",
+          "megalab/shop/pricing.TestHiddenTaxIsPerLine",
+          "megalab/shop/pricing.TestHiddenUntaxedAndInternational",
+          "megalab/shop/report.TestHiddenAOVRounds",
+          "megalab/shop/report.TestHiddenByStateAndUnits",
+          "megalab/shop/report.TestHiddenEmpty",
+          "megalab/shop/report.TestHiddenMoneyTotals",
+          "megalab/shop/report.TestHiddenTop",
+          "megalab/shop/shipping.TestHiddenDomesticFreeOverFifty",
+          "megalab/shop/shipping.TestHiddenDomesticSteps",
+          "megalab/shop/shipping.TestHiddenInternational",
+          "megalab/shop/shipping.TestHiddenParseZone",
+          "megalab/shop/shipping.TestHiddenRateRejects"
+        ],
+        "receipts": [
+          {
+            "head": "d7fc48efa1700aa91c6c891ad66bf86eeb05dcc1",
+            "author": "harness",
+            "green": false,
+            "at_s": 15.445101875
+          },
+          {
+            "head": "ac0fc231f20c611249909f207842674b75de44af",
+            "author": "p1",
+            "green": true,
+            "at_s": 91.395238041
+          },
+          {
+            "head": "3fecaef3bc8e4610a1130a7d56aa000aec7ab146",
+            "author": "p3",
+            "green": true,
+            "at_s": 122.842349291
+          },
+          {
+            "head": "af43c78c73398a9c8b3f129e75d98f767ef28245",
+            "author": "p2",
+            "green": true,
+            "at_s": 319.798435916
+          }
+        ]
+      }
+    },
+    {
+      "unit": "shop-rest",
+      "branch": "team/shop-rest",
+      "merged": false,
+      "note": "git merge -q --no-ff -m merge team/shop-rest origin/team/shop-rest: exit status 1: Auto-merging SPEC.md\nCONFLICT (content): Merge conflict in SPEC.md\nAutomatic merge failed; fix conflicts and then commit the result.",
+      "result": {
+        "at": "2026-09-18T18:11:51.735279Z",
+        "shape": "swat",
+        "model": "claude-sonnet-5",
+        "store": "resp:127.0.0.1:56440/mega1-teams-shop-rest:",
+        "seats": [
+          {
+            "seat": "p1",
+            "role": "peer",
+            "joined_s": 0.207126833,
+            "wall_s": 720.074777542,
+            "turns": 106,
+            "cost_usd": 3.3725677999999997,
+            "cost_known": true,
+            "wakes": 0
+          },
+          {
+            "seat": "p2",
+            "role": "peer",
+            "joined_s": 0.351893416,
+            "wall_s": 709.992285459,
+            "turns": 68,
+            "cost_usd": 2.0104666,
+            "cost_known": true,
+            "wakes": 0
+          },
+          {
+            "seat": "p3",
+            "role": "joiner",
+            "joined_s": 60.536189375,
+            "wall_s": 650.025582791,
+            "turns": 60,
+            "cost_usd": 1.620954,
+            "cost_known": true,
+            "wakes": 0
+          },
+          {
+            "seat": "p4",
+            "role": "joiner",
+            "joined_s": 80.646878083,
+            "wall_s": 630.843718042,
+            "turns": 81,
+            "cost_usd": 2.0147103999999993,
+            "cost_known": true,
+            "wakes": 0
+          },
+          {
+            "seat": "p5",
+            "role": "joiner",
+            "joined_s": 100.775130291,
+            "wall_s": 609.312030458,
+            "turns": 107,
+            "cost_usd": 2.8809780000000007,
+            "cost_known": true,
+            "wakes": 0
+          }
+        ],
+        "hidden_passed": 67,
+        "hidden_total": 186,
+        "builds": true,
+        "own_test_files": 16,
+        "wall_s": 727.357669541,
+        "cost_usd": 11.8996768,
+        "turns": 422,
+        "work": [
+          {
+            "team": false,
+            "brief": "",
+            "id": "outbox",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "shop/outbox: event log"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shipping",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p4",
+            "holder": "",
+            "title": "shop/shipping: rate calc"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "discount",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p5",
+            "holder": "",
+            "title": "shop/discount: coupon book"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "ledger",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p2",
+            "holder": "",
+            "title": "shop/ledger: double-entry ledger"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "command",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p4",
+            "holder": "",
+            "title": "shop/command: line parser"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "catalog",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p3",
+            "holder": "",
+            "title": "shop/catalog: product catalog"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "inventory",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p2",
+            "holder": "",
+            "title": "shop/inventory: stock+reservations"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "cart",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "shop/cart: cart lines (needs catalog)"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "pricing",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p5",
+            "holder": "",
+            "title": "shop/pricing: quote calc (needs cart,shipping)"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "order",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p4",
+            "holder": "",
+            "title": "shop/order: order book (needs pricing)"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "report",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p2",
+            "holder": "",
+            "title": "shop/report: order summary (needs order)"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "app",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "shop/app: Exec facade (needs everything, claim last)"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-foundation",
+            "state": "done",
+            "added_by": "p3",
+            "done_by": "p3",
+            "holder": "",
+            "title": "shop/errs,money,sku,idem: foundation types"
+          }
+        ],
+        "requests": 0,
+        "commits_by_author": {
+          "harness": 3,
+          "p1": 4,
+          "p2": 3,
+          "p3": 1
+        },
+        "failed_tests": [
+          "megalab/bridge.TestHiddenCaseInsensitivePay",
+          "megalab/bridge.TestHiddenCommandsRemembered",
+          "megalab/bridge.TestHiddenFailedPayChangesNothing",
+          "megalab/bridge.TestHiddenPaidOrderBecomesRun",
+          "megalab/bridge.TestHiddenThreeTicksFulfil",
+          "megalab/kv/query.TestHiddenBasics",
+          "megalab/sched/dag.TestHiddenCycleRefused",
+          "megalab/sched/dag.TestHiddenDiamondDoesNotCycle",
+          "megalab/sched/dag.TestHiddenEdges",
+          "megalab/sched/dag.TestHiddenNodes",
+          "megalab/sched/dag.TestHiddenOrderIsSmallestFirst",
+          "megalab/sched/dag.TestHiddenReady",
+          "megalab/sched/engine.TestHiddenCancel",
+          "megalab/sched/engine.TestHiddenCronFiresByPriority",
+          "megalab/sched/engine.TestHiddenFailureCancelsTheRest",
+          "megalab/sched/engine.TestHiddenLeaseExpiryAndStaleResult",
+          "megalab/sched/engine.TestHiddenNewRejects",
+          "megalab/sched/engine.TestHiddenRetryThenSucceed",
+          "megalab/sched/engine.TestHiddenSubmitThenRunToSuccess",
+          "megalab/sched/lease.TestHiddenAcquireAndEpochs",
+          "megalab/sched/lease.TestHiddenCheckAndReleaseFencing",
+          "megalab/sched/lease.TestHiddenConcurrentSingleWinner",
+          "megalab/sched/lease.TestHiddenEpochsNeverGoBack",
+          "megalab/sched/lease.TestHiddenExpiry",
+          "megalab/sched/lease.TestHiddenInvalid",
+          "megalab/sched/log.TestHiddenAppend",
+          "megalab/sched/log.TestHiddenConcurrentAppend",
+          "megalab/sched/log.TestHiddenDecodeRejects",
+          "megalab/sched/log.TestHiddenLastAndLoad",
+          "megalab/sched/log.TestHiddenReadAll",
+          "megalab/sched/log.TestHiddenRoundTrip",
+          "megalab/sched/metrics.TestHiddenConcurrent",
+          "megalab/sched/metrics.TestHiddenCounters",
+          "megalab/sched/metrics.TestHiddenHistogram",
+          "megalab/sched/metrics.TestHiddenNameConflicts",
+          "megalab/sched/metrics.TestHiddenRender",
+          "megalab/sched/plan.TestHiddenCompile",
+          "megalab/sched/plan.TestHiddenCompileRejects",
+          "megalab/sched/plan.TestHiddenNext",
+          "megalab/sched/plan.TestHiddenPlannerDue",
+          "megalab/sched/plan.TestHiddenPlannerRegistry",
+          "megalab/sched/plan.TestHiddenWindow",
+          "megalab/sched/queue.TestHiddenDelay",
+          "megalab/sched/queue.TestHiddenErrors",
+          "megalab/sched/queue.TestHiddenOrdering",
+          "megalab/sched/queue.TestHiddenPushPop",
+          "megalab/sched/queue.TestHiddenRemoveAndConcurrentPop",
+          "megalab/sched/worker.TestHiddenDrain",
+          "megalab/sched/worker.TestHiddenEpochFollowsClaims",
+          "megalab/sched/worker.TestHiddenHandlerFailure",
+          "megalab/sched/worker.TestHiddenLeaseConflictPushesBack",
+          "megalab/sched/worker.TestHiddenNewRejects",
+          "megalab/sched/worker.TestHiddenRunClaimsUnderLease",
+          "megalab/shop/app.TestHiddenCancelAndRefund",
+          "megalab/shop/app.TestHiddenConcurrentCheckoutsNeverOversell",
+          "megalab/shop/app.TestHiddenErrorsChangeNothing",
+          "megalab/shop/app.TestHiddenEventLog",
+          "megalab/shop/app.TestHiddenHappyPath",
+          "megalab/shop/app.TestHiddenIdempotency",
+          "megalab/shop/app.TestHiddenReservationExpiry",
+          "megalab/shop/cart.TestHiddenAddAndLines",
+          "megalab/shop/cart.TestHiddenAddRejects",
+          "megalab/shop/cart.TestHiddenItemsIsACopy",
+          "megalab/shop/cart.TestHiddenPricesAreReadLate",
+          "megalab/shop/cart.TestHiddenSetRemoveClear",
+          "megalab/shop/catalog.TestHiddenConcurrent",
+          "megalab/shop/catalog.TestHiddenListSorted",
+          "megalab/shop/catalog.TestHiddenNotFoundAndRemove",
+          "megalab/shop/catalog.TestHiddenPutGetReplace",
+          "megalab/shop/catalog.TestHiddenPutRejects",
+          "megalab/shop/command.TestHiddenArity",
+          "megalab/shop/command.TestHiddenIdemKey",
+          "megalab/shop/command.TestHiddenParseBasics",
+          "megalab/shop/command.TestHiddenQuoting",
+          "megalab/shop/command.TestHiddenRejectsAndOps",
+          "megalab/shop/discount.TestHiddenAddRejects",
+          "megalab/shop/discount.TestHiddenMaxUsesUnderConcurrency",
+          "megalab/shop/discount.TestHiddenMinSubtotalAndExpiry",
+          "megalab/shop/discount.TestHiddenPercentAndFixed",
+          "megalab/shop/discount.TestHiddenQuoteDoesNotConsume",
+          "megalab/shop/inventory.TestHiddenNoOversell",
+          "megalab/shop/inventory.TestHiddenReceiveAndCounts",
+          "megalab/shop/inventory.TestHiddenReleaseAndCommit",
+          "megalab/shop/inventory.TestHiddenReservationExpiry",
+          "megalab/shop/inventory.TestHiddenReserveAllOrNothing",
+          "megalab/shop/inventory.TestHiddenReserveRejects",
+          "megalab/shop/ledger.TestHiddenConcurrentPosts",
+          "megalab/shop/ledger.TestHiddenPostAndBalances",
+          "megalab/shop/ledger.TestHiddenPostRejects",
+          "megalab/shop/ledger.TestHiddenSameAccountTwice",
+          "megalab/shop/ledger.TestHiddenTxnsAreCopies",
+          "megalab/shop/order.TestHiddenCancelAndRefund",
+          "megalab/shop/order.TestHiddenConcurrentPayOnce",
+          "megalab/shop/order.TestHiddenCreate",
+          "megalab/shop/order.TestHiddenHappyPath",
+          "megalab/shop/order.TestHiddenTransitionTable",
+          "megalab/shop/order.TestHiddenWrongStateAndUnknown",
+          "megalab/shop/outbox.TestHiddenDecodeRejects",
+          "megalab/shop/outbox.TestHiddenLogAppend",
+          "megalab/shop/outbox.TestHiddenLogConcurrent",
+          "megalab/shop/outbox.TestHiddenNilFieldsAndDeterminism",
+          "megalab/shop/outbox.TestHiddenReadAll",
+          "megalab/shop/outbox.TestHiddenRoundTrip",
+          "megalab/shop/pricing.TestHiddenFreeShippingUsesDiscountedSubtotal",
+          "megalab/shop/pricing.TestHiddenRatesAreCopied",
+          "megalab/shop/pricing.TestHiddenRejects",
+          "megalab/shop/pricing.TestHiddenSpecExample",
+          "megalab/shop/pricing.TestHiddenTaxIsPerLine",
+          "megalab/shop/pricing.TestHiddenUntaxedAndInternational",
+          "megalab/shop/report.TestHiddenAOVRounds",
+          "megalab/shop/report.TestHiddenByStateAndUnits",
+          "megalab/shop/report.TestHiddenEmpty",
+          "megalab/shop/report.TestHiddenMoneyTotals",
+          "megalab/shop/report.TestHiddenTop",
+          "megalab/shop/shipping.TestHiddenDomesticFreeOverFifty",
+          "megalab/shop/shipping.TestHiddenDomesticSteps",
+          "megalab/shop/shipping.TestHiddenInternational",
+          "megalab/shop/shipping.TestHiddenParseZone",
+          "megalab/shop/shipping.TestHiddenRateRejects"
+        ],
+        "receipts": [
+          {
+            "head": "2ad9e1239636f4f046174641d6e7cc10a1e21c44",
+            "author": "harness",
+            "green": false,
+            "at_s": 15.422977625
+          },
+          {
+            "head": "549ab0d61d4def63c75d9ba5f57f8e5edb03acb2",
+            "author": "p1",
+            "green": true,
+            "at_s": 182.544345
+          },
+          {
+            "head": "b1a41481f38717ec6f6a90f191586a3073882508",
+            "author": "p5",
+            "green": true,
+            "at_s": 214.421844208
+          },
+          {
+            "head": "6df84e79271315eecb73cb55a487234b38de4797",
+            "author": "p4",
+            "green": true,
+            "at_s": 232.436955125
+          },
+          {
+            "head": "677389cb99a00c2511140da5d92ca49fd46f3ff6",
+            "author": "p2",
+            "green": true,
+            "at_s": 265.080331833
+          },
+          {
+            "head": "b327049e723a3beee13cb8150e2d237b5edf9bd9",
+            "author": "p3",
+            "green": true,
+            "at_s": 297.935943958
+          },
+          {
+            "head": "9749023d69a8d19583b2ac24c38a83c1e27bd6c2",
+            "author": "p1",
+            "green": true,
+            "at_s": 316.706428541
+          },
+          {
+            "head": "2752aebf347defbbd1c3e185dc1870714e7c1f6d",
+            "author": "p5",
+            "green": true,
+            "at_s": 368.844482
+          },
+          {
+            "head": "00799598be8232731179e9fac7355e98046d1ef9",
+            "author": "p4",
+            "green": true,
+            "at_s": 387.243207541
+          },
+          {
+            "head": "5b973876aaa7909b9e279036edfbf4997ec74147",
+            "author": "p2",
+            "green": true,
+            "at_s": 422.811745375
+          },
+          {
+            "head": "1d6195c58d575f743b1cb994734c07e86d5d5e9a",
+            "author": "p1",
+            "green": true,
+            "at_s": 712.327912416
+          }
+        ]
+      }
+    },
+    {
+      "unit": "sched-rest",
+      "branch": "team/sched-rest",
+      "merged": false,
+      "note": "git merge -q --no-ff -m merge team/sched-rest origin/team/sched-rest: exit status 1: add/add): Merge conflict in shop/shipping/shipping_test.go\nAuto-merging shop/sku/sku.go\nCONFLICT (add/add): Merge conflict in shop/sku/sku.go\nAuto-merging shop/sku/sku_test.go\nCONFLICT (add/add): Merge conflict in shop/sku/sku_test.go\nAutomatic merge failed; fix conflicts and then commit the result.",
+      "result": {
+        "at": "2026-09-18T18:11:51.717267Z",
+        "shape": "swat",
+        "model": "claude-sonnet-5",
+        "store": "resp:127.0.0.1:56440/mega1-teams-sched-rest:",
+        "seats": [
+          {
+            "seat": "p1",
+            "role": "peer",
+            "joined_s": 0.197088959,
+            "wall_s": 919.248231167,
+            "turns": 208,
+            "cost_usd": 7.216926799999999,
+            "cost_known": true,
+            "wakes": 0
+          },
+          {
+            "seat": "p2",
+            "role": "peer",
+            "joined_s": 0.330036125,
+            "wall_s": 926.102442417,
+            "turns": 177,
+            "cost_usd": 5.0171236000000015,
+            "cost_known": true,
+            "wakes": 0
+          },
+          {
+            "seat": "p3",
+            "role": "joiner",
+            "joined_s": 100.623217959,
+            "wall_s": 820.57503225,
+            "turns": 73,
+            "cost_usd": 3.0669504,
+            "cost_known": true,
+            "wakes": 0
+          },
+          {
+            "seat": "p4",
+            "role": "joiner",
+            "joined_s": 120.746180459,
+            "wall_s": 801.463726334,
+            "turns": 248,
+            "cost_usd": 9.597801400000007,
+            "cost_known": true,
+            "wakes": 0
+          },
+          {
+            "seat": "p5",
+            "role": "joiner",
+            "joined_s": 140.881787292,
+            "wall_s": 781.174112458,
+            "turns": 7,
+            "cost_usd": 4.1213558,
+            "cost_known": true,
+            "wakes": 0
+          }
+        ],
+        "hidden_passed": 132,
+        "hidden_total": 186,
+        "builds": true,
+        "own_test_files": 28,
+        "wall_s": 943.081754917,
+        "cost_usd": 29.020158000000006,
+        "turns": 713,
+        "work": [
+          {
+            "team": true,
+            "brief": "Build kv/ per SPEC.md kvlab section: store, wal, query, stats, engine packages under megalab/kv/*. engine depends on store,wal,query,stats; build those first.",
+            "id": "kv",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "kvlab subsystem: store, wal, query, stats, engine"
+          },
+          {
+            "team": true,
+            "brief": "Build sched/ per SPEC.md schedlab section, 14 packages in layers: errs; clock/ids; cron; dag; retry; state; metrics/lease; queue; log/worker; plan/engine. A package imports only the packages its section names.",
+            "id": "sched",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "schedlab subsystem: 14 packages (errs..engine)"
+          },
+          {
+            "team": true,
+            "brief": "Build shop/ per SPEC.md shoplab section, 16 packages in layers: errs/money; sku; idem; outbox/catalog; inventory; shipping; discount; ledger; command/cart/pricing/order/report/app.",
+            "id": "shop",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "shoplab subsystem: 16 packages (errs/money..app)"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "bridge",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p4",
+            "holder": "",
+            "title": "bridge package tying kv/shop/sched together"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "kv-store",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "kv/store: Store with Set/Get/Delete/Keys/Len, ttl"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "kv-wal",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "kv/wal: Entry/Encode/Decode/Replay"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "sched-errs",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p2",
+            "holder": "",
+            "title": "sched/errs: sentinels + Code"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "sched-clock",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p2",
+            "holder": "",
+            "title": "sched/clock: Clock, System, Millis, Fake"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "sched-ids",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p3",
+            "holder": "",
+            "title": "sched/ids: ID, Parse, Time, Sort, Gen"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "sched-cron",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p3",
+            "holder": "",
+            "title": "sched/cron: Expr, Parse, String, Matches, Next"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "sched-dag",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p2",
+            "holder": "",
+            "title": "sched/dag: Graph, AddNode/Edge, Order, Ready"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "sched-retry",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p5",
+            "holder": "",
+            "title": "sched/retry: Policy, Validate, Retry, Delay"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "sched-state",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p5",
+            "holder": "",
+            "title": "sched/state: State, Parse, CanTransition, Terminal"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "sched-metrics",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p4",
+            "holder": "",
+            "title": "sched/metrics: Registry, Counter, Histogram, Render"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "sched-lease",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p4",
+            "holder": "",
+            "title": "sched/lease: Lease, Store, Acquire/Check/Release"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "sched-queue",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p5",
+            "holder": "",
+            "title": "sched/queue: Item, Queue, Push/Pop/Peek/Remove"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "sched-log",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p4",
+            "holder": "",
+            "title": "sched/log: Entry, Encode/Decode, Log, Append"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "sched-worker",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p5",
+            "holder": "",
+            "title": "sched/worker: Result, Handler, Pool, Run/Drain"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "sched-plan",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p2",
+            "holder": "",
+            "title": "sched/plan: Spec, Workflow, Compile, Planner"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "sched-engine",
+            "state": "done",
+            "added_by": "p2",
+            "done_by": "p3",
+            "holder": "",
+            "title": "sched/engine: Config, Task, Run, Engine, Tick/Report"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "kv-query",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "kv/query: Cmd, Parse grammar"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "kv-stats",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "kv/stats: Percentile, Sum, Summary"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "kv-engine",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "kv/engine: Exec/Restore/ValueSizes tying kv together"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-errs",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "shop/errs: sentinels + Code"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-money",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "shop/money: Money, Parse/String/Mul/BP/Div/Allocate"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-sku",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "shop/sku: SKU Parse/String/Sort"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-idem",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "shop/idem: idempotency Store"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-outbox",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "shop/outbox: Event log Encode/Decode/Append"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-catalog",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p4",
+            "holder": "",
+            "title": "shop/catalog: Product Catalog"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-inventory",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p5",
+            "holder": "",
+            "title": "shop/inventory: stock/reservations"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-shipping",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "shop/shipping: Zone, Rate"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-discount",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p4",
+            "holder": "",
+            "title": "shop/discount: Coupon Book"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-ledger",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p2",
+            "holder": "",
+            "title": "shop/ledger: double-entry Ledger"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-command",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p5",
+            "holder": "",
+            "title": "shop/command: Cmd Parse, Ops"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-cart",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "shop/cart: Cart, Line"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-pricing",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p4",
+            "holder": "",
+            "title": "shop/pricing: Quote, Calc"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-order",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "shop/order: Order, Book, State"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-report",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p4",
+            "holder": "",
+            "title": "shop/report: Summary, Summarize"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shop-app",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "shop/app: App tying shop together"
+          }
+        ],
+        "requests": 1,
+        "commits_by_author": {
+          "harness": 5,
+          "p1": 9,
+          "p2": 5,
+          "p3": 3,
+          "p4": 2,
+          "p5": 2
+        },
+        "failed_tests": [
+          "megalab/bridge.TestHiddenCaseInsensitivePay",
+          "megalab/bridge.TestHiddenCommandsRemembered",
+          "megalab/bridge.TestHiddenFailedPayChangesNothing",
+          "megalab/bridge.TestHiddenPaidOrderBecomesRun",
+          "megalab/bridge.TestHiddenThreeTicksFulfil",
+          "megalab/kv/query.TestHiddenBasics",
+          "megalab/sched/dag.TestHiddenCycleRefused",
+          "megalab/sched/dag.TestHiddenDiamondDoesNotCycle",
+          "megalab/sched/dag.TestHiddenEdges",
+          "megalab/sched/dag.TestHiddenNodes",
+          "megalab/sched/dag.TestHiddenOrderIsSmallestFirst",
+          "megalab/sched/dag.TestHiddenReady",
+          "megalab/sched/engine.TestHiddenCancel",
+          "megalab/sched/engine.TestHiddenCronFiresByPriority",
+          "megalab/sched/engine.TestHiddenFailureCancelsTheRest",
+          "megalab/sched/engine.TestHiddenLeaseExpiryAndStaleResult",
+          "megalab/sched/engine.TestHiddenNewRejects",
+          "megalab/sched/engine.TestHiddenRetryThenSucceed",
+          "megalab/sched/engine.TestHiddenSubmitThenRunToSuccess",
+          "megalab/sched/lease.TestHiddenAcquireAndEpochs",
+          "megalab/sched/lease.TestHiddenCheckAndReleaseFencing",
+          "megalab/sched/lease.TestHiddenConcurrentSingleWinner",
+          "megalab/sched/lease.TestHiddenEpochsNeverGoBack",
+          "megalab/sched/lease.TestHiddenExpiry",
+          "megalab/sched/lease.TestHiddenInvalid",
+          "megalab/sched/log.TestHiddenAppend",
+          "megalab/sched/log.TestHiddenConcurrentAppend",
+          "megalab/sched/log.TestHiddenDecodeRejects",
+          "megalab/sched/log.TestHiddenLastAndLoad",
+          "megalab/sched/log.TestHiddenReadAll",
+          "megalab/sched/log.TestHiddenRoundTrip",
+          "megalab/sched/metrics.TestHiddenConcurrent",
+          "megalab/sched/metrics.TestHiddenCounters",
+          "megalab/sched/metrics.TestHiddenHistogram",
+          "megalab/sched/metrics.TestHiddenNameConflicts",
+          "megalab/sched/metrics.TestHiddenRender",
+          "megalab/sched/plan.TestHiddenCompile",
+          "megalab/sched/plan.TestHiddenCompileRejects",
+          "megalab/sched/plan.TestHiddenNext",
+          "megalab/sched/plan.TestHiddenPlannerDue",
+          "megalab/sched/plan.TestHiddenPlannerRegistry",
+          "megalab/sched/plan.TestHiddenWindow",
+          "megalab/sched/queue.TestHiddenDelay",
+          "megalab/sched/queue.TestHiddenErrors",
+          "megalab/sched/queue.TestHiddenOrdering",
+          "megalab/sched/queue.TestHiddenPushPop",
+          "megalab/sched/queue.TestHiddenRemoveAndConcurrentPop",
+          "megalab/sched/worker.TestHiddenDrain",
+          "megalab/sched/worker.TestHiddenEpochFollowsClaims",
+          "megalab/sched/worker.TestHiddenHandlerFailure",
+          "megalab/sched/worker.TestHiddenLeaseConflictPushesBack",
+          "megalab/sched/worker.TestHiddenNewRejects",
+          "megalab/sched/worker.TestHiddenRunClaimsUnderLease",
+          "megalab/shop/outbox.TestHiddenReadAll"
+        ],
+        "receipts": [
+          {
+            "head": "eac51a5e3e3a744c565f15c451a8c7c6a53e469e",
+            "author": "harness",
+            "green": false,
+            "at_s": 15.426708
+          },
+          {
+            "head": "d66522fed58320114227dba6690c685d33966954",
+            "author": "p1",
+            "green": true,
+            "at_s": 76.475912
+          },
+          {
+            "head": "8549b7871977bd1845b4d1cf117de2ea54073da7",
+            "author": "p1",
+            "green": true,
+            "at_s": 123.20977175
+          },
+          {
+            "head": "43816798ee25ece5a678eebb69e934ae841d5e94",
+            "author": "p2",
+            "green": true,
+            "at_s": 139.235037667
+          },
+          {
+            "head": "d448bd5b87f233334456ed14bf218b60804b5884",
+            "author": "p1",
+            "green": true,
+            "at_s": 170.6613785
+          },
+          {
+            "head": "33cb5c3413bbb163e80a5fc4dd130ee706226d80",
+            "author": "p1",
+            "green": true,
+            "at_s": 186.992986084
+          },
+          {
+            "head": "feaf6276d0706fe38db605dad1657478c9bacaf0",
+            "author": "p2",
+            "green": true,
+            "at_s": 203.776736334
+          },
+          {
+            "head": "979e916bfafa4162e4b5f578bba4a7cd2b8c3ba4",
+            "author": "p1",
+            "green": true,
+            "at_s": 220.777631417
+          },
+          {
+            "head": "ae55465e05c670d822c3ba62fa90a93993700883",
+            "author": "p5",
+            "green": true,
+            "at_s": 238.225073
+          },
+          {
+            "head": "f53fd6a07a4568b42295da2e552b47d4333e7462",
+            "author": "p1",
+            "green": true,
+            "at_s": 271.168204167
+          },
+          {
+            "head": "63defee4c2420c2ec5f0b103e6f1936baef78bcc",
+            "author": "p4",
+            "green": true,
+            "at_s": 289.367998542
+          },
+          {
+            "head": "710c995e186f6a86ad1d2b41236e5eddc64147f9",
+            "author": "p5",
+            "green": true,
+            "at_s": 322.979559834
+          },
+          {
+            "head": "95361c22bd094a8ac0cce671f484934f5d0f840c",
+            "author": "p1",
+            "green": true,
+            "at_s": 344.172359875
+          },
+          {
+            "head": "bfccf8515ab0c37a28280c05d5c672e5cbc0661f",
+            "author": "p4",
+            "green": true,
+            "at_s": 364.893855542
+          },
+          {
+            "head": "0d791bee08c1f923f861d08e10850f871df0eb6c",
+            "author": "p5",
+            "green": true,
+            "at_s": 384.45195775
+          },
+          {
+            "head": "14b078da45cb39c121e0f3117bcba9154df725a7",
+            "author": "p2",
+            "green": true,
+            "at_s": 419.133828792
+          },
+          {
+            "head": "6f9a9583f624a10300040efaf89e848745956f38",
+            "author": "p4",
+            "green": true,
+            "at_s": 439.062560459
+          },
+          {
+            "head": "e6e14ad193cb7ebb203e6b8d170e1a0d50fafcf3",
+            "author": "p5",
+            "green": true,
+            "at_s": 459.294489417
+          },
+          {
+            "head": "78278ceafb2f4fd718a837ca15b2262a00f974f0",
+            "author": "p1",
+            "green": true,
+            "at_s": 480.384827042
+          },
+          {
+            "head": "9d727dcb0dfc12c3239ad7dd59611a03f4572624",
+            "author": "p4",
+            "green": true,
+            "at_s": 502.166508667
+          },
+          {
+            "head": "40f434282de0f13d6c97f876c11df0afbd15be1e",
+            "author": "p2",
+            "green": true,
+            "at_s": 526.108028625
+          },
+          {
+            "head": "1741236eae447157759b7f4d2c143e2ba0d69e46",
+            "author": "p1",
+            "green": true,
+            "at_s": 547.164791667
+          },
+          {
+            "head": "0a8e1b47f0c537957c78b4b052f275f593668363",
+            "author": "p4",
+            "green": true,
+            "at_s": 598.5734655
+          },
+          {
+            "head": "289b79318af41910154ab03b19d6c6e508a8e39a",
+            "author": "p1",
+            "green": true,
+            "at_s": 650.086679334
+          },
+          {
+            "head": "716c37ccfddf09c68ce45d18d87019886b73aa77",
+            "author": "p4",
+            "green": true,
+            "at_s": 701.886677917
+          },
+          {
+            "head": "2174a6c745af71abadaaf8a1d7bbb7899aef3431",
+            "author": "p1",
+            "green": true,
+            "at_s": 815.492439
+          },
+          {
+            "head": "fdda6bfbf66d9ce984b034cbfd066a5be58b58bf",
+            "author": "p4",
+            "green": true,
+            "at_s": 928.02556175
+          }
+        ]
+      }
+    },
+    {
+      "unit": "bridge",
+      "branch": "team/bridge",
+      "merged": true,
+      "result": {
+        "at": "2026-09-18T18:11:51.75246Z",
+        "shape": "swat",
+        "model": "claude-sonnet-5",
+        "store": "resp:127.0.0.1:56440/mega1-teams-bridge:",
+        "seats": [
+          {
+            "seat": "p1",
+            "role": "peer",
+            "joined_s": 0.2149495,
+            "wall_s": 1105.956279542,
+            "turns": 39,
+            "cost_usd": 1.1082894,
+            "cost_known": true,
+            "wakes": 0
+          },
+          {
+            "seat": "p2",
+            "role": "peer",
+            "joined_s": 0.37876725,
+            "wall_s": 1116.796574167,
+            "turns": 55,
+            "cost_usd": 1.7355716,
+            "cost_known": true,
+            "wakes": 1
+          }
+        ],
+        "hidden_passed": 173,
+        "hidden_total": 186,
+        "builds": true,
+        "own_test_files": 36,
+        "wall_s": 1135.657753,
+        "cost_usd": 2.8438610000000004,
+        "turns": 94,
+        "work": [
+          {
+            "team": false,
+            "brief": "",
+            "id": "bridge",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p2",
+            "holder": "",
+            "title": "bridge: New/Exec/Tick/Fulfilment/Count/Store tying kv+shop+sched"
+          }
+        ],
+        "requests": 0,
+        "commits_by_author": {
+          "harness": 5,
+          "p1": 10,
+          "p2": 5,
+          "p3": 3,
+          "p4": 2,
+          "p5": 2
+        },
+        "failed_tests": [
+          "megalab/bridge.TestHiddenCaseInsensitivePay",
+          "megalab/bridge.TestHiddenCommandsRemembered",
+          "megalab/bridge.TestHiddenFailedPayChangesNothing",
+          "megalab/bridge.TestHiddenPaidOrderBecomesRun",
+          "megalab/bridge.TestHiddenThreeTicksFulfil",
+          "megalab/kv/query.TestHiddenBasics",
+          "megalab/sched/dag.TestHiddenCycleRefused",
+          "megalab/sched/dag.TestHiddenDiamondDoesNotCycle",
+          "megalab/sched/dag.TestHiddenEdges",
+          "megalab/sched/dag.TestHiddenNodes",
+          "megalab/sched/dag.TestHiddenOrderIsSmallestFirst",
+          "megalab/sched/dag.TestHiddenReady",
+          "megalab/shop/outbox.TestHiddenReadAll"
+        ],
+        "receipts": [
+          {
+            "head": "f1a3d9ad5abae6cc54022efb2e563d89655663e6",
+            "author": "harness",
+            "green": false,
+            "at_s": 15.466725167
+          },
+          {
+            "head": "2844a4b85535d8cd04b4cef875b25d06d314eefd",
+            "author": "p2",
+            "green": true,
+            "at_s": 1120.605212875
+          }
+        ]
+      }
+    }
+  ]
+}
