@@ -66,7 +66,7 @@ func (r *teamRun) childTeam(w workRow) {
 		branch: branch, brief: w.Brief, originPath: r.origin(), childMax: r.childMax, shape: "swat", model: r.model,
 		store: childStore(r.store, w.ID), out: filepath.Join(r.out, "teams", w.ID), goal: r.goal, module: r.module,
 		self: r.self, seatCmd: r.seatCmd, wakes: r.wakes, turns: r.turns, wall: r.wall, ctx: ctx, cancel: cancel,
-		start: time.Now(), reconcile: r.reconcile, lives: map[string]*liveSeat{}, childRuns: map[string]*teamRun{},
+		start: time.Now(), reconcile: r.reconcile, verifyCmd: r.verifyCmd, deadline: r.deadline, lives: map[string]*liveSeat{}, childRuns: map[string]*teamRun{},
 	}
 	r.mu.Lock()
 	r.childRuns[w.ID] = child
@@ -199,7 +199,11 @@ func (c *teamRun) lastGreen() bool {
 
 func (r *teamRun) verifyHeadIn(dir string) (bool, string) {
 	var log strings.Builder
-	for _, step := range [][]string{{"go", "build", "./..."}, {"go", "vet", "./..."}, {"go", "test", "-count=1", "./..."}} {
+	steps := [][]string{{"go", "build", "./..."}, {"go", "vet", "./..."}, {"go", "test", "-count=1", "./..."}}
+	if r.verifyCmd != "" {
+		steps = [][]string{{"sh", "-c", r.verifyCmd}}
+	}
+	for _, step := range steps {
 		ctx, cancel := context.WithTimeout(r.ctx, 10*time.Minute)
 		cmd := exec.CommandContext(ctx, step[0], step[1:]...)
 		cmd.Dir = dir

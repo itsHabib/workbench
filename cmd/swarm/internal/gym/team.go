@@ -92,7 +92,7 @@ How the team coordinates. The only shared things are the git remote "origin" and
   swarm nudge <seat> "..."                           a note to one seat
   swarm inbox                                        your notes
   swarm idle --timeout 4m                            block until there is something for you (a note, a question, open work, or all done)
-Rules: claim before you touch files. Small commits. To land: git pull --rebase origin BRANCH, run go build ./... and go test ./..., then git push origin HEAD:BRANCH. If the push is rejected, pull --rebase and try again. Never force-push.
+Rules: claim before you touch files. Small commits. To land: git pull --rebase origin BRANCH, run the checks SPEC.md names (for a Go module: go build ./... and go test ./...), then git push origin HEAD:BRANCH. If the push is rejected, pull --rebase and try again. Never force-push.
 Your session ends when your turn ends. Never leave a command running in the background and stop: wait with swarm idle in the foreground, and if it times out run it again.
 One shell command per tool call; no && and no ;. Do not look for files named zz_hidden_test.go.`
 
@@ -142,6 +142,7 @@ type teamRun struct {
 	brainEvery               time.Duration
 	brainModel, metricsAddr  string
 	deadline                 time.Duration
+	originFrom, verifyCmd    string
 	escalated                bool
 	live                     []string
 	shape, model, store, out string
@@ -181,6 +182,8 @@ func teamCmd(args []string) int {
 	reconcile := fl.Bool("reconcile", false, "a controller verifies every landing on origin main and nudges its author when red")
 	wakes := fl.Int("wakes", 8, "most times a stopped seat is resumed")
 	childMax := fl.Int("team-max", 4, "teams: most seats a child team may grow to")
+	originFrom := fl.String("origin", "", "start from a clone of this repository (a path or URL) instead of an empty module; the goal file is added as SPEC.md")
+	verifyCmd := fl.String("verify", "", "shell that verifies a checkout (default: go build, vet and test); used by --reconcile, by merges, and by the grade when there are no hidden tests")
 	deadline := fl.Duration("deadline", 0, "when the work should be done, from the start; growth and the brain read the projection against it")
 	brainOn := fl.Bool("brain", false, "a model judges the telemetry every interval and may add, retire, form, disband, nudge or escalate; replaces the fixed growth rule")
 	brainEvery := fl.Duration("brain-every", 60*time.Second, "how often the brain judges")
@@ -192,7 +195,7 @@ func teamCmd(args []string) int {
 		fmt.Fprint(os.Stderr, usage)
 		return 3
 	}
-	if _, err := exec.LookPath("go"); err != nil {
+	if _, err := exec.LookPath("go"); err != nil && *verifyCmd == "" {
 		// The seats may run anywhere, but the grader builds and tests here.
 		fmt.Fprintln(os.Stderr, "gym team: go is not on this machine's PATH; the seats could succeed and the grader could not. Install Go here, or run team-table --regrade later on a machine that has it.")
 		return 3
@@ -208,7 +211,7 @@ func teamCmd(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), *wall)
 	defer cancel()
 	self, _ := os.Executable()
-	r := &teamRun{deadline: *deadline, brainOn: *brainOn, brainEvery: *brainEvery, brainModel: *brainModel, costCap: *costCap, metricsAddr: *metricsAddr, lives: map[string]*liveSeat{}, childRuns: map[string]*teamRun{}, branch: "main", childMax: *childMax, twistTest: *twistTest, twist: *twist, twistAfter: *twistAfter, goalFile: *goalFile, reconcile: *reconcile, module: "goal", seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
+	r := &teamRun{originFrom: *originFrom, verifyCmd: *verifyCmd, deadline: *deadline, brainOn: *brainOn, brainEvery: *brainEvery, brainModel: *brainModel, costCap: *costCap, metricsAddr: *metricsAddr, lives: map[string]*liveSeat{}, childRuns: map[string]*teamRun{}, branch: "main", childMax: *childMax, twistTest: *twistTest, twist: *twist, twistAfter: *twistAfter, goalFile: *goalFile, reconcile: *reconcile, module: "goal", seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
 	r.env = append(childEnv(filepath.Dir(self), filepath.Join(abs, "fleet-state")), "SWARM_STORE="+*store)
 	if err := r.seed(); err != nil {
 		fmt.Fprintln(os.Stderr, "seed:", err)
@@ -394,18 +397,11 @@ func (r *teamRun) verifyHead(head string) (bool, string) {
 	if err := hgit("", "clone", "-q", "-b", r.branch, r.origin(), dir); err != nil {
 		return false, err.Error()
 	}
-	var log strings.Builder
-	for _, step := range [][]string{{"go", "build", "./..."}, {"go", "vet", "./..."}, {"go", "test", "-count=1", "./..."}} {
-		cmd := exec.CommandContext(r.ctx, step[0], step[1:]...)
-		cmd.Dir = dir
-		out, err := cmd.CombinedOutput()
-		log.Write(out)
-		if err != nil {
-			return false, strings.Join(step, " ") + "\n" + log.String()
-		}
+	ok, out := r.verifyHeadIn(dir)
+	if ok {
+		_ = os.RemoveAll(dir)
 	}
-	_ = os.RemoveAll(dir)
-	return true, ""
+	return ok, out
 }
 
 func (r *teamRun) finished() bool {
@@ -501,6 +497,9 @@ func (r *teamRun) swarm(seat string, args ...string) error {
 func (r *teamRun) seed() error {
 	origin := filepath.Join(r.out, "origin.git")
 	seed := filepath.Join(r.out, "seed")
+	if r.originFrom != "" {
+		return r.seedFrom(origin, seed)
+	}
 	if err := hgit("", "init", "-q", "--bare", "-b", "main", origin); err != nil {
 		return err
 	}
@@ -520,6 +519,33 @@ func (r *teamRun) seed() error {
 	_ = os.WriteFile(filepath.Join(seed, "SPEC.md"), spec, 0o644)
 	_ = os.WriteFile(filepath.Join(seed, "go.mod"), []byte("module "+r.module+"\n\ngo 1.22\n"), 0o644)
 	for _, step := range [][]string{{"checkout", "-q", "-b", "main"}, {"add", "-A"}, {"commit", "-q", "-m", "spec"}, {"push", "-q", "origin", "main"}} {
+		if err := hgit(seed, step...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// seedFrom starts from a copy of a real repository: a bare clone becomes the
+// team's origin, and the goal file lands on its main as SPEC.md. The real
+// repository is never written to.
+func (r *teamRun) seedFrom(origin, seed string) error {
+	if r.goalFile == "" {
+		return fmt.Errorf("--origin needs --goal-file")
+	}
+	if err := hgit("", "clone", "-q", "--bare", r.originFrom, origin); err != nil {
+		return err
+	}
+	if err := hgit("", "clone", "-q", origin, seed); err != nil {
+		return err
+	}
+	spec, err := os.ReadFile(r.goalFile)
+	if err != nil {
+		return err
+	}
+	r.goal = ""
+	_ = os.WriteFile(filepath.Join(seed, "SPEC.md"), spec, 0o644)
+	for _, step := range [][]string{{"add", "SPEC.md"}, {"commit", "-q", "-m", "goal"}, {"push", "-q", "origin", "HEAD:main"}} {
 		if err := hgit(seed, step...); err != nil {
 			return err
 		}
@@ -701,7 +727,7 @@ func (r *teamRun) result() TeamResult {
 		res.Turns += c.Result.Turns
 		res.Seats = append(res.Seats, c.Result.Seats...)
 	}
-	g := Grade(r.goal, r.origin(), filepath.Join(r.out, "grade"))
+	g := gradeWith(r.goal, r.origin(), filepath.Join(r.out, "grade"), r.verifyCmd)
 	res.Total = g.Passed + len(g.Failed)
 	res.Passed, res.Builds, res.OwnTests, res.Failed, res.Commits, res.GradeNote = g.Passed, g.Builds, g.OwnTests, g.Failed, g.Commits, g.Note
 	return res
@@ -731,7 +757,10 @@ type Graded struct {
 
 // Grade clones origin's main, drops the hidden tests in, and counts which of
 // them pass. A package that does not compile fails all of its tests.
-func Grade(goal, origin, into string) Graded {
+func Grade(goal, origin, into string) Graded { return gradeWith(goal, origin, into, "") }
+
+// gradeWith grades with a verifier of the team's own when the goal has no hidden tests.
+func gradeWith(goal, origin, into, verify string) Graded {
 	g := Graded{Commits: map[string]int{}}
 	_ = os.RemoveAll(into)
 	if err := hgit("", "clone", "-q", origin, into); err != nil {
@@ -751,9 +780,14 @@ func Grade(goal, origin, into string) Graded {
 	})
 	build := exec.Command("go", "build", "./...")
 	build.Dir = into
-	g.Builds = build.Run() == nil
+	g.Builds = verify != "" || build.Run() == nil
 	if goal == "" {
 		own := exec.Command("go", "test", "-count=1", "./...")
+		if verify != "" {
+			own = exec.Command("sh", "-c", verify)
+			build.Dir = into
+			g.Builds = true
+		}
 		own.Dir = into
 		if own.Run() == nil && g.Builds {
 			g.Passed = 1
