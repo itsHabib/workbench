@@ -1,0 +1,129 @@
+{
+  "at": "2026-09-18T03:11:51.049195Z",
+  "shape": "swat",
+  "model": "claude-sonnet-5",
+  "store": "resp:127.0.0.1:56440/launch1",
+  "seats": [
+    {
+      "seat": "p1",
+      "role": "peer",
+      "joined_s": 0.160639583,
+      "wall_s": 353.136471459,
+      "turns": 52,
+      "cost_usd": 1.521512,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p2",
+      "role": "peer",
+      "joined_s": 0.212548333,
+      "wall_s": 327.083811584,
+      "turns": 49,
+      "cost_usd": 1.0686738000000002,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p3",
+      "role": "joiner",
+      "joined_s": 100.468798042,
+      "wall_s": 220.529598792,
+      "turns": 44,
+      "cost_usd": 1.1056314000000005,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p4",
+      "role": "joiner",
+      "joined_s": 120.5476545,
+      "wall_s": 204.344581833,
+      "turns": 36,
+      "cost_usd": 0.6869472,
+      "cost_known": true,
+      "wakes": 0
+    }
+  ],
+  "hidden_passed": 1,
+  "hidden_total": 1,
+  "builds": true,
+  "own_test_files": 4,
+  "wall_s": 353.297134708,
+  "cost_usd": 4.382764400000001,
+  "turns": 181,
+  "work": [
+    {
+      "id": "job-types",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p2",
+      "holder": "",
+      "title": "internal/job: JSON job decode types"
+    },
+    {
+      "id": "library",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p3",
+      "holder": "",
+      "title": "internal/library: embedded materials/tools + override merge"
+    },
+    {
+      "id": "estimate",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p4",
+      "holder": "",
+      "title": "internal/estimate: formulas for facing/pocketing/drilling/contouring"
+    },
+    {
+      "id": "cli",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p3",
+      "holder": "",
+      "title": "cmd/cycletime: CLI wiring, output formatting, golden test, README, testdata"
+    }
+  ],
+  "requests": 1,
+  "commits_by_author": {
+    "harness": 1,
+    "p2": 1,
+    "p3": 2,
+    "p4": 1
+  },
+  "grade_note": "no hidden tests: 1/1 means the team's own suite is green on origin main",
+  "receipts": [
+    {
+      "head": "af0b2a0b61de150434813e5f67ee657d1c059167",
+      "author": "harness",
+      "green": false,
+      "at_s": 15.346715042
+    },
+    {
+      "head": "b3beaff1d1c0852623d5677807e9032589e9f258",
+      "author": "p2",
+      "green": true,
+      "at_s": 136.605630333
+    },
+    {
+      "head": "41e32fd067d2678dfe531e65f795b986594b5576",
+      "author": "p3",
+      "green": true,
+      "at_s": 152.3437175
+    },
+    {
+      "head": "3a5268cadfc772bf6bcd707beec36cb21936df77",
+      "author": "p4",
+      "green": true,
+      "at_s": 243.638615792
+    },
+    {
+      "head": "c56366c9cedda583e06b660e29c41cfacf57e025",
+      "author": "p3",
+      "green": true,
+      "at_s": 320.187455
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+p3 cmd/cycletime: CLI wiring, README worked example, golden test
+p4 Add internal/estimate: cycle-time formulas for facing/pocketing/drilling/contouring
+p3 internal/library: embedded materials/tools with JSON override merge
+p2 Add internal/job package for decoding job JSON
+harness spec

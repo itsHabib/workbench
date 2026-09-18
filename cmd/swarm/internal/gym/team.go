@@ -47,6 +47,7 @@ type TeamResult struct {
 	Commits   map[string]int `json:"commits_by_author"`
 	Failed    []string       `json:"failed_tests,omitempty"`
 	GradeNote string         `json:"grade_note,omitempty"`
+	Receipts  []receipt      `json:"receipts,omitempty"`
 }
 
 // SeatResult is one session's bill.
@@ -105,9 +106,19 @@ func teamPrompt(shape, _, role, seat string, roster []string) string {
 	return "You are " + seat + ", one of " + fmt.Sprint(len(roster)+1) + " equal peers building what SPEC.md describes. The others are: " + others + ". Nobody is in charge and nobody will hand you a task. Look at swarm work list first: if it is empty, break the goal into units and add them; if someone beat you to it, use theirs. Then claim, build with tests, land, mark done, repeat. Raise anything two packages must agree on with swarm ask. When nothing is open, run swarm idle. Stop when it says every unit of work is done and origin main builds and passes." + verbsCard
 }
 
+type receipt struct {
+	Head   string  `json:"head"`
+	Author string  `json:"author"`
+	Green  bool    `json:"green"`
+	At     float64 `json:"at_s"`
+}
+
 type teamRun struct {
+	receipts                 []receipt
 	shape, model, store, out string
 	goal, self, seatCmd      string
+	goalFile, module         string
+	reconcile                bool
 	wakes                    int
 	turns                    int
 	wall                     time.Duration
@@ -129,6 +140,8 @@ func teamCmd(args []string) int {
 	wall := fl.Duration("wall", 30*time.Minute, "wall cap for the whole run")
 	turns := fl.Int("turns", 150, "turn cap per session")
 	goal := fl.String("goal", "kvlab", "which sandbox goal: a directory under testdata")
+	goalFile := fl.String("goal-file", "", "a goal of your own (a markdown file); no hidden tests, graded on build and the team's own tests")
+	reconcile := fl.Bool("reconcile", false, "a controller verifies every landing on origin main and nudges its author when red")
 	wakes := fl.Int("wakes", 8, "most times a stopped seat is resumed")
 	seatCmd := fl.String("seat-cmd", "", "shell that runs one seat turn somewhere else (see docs/SEAT.md); empty runs claude here")
 	if fl.Parse(args) != nil || *out == "" {
@@ -146,13 +159,17 @@ func teamCmd(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), *wall)
 	defer cancel()
 	self, _ := os.Executable()
-	r := &teamRun{seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
+	r := &teamRun{goalFile: *goalFile, reconcile: *reconcile, module: "goal", seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
 	r.env = append(childEnv(filepath.Dir(self), filepath.Join(abs, "fleet-state")), "SWARM_STORE="+*store)
 	if err := r.seed(); err != nil {
 		fmt.Fprintln(os.Stderr, "seed:", err)
 		return 3
 	}
 	r.launch(*n)
+	if r.reconcile {
+		r.wg.Add(1)
+		go r.reconciler()
+	}
 	r.wg.Wait()
 	res := r.result()
 	data, _ := json.MarshalIndent(res, "", "  ")
@@ -190,6 +207,76 @@ func (r *teamRun) launch(n int) {
 			r.spawn(s, "peer", others)
 		}
 	}
+}
+
+// reconciler is a standing controller, not a seat: every new commit on
+// origin main is built and tested in a fresh clone, and a red landing is
+// sent back to the seat that made it by note. It reads git and the store
+// and never writes code, which is what a reconcile role reduces to.
+func (r *teamRun) reconciler() {
+	defer r.wg.Done()
+	seen := ""
+	for r.ctx.Err() == nil {
+		select {
+		case <-r.ctx.Done():
+			return
+		case <-time.After(15 * time.Second):
+		}
+		head, author := r.originHead()
+		if head == "" || head == seen {
+			if r.finished() {
+				return
+			}
+			continue
+		}
+		seen = head
+		ok, out := r.verifyHead(head)
+		r.mu.Lock()
+		r.receipts = append(r.receipts, receipt{Head: head, Author: author, Green: ok, At: time.Since(r.start).Seconds()})
+		r.mu.Unlock()
+		if ok {
+			fmt.Printf("[%4.0fs] reconcile: %s by %s green\n", time.Since(r.start).Seconds(), head[:8], author)
+			continue
+		}
+		fmt.Printf("[%4.0fs] reconcile: %s by %s RED, nudging\n", time.Since(r.start).Seconds(), head[:8], author)
+		if author != "" && author != "harness" {
+			_ = r.swarm("reconciler", "nudge", author, "Your landing "+head[:8]+" is red on a fresh clone of origin main. Fix it before taking new work:\n"+tail(out, 1500))
+		}
+	}
+}
+
+func (r *teamRun) originHead() (head, author string) {
+	out, err := exec.Command("git", "--git-dir", filepath.Join(r.out, "origin.git"), "log", "-1", "--format=%H %an", "main").Output()
+	if err != nil {
+		return "", ""
+	}
+	head, author, _ = strings.Cut(strings.TrimSpace(string(out)), " ")
+	return head, author
+}
+
+func (r *teamRun) verifyHead(head string) (bool, string) {
+	dir := filepath.Join(r.out, "verify", head[:12])
+	_ = os.RemoveAll(dir)
+	if err := hgit("", "clone", "-q", filepath.Join(r.out, "origin.git"), dir); err != nil {
+		return false, err.Error()
+	}
+	var log strings.Builder
+	for _, step := range [][]string{{"go", "build", "./..."}, {"go", "vet", "./..."}, {"go", "test", "-count=1", "./..."}} {
+		cmd := exec.CommandContext(r.ctx, step[0], step[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		log.Write(out)
+		if err != nil {
+			return false, strings.Join(step, " ") + "\n" + log.String()
+		}
+	}
+	_ = os.RemoveAll(dir)
+	return true, ""
+}
+
+func (r *teamRun) finished() bool {
+	open, held, done, total := r.workCounts()
+	return total > 0 && open == 0 && held == 0 && done == total
 }
 
 // grow adds a peer while open work outnumbers the seats not holding any. It
@@ -262,9 +349,18 @@ func (r *teamRun) seed() error {
 	if err := hgit("", "clone", "-q", origin, seed); err != nil {
 		return err
 	}
-	spec, _ := goals.ReadFile("testdata/" + r.goal + "/SPEC.md")
+	spec, err := goals.ReadFile("testdata/" + r.goal + "/SPEC.md")
+	if r.goalFile != "" {
+		spec, err = os.ReadFile(r.goalFile)
+		r.goal = ""
+	} else {
+		r.module = r.goal
+	}
+	if err != nil {
+		return err
+	}
 	_ = os.WriteFile(filepath.Join(seed, "SPEC.md"), spec, 0o644)
-	_ = os.WriteFile(filepath.Join(seed, "go.mod"), []byte("module "+r.goal+"\n\ngo 1.22\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(seed, "go.mod"), []byte("module "+r.module+"\n\ngo 1.22\n"), 0o644)
 	for _, step := range [][]string{{"checkout", "-q", "-b", "main"}, {"add", "-A"}, {"commit", "-q", "-m", "spec"}, {"push", "-q", "origin", "main"}} {
 		if err := hgit(seed, step...); err != nil {
 			return err
@@ -408,6 +504,7 @@ func (r *teamRun) result() TeamResult {
 		res.Turns += s.Turns
 	}
 	res.Requests = r.countRequests()
+	res.Receipts = r.receipts
 	g := Grade(r.goal, filepath.Join(r.out, "origin.git"), filepath.Join(r.out, "grade"))
 	res.Total = g.Passed + len(g.Failed)
 	res.Passed, res.Builds, res.OwnTests, res.Failed, res.Commits, res.GradeNote = g.Passed, g.Builds, g.OwnTests, g.Failed, g.Commits, g.Note
@@ -459,6 +556,17 @@ func Grade(goal, origin, into string) Graded {
 	build := exec.Command("go", "build", "./...")
 	build.Dir = into
 	g.Builds = build.Run() == nil
+	if goal == "" {
+		own := exec.Command("go", "test", "-count=1", "./...")
+		own.Dir = into
+		if own.Run() == nil && g.Builds {
+			g.Passed = 1
+		} else {
+			g.Failed = []string{"own test suite"}
+		}
+		g.Note = "no hidden tests: 1/1 means the team's own suite is green on origin main"
+		return g
+	}
 	want, err := plantHidden(goal, into)
 	if err != nil {
 		g.Note = err.Error()

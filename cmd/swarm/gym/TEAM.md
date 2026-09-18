@@ -98,3 +98,28 @@ partway through. Those are the next goals to build, not a bigger copy of this on
 
 One attempt per cell. No vague or wrong spec, no goal beyond one context, no work that spans
 sessions, no person in the loop. Wall times were taken with all four shapes sharing one machine.
+
+## Run 3: a vague goal, SWAT shape, with a reconcile controller
+
+`gym/goals/cycletime.md` is a one-paragraph brief for a machinist's cycle-time estimator
+that says nothing about input, output, formulas or testing, and requires the team to record
+those choices as decisions before coding. Run with `--shape swat --n 5 --reconcile`.
+
+| seats | own suite | wall | cost | turns | units | questions |
+|---|---|---|---|---|---|---|
+| 2, grew to 4 | green | 353s | $4.38 | 181 | 4 | 1 |
+
+What happened, in order: the first peer wrote the whole architecture, formulas, input format,
+output and test strategy as one question with options accept or amend; the second peer ruled
+it accepted within two minutes; the ruler then added four units; two more seats joined within
+120 seconds as the list filled; each seat landed its package with tests; the last seat wired
+the CLI, wrote the README example and a golden test. The reconcile controller, which is
+harness code and not a session, built and tested every landing in a fresh clone: four green,
+no nudges. Raw results in `runs/launch-cycletime/`.
+
+This is the first run where the decision ledger did work: a vague brief produced one binding
+ruling that every later seat read before claiming. It is also the first run of a standing
+role as a controller rather than a seat. Reconcile cost nothing and would have sent a red
+landing back to its author by note.
+
+Not tested: a decision that turns out wrong partway through, and a landing that goes red.
