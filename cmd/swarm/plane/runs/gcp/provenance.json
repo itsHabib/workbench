@@ -1,0 +1,12 @@
+{
+  "box": {"machine": "n2-standard-16 spot", "zone": "us-central1-a", "cpu": "Intel Xeon 2.80GHz, 16 vCPU, 62 GiB", "kernel": "7.0.0-1011-gcp", "rented": "2026-09-17T23:47:02Z", "deleted": "2026-09-18T00:17:35Z"},
+  "swarm": {"commit": "2db2742", "goos_goarch": "linux/amd64", "sha256": "6164b1882ced6c76328b015b6513f5182f237c39376b390b32fc212f672df6c1"},
+  "rooms_main": {"commit": "c3ea9e660ce50e3e97b09bacb33210a5a0ca1c45", "sha256": "f72a451a4169d0e31bc42632b006aa1b8d085b62a34dd4cfc0f15960295f8894", "rows": ["n2", "n4", "n6", "n6-faults"]},
+  "rooms_lab": {"commit": "c3ea9e6 + scripts/cloud-experiments/density-lab.patch, density-network.patch, density-fixtures.patch", "sha256": "29a17e1f8f2c2390765d2e9d2ba35f2378bad2223c29b7b7232d082a337ed077", "rows": ["n12", "n16", "n12-faults", "n16-faults"], "note": "patched setup-tap.sh --host rules installed before these rows"},
+  "image_sha256": "2b8201e1141b9377ecee1e15731a8da0ec097262c661980631aaf66321a1dfa3",
+  "toolstore_sha256": "55e05cd70959c58446a3c9da76686adc4e58dcf47d883cca73d73df2643c9b5e",
+  "redis": "7.0.15, bound to 10.128.0.2, appendonly yes",
+  "guest": "512 MiB, 1 vCPU, Alpine agent image, python from the toolstore",
+  "tasks": {"n<=6": 240, "n12_n16": 480},
+  "watchers": 2
+}
