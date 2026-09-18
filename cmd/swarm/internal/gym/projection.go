@@ -138,8 +138,8 @@ func project(rows []workRow, active, idle int, elapsed, deadline time.Duration) 
 		} else {
 			p.Recommend, p.Why = "add_seat", "the deadline slips; one more seat helps but may not be enough"
 		}
-	case idle > 0 && p.Ready == 0 && p.Remaining < active:
-		p.Recommend, p.Why = "retire_seat", "more seats than remaining units and nothing is claimable"
+	case idle > p.Ready && p.Remaining < active:
+		p.Recommend, p.Why = "retire_seat", "more idle seats than claimable units, and fewer units than seats remain"
 	default:
 		p.Recommend, p.Why = "hold", "on track, or no deadline to be late for"
 	}
