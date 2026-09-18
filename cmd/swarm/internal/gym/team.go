@@ -131,6 +131,14 @@ type receipt struct {
 type teamRun struct {
 	receipts                 []receipt
 	children                 []ChildResult
+	lives                    map[string]*liveSeat
+	childRuns                map[string]*teamRun
+	cancel                   context.CancelFunc
+	decisions                []BrainDecision
+	brainCost, costCap       float64
+	brainOn                  bool
+	brainEvery               time.Duration
+	brainModel, metricsAddr  string
 	live                     []string
 	shape, model, store, out string
 	branch, brief            string
@@ -169,6 +177,11 @@ func teamCmd(args []string) int {
 	reconcile := fl.Bool("reconcile", false, "a controller verifies every landing on origin main and nudges its author when red")
 	wakes := fl.Int("wakes", 8, "most times a stopped seat is resumed")
 	childMax := fl.Int("team-max", 4, "teams: most seats a child team may grow to")
+	brainOn := fl.Bool("brain", false, "a model judges the telemetry every interval and may add, retire, form, disband, nudge or escalate; replaces the fixed growth rule")
+	brainEvery := fl.Duration("brain-every", 60*time.Second, "how often the brain judges")
+	brainModel := fl.String("brain-model", "claude-sonnet-5", "model the brain uses")
+	costCap := fl.Float64("cost-cap", 0, "dollars the brain is told not to exceed (0: none)")
+	metricsAddr := fl.String("metrics", "", "serve Prometheus text metrics on this address, e.g. :9109")
 	seatCmd := fl.String("seat-cmd", "", "shell that runs one seat turn somewhere else (see docs/SEAT.md); empty runs claude here")
 	if fl.Parse(args) != nil || *out == "" {
 		fmt.Fprint(os.Stderr, usage)
@@ -190,7 +203,7 @@ func teamCmd(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), *wall)
 	defer cancel()
 	self, _ := os.Executable()
-	r := &teamRun{branch: "main", childMax: *childMax, twistTest: *twistTest, twist: *twist, twistAfter: *twistAfter, goalFile: *goalFile, reconcile: *reconcile, module: "goal", seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
+	r := &teamRun{brainOn: *brainOn, brainEvery: *brainEvery, brainModel: *brainModel, costCap: *costCap, metricsAddr: *metricsAddr, lives: map[string]*liveSeat{}, childRuns: map[string]*teamRun{}, branch: "main", childMax: *childMax, twistTest: *twistTest, twist: *twist, twistAfter: *twistAfter, goalFile: *goalFile, reconcile: *reconcile, module: "goal", seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
 	r.env = append(childEnv(filepath.Dir(self), filepath.Join(abs, "fleet-state")), "SWARM_STORE="+*store)
 	if err := r.seed(); err != nil {
 		fmt.Fprintln(os.Stderr, "seed:", err)
@@ -214,9 +227,16 @@ func (r *teamRun) run(n int) TeamResult {
 		r.wg.Add(1)
 		go r.twister()
 	}
-	if r.shape == "teams" {
+	if r.shape == "teams" || r.brainOn {
 		r.wg.Add(1)
 		go r.teamsController()
+	}
+	if r.brainOn {
+		r.wg.Add(1)
+		go r.brain()
+	}
+	if r.metricsAddr != "" {
+		go r.metrics(r.metricsAddr)
 	}
 	r.wg.Wait()
 	return r.result()
@@ -227,6 +247,9 @@ func (r *teamRun) launch(n int) {
 	case "teams":
 		r.spawn("p1", "peer", []string{"p2"})
 		r.spawn("p2", "peer", []string{"p1"})
+		if r.brainOn {
+			return
+		}
 		r.wg.Add(1)
 		go r.grow(n)
 	case "solo":
@@ -244,6 +267,9 @@ func (r *teamRun) launch(n int) {
 	case "swat":
 		r.spawn("p1", "peer", []string{"p2"})
 		r.spawn("p2", "peer", []string{"p1"})
+		if r.brainOn {
+			return
+		}
 		r.wg.Add(1)
 		go r.grow(n)
 	default:
@@ -317,6 +343,13 @@ func (r *teamRun) reconciler() {
 		}
 		seen = head
 		ok, out := r.verifyHead(head)
+		r.mu.Lock()
+		if ls := r.lives[author]; ls != nil {
+			ls.mu.Lock()
+			ls.lastLand = time.Now()
+			ls.mu.Unlock()
+		}
+		r.mu.Unlock()
 		verdict := map[bool]string{true: "pass", false: "fail"}[ok]
 		_ = r.swarm("reconciler", "receipt", head, "--verdict", verdict, "--cmd", "go build+vet+test", "--tail", tail(out, 400))
 		r.mu.Lock()
@@ -508,8 +541,13 @@ func (r *teamRun) spawn(seat, role string, roster []string) {
 	if r.branch != "main" {
 		_ = hgit(dir, "checkout", "-q", "-b", r.branch, "origin/"+r.branch)
 	}
+	ls := &liveSeat{seat: seat, role: role, joined: time.Now()}
 	r.mu.Lock()
 	r.live = append(r.live, seat)
+	if r.lives == nil {
+		r.lives = map[string]*liveSeat{}
+	}
+	r.lives[seat] = ls
 	r.mu.Unlock()
 	r.wg.Add(1)
 	go func() {
@@ -518,11 +556,24 @@ func (r *teamRun) spawn(seat, role string, roster []string) {
 		t0 := time.Now()
 		session, msg := "", teamPrompt(r.shape, r.branch, role, seat, roster)
 		for {
+			ls.mu.Lock()
+			ls.running = true
+			ls.mu.Unlock()
 			session = r.turn(&sr, dir, session, msg)
-			if session == "" || r.ctx.Err() != nil || sr.Wakes >= r.wakes {
+			ls.mu.Lock()
+			ls.running, ls.stopped, ls.turns, ls.cost, ls.wakes = false, time.Now(), sr.Turns, sr.CostUSD, sr.Wakes
+			retired := ls.retired
+			ls.mu.Unlock()
+			if session == "" || r.ctx.Err() != nil || sr.Wakes >= r.wakes || retired {
 				break
 			}
 			if msg = r.wakeReason(seat); msg == "" {
+				break
+			}
+			ls.mu.Lock()
+			retired = ls.retired
+			ls.mu.Unlock()
+			if retired {
 				break
 			}
 			sr.Wakes++

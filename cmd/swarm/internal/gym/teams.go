@@ -61,12 +61,22 @@ func (r *teamRun) teamsController() {
 func (r *teamRun) childTeam(w workRow) {
 	defer r.wg.Done()
 	branch := "team/" + w.ID
+	ctx, cancel := context.WithCancel(r.ctx)
 	child := &teamRun{
 		branch: branch, brief: w.Brief, originPath: r.origin(), childMax: r.childMax, shape: "swat", model: r.model,
 		store: childStore(r.store, w.ID), out: filepath.Join(r.out, "teams", w.ID), goal: r.goal, module: r.module,
-		self: r.self, seatCmd: r.seatCmd, wakes: r.wakes, turns: r.turns, wall: r.wall, ctx: r.ctx,
-		start: time.Now(), reconcile: r.reconcile,
+		self: r.self, seatCmd: r.seatCmd, wakes: r.wakes, turns: r.turns, wall: r.wall, ctx: ctx, cancel: cancel,
+		start: time.Now(), reconcile: r.reconcile, lives: map[string]*liveSeat{}, childRuns: map[string]*teamRun{},
 	}
+	r.mu.Lock()
+	r.childRuns[w.ID] = child
+	r.mu.Unlock()
+	defer func() {
+		cancel()
+		r.mu.Lock()
+		delete(r.childRuns, w.ID)
+		r.mu.Unlock()
+	}()
 	child.env = append(childEnv(filepath.Dir(r.self), filepath.Join(child.out, "fleet-state")), "SWARM_STORE="+child.store)
 	_ = os.MkdirAll(filepath.Join(child.out, "logs"), 0o755)
 	fmt.Printf("[%4.0fs] team %s forms on %s: %s\n", time.Since(r.start).Seconds(), w.ID, branch, w.Title)

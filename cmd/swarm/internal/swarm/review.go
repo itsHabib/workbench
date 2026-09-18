@@ -78,3 +78,26 @@ func (s *State) Reviews(tip string) ([]Review, error) {
 	sort.Slice(out, func(i, j int) bool { return out[i].At.Before(out[j].At) })
 	return out, nil
 }
+
+// Journal records one entry under kind journal:<name>. A controller that
+// judges from telemetry leaves the telemetry and the judgment here.
+func (s *State) Journal(name, id, by, payload string) error {
+	if name == "" || id == "" {
+		return refuse("bad_journal", "journal needs a name and an id")
+	}
+	if !remote() {
+		return refuse("no_store", "journals live on a shared store; set SWARM_STORE")
+	}
+	st, err := s.Plane()
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	if !json.Valid([]byte(payload)) {
+		payload, _ = func() (string, error) {
+			b, err := json.Marshal(map[string]string{"text": payload})
+			return string(b), err
+		}()
+	}
+	return st.Put(context.Background(), plane.Item{Kind: "journal:" + name, ID: id, Payload: payload})
+}

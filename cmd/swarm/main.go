@@ -101,8 +101,8 @@ type cli struct {
 	s    *swarm.State
 	seat string
 
-	title, files, result, head, verdict, tail, brief string
-	team                                             bool
+	title, files, result, head, verdict, tail, brief, payload string
+	team                                                      bool
 
 	as, scope, question, options, needs, ruling, evidence, supersedes, to, why        string
 	operator, lead, verifier, diskMin, resource, dir, cmd, wakeModel, wakeTools, base string
@@ -161,6 +161,7 @@ func parse(verb string, args []string) (*cli, error) {
 	fs.StringVar(&c.files, "files", "", "comma-separated paths the work touches")
 	fs.BoolVar(&c.team, "team", false, "work add: this unit is a team's job")
 	fs.StringVar(&c.brief, "brief", "", "work add --team: what that team must build")
+	fs.StringVar(&c.payload, "payload", "", "journal: the JSON to record")
 	fs.StringVar(&c.verdict, "verdict", "", "pass or fail")
 	fs.StringVar(&c.tail, "tail", "", "last lines of the verifier output")
 	fs.StringVar(&c.head, "head", "", "commit that carries the finished unit")
@@ -203,6 +204,7 @@ var verbs = map[string]func(*cli) error{
 	"receipt":      (*cli).receipt,
 	"receipts":     (*cli).receipts,
 	"review":       (*cli).review,
+	"journal":      (*cli).journal,
 	"reviews":      (*cli).reviews,
 	"idle":         (*cli).idleWait,
 	"drop":         (*cli).drop,
@@ -717,6 +719,15 @@ func (c *cli) reviews() error {
 	}
 	for _, r := range rs {
 		fmt.Printf("%-5s %s by %-10s %s\n", r.Verdict, shortTip(r.Tip), r.By, r.Why)
+	}
+	return nil
+}
+
+// journal records an item under kind journal:<name>, for controllers that
+// must leave what they saw and decided on the store.
+func (c *cli) journal() error {
+	if err := c.s.Journal(c.arg(0), c.arg(1), c.seat, c.payload); err != nil {
+		return c.record(err)
 	}
 	return nil
 }
