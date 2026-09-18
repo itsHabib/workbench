@@ -1,0 +1,11 @@
+FAIL  6b28614340c3 reconciler   go build+vet+test
+pass  bff0578f285c reconciler   go build+vet+test
+pass  368bf75803aa reconciler   go build+vet+test
+pass  8586b25e3b69 reconciler   go build+vet+test
+pass  8e5e32902e64 reconciler   go build+vet+test
+FAIL  131893ea7df3 reconciler   go build+vet+test
+FAIL  bd1927ed3974 reconciler   go build+vet+test
+FAIL  cdfd7ca18b50 reconciler   go build+vet+test
+FAIL  ba3b13c2d124 reconciler   go build+vet+test
+FAIL  669770f88c22 reconciler   go build+vet+test
+pass  a2e0161502c6 reconciler   go build+vet+test

@@ -184,3 +184,23 @@ red path is still unexercised. Raw results in `runs/team-shoplab-rooms/`.
 What to take from runs 5 and 6 together: the seam works, a seat inside a microVM behaves as a
 seat, and the substrate's own overhead per turn is small. Why the same team needed more turns
 in guests is the open question; the per-turn prompts in `logs/` are where to look.
+
+## Run 7: the customer lands a failing acceptance test
+
+Run 4 again, plus `--twist-test`: with the change, the customer commits `customer/customer_test.go`
+to main, which fails until a CSV example exists under testdata and the README shows CSV and setup
+time. Receipts now go to the store, keyed by commit, written once.
+
+| seats | own suite | wall | cost | turns | units | red landings | then green |
+|---|---|---|---|---|---|---|---|
+| 2, grew to 4 | green | 536s | $10.19 | 425 | 11 | 5 | yes, at 521s |
+
+The customer's commit went red at 244s and every seat got the verdict by note. The next four
+seat landings were red too, each rebased onto the failing test while its own unit was still
+green, and each author was nudged with the failing output. The fifth landing made the
+acceptance test pass and the run finished green. Four questions were asked and ruled during the
+rework. Raw results and the receipt list in `runs/launch-cycletime/`.
+
+That is the red path exercised end to end: a verdict on the store, a note to the author, a fix,
+a green verdict for the fixing commit. Cost of the change with the acceptance test: about $6 and
+three minutes more than the change without one.

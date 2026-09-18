@@ -1,0 +1,222 @@
+{
+  "at": "2026-09-18T16:20:42.614309Z",
+  "shape": "swat",
+  "model": "claude-sonnet-5",
+  "store": "resp:127.0.0.1:56440/launch3",
+  "seats": [
+    {
+      "seat": "p1",
+      "role": "peer",
+      "joined_s": 0.170230667,
+      "wall_s": 534.699809292,
+      "turns": 128,
+      "cost_usd": 3.2679012000000016,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p2",
+      "role": "peer",
+      "joined_s": 0.226069459,
+      "wall_s": 520.981155375,
+      "turns": 123,
+      "cost_usd": 2.8212610000000007,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p3",
+      "role": "joiner",
+      "joined_s": 60.421492667,
+      "wall_s": 463.2850485,
+      "turns": 94,
+      "cost_usd": 2.3587733999999996,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p4",
+      "role": "joiner",
+      "joined_s": 80.535323,
+      "wall_s": 441.69627125,
+      "turns": 80,
+      "cost_usd": 1.7390838000000004,
+      "cost_known": true,
+      "wakes": 0
+    }
+  ],
+  "hidden_passed": 1,
+  "hidden_total": 1,
+  "builds": true,
+  "own_test_files": 8,
+  "wall_s": 535.949383209,
+  "cost_usd": 10.1870194,
+  "turns": 425,
+  "work": [
+    {
+      "id": "fix-empty-module",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p2",
+      "holder": "",
+      "title": "Fix red main: no buildable package yet"
+    },
+    {
+      "id": "types-catalog",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "estimate: core types + default material/tool catalog"
+    },
+    {
+      "id": "formulas",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "estimate: cycle-time formulas for facing/pocketing/drilling/contouring"
+    },
+    {
+      "id": "job-loader",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p3",
+      "holder": "",
+      "title": "estimate: job JSON loading, Estimate() orchestration, text report"
+    },
+    {
+      "id": "cli",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p4",
+      "holder": "",
+      "title": "cmd/goal: CLI entrypoint with --job/--materials/--tools flags"
+    },
+    {
+      "id": "testdata-readme",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "testdata example job + README worked example (after core units land)"
+    },
+    {
+      "id": "csv-input",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p2",
+      "holder": "",
+      "title": "estimate: CSV job input (primary format)"
+    },
+    {
+      "id": "material-setup",
+      "state": "done",
+      "added_by": "p2",
+      "done_by": "p2",
+      "holder": "",
+      "title": "estimate: per-material setup-time table"
+    },
+    {
+      "id": "csv-and-setup",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "estimate: CSV job loader + per-material setup time"
+    },
+    {
+      "id": "csv-material-setup",
+      "state": "done",
+      "added_by": "p3",
+      "done_by": "p4",
+      "holder": "",
+      "title": "estimate: CSV job loader + per-material setup time"
+    },
+    {
+      "id": "cli-csv-routing",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "cmd/goal: route .csv job files to LoadJobCSV"
+    }
+  ],
+  "requests": 4,
+  "commits_by_author": {
+    "harness": 2,
+    "p1": 3,
+    "p2": 5,
+    "p3": 1,
+    "p4": 1
+  },
+  "grade_note": "no hidden tests: 1/1 means the team's own suite is green on origin main",
+  "receipts": [
+    {
+      "head": "6b28614340c3b04826e13403b1151bcd4b635c03",
+      "author": "harness",
+      "green": false,
+      "at_s": 15.346658292
+    },
+    {
+      "head": "bff0578f285c95995b63e4ce3de23414ed279a1c",
+      "author": "p2",
+      "green": true,
+      "at_s": 45.775341625
+    },
+    {
+      "head": "368bf75803aaecbe953cfbc337c2ee43e38a7958",
+      "author": "p1",
+      "green": true,
+      "at_s": 136.634055792
+    },
+    {
+      "head": "8586b25e3b6901266641171b88dbb038295b2ada",
+      "author": "p2",
+      "green": true,
+      "at_s": 152.326483917
+    },
+    {
+      "head": "8e5e32902e64730813adcf28ee7f25389fd6785f",
+      "author": "p3",
+      "green": true,
+      "at_s": 228.157794375
+    },
+    {
+      "head": "131893ea7df3a30caa576f6d4200b961dc6fe4df",
+      "author": "harness",
+      "green": false,
+      "at_s": 244.248662417
+    },
+    {
+      "head": "bd1927ed3974e158cb5d8e3461f7c5e768f6c174",
+      "author": "p2",
+      "green": false,
+      "at_s": 350.519277417
+    },
+    {
+      "head": "cdfd7ca18b50ab9a780236dc1970a2b07ddc5fde",
+      "author": "p4",
+      "green": false,
+      "at_s": 366.85137025
+    },
+    {
+      "head": "ba3b13c2d1243605d26e8fcfd29e19fcb8d7cbd6",
+      "author": "p1",
+      "green": false,
+      "at_s": 428.409784584
+    },
+    {
+      "head": "669770f88c223f14ff7cd2491a406274171d0e08",
+      "author": "p2",
+      "green": false,
+      "at_s": 474.624823167
+    },
+    {
+      "head": "a2e0161502c654056afdb124258e84e88d32f0f3",
+      "author": "p1",
+      "green": true,
+      "at_s": 520.896518
+    }
+  ]
+}
