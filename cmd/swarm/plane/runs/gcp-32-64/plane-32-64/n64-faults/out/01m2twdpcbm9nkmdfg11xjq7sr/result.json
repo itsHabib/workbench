@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "status": "succeeded",
+  "exit_code": 0,
+  "started_at": "2026-09-18T18:28:27.309810465Z",
+  "ended_at": "2026-09-18T18:28:47.376045425Z",
+  "command": [
+    "sh",
+    "-c",
+    "set -eu\nexport PATH=/nix/var/rooms/env/bin:$PATH\nmkdir -p /tmp/swarm /workspace/out\ncd /tmp/swarm\npython3 -c \"import urllib.request;urllib.request.urlretrieve('http://10.128.0.5:41855/swarm','swarm')\"\nchmod +x swarm\nID=$(cat /proc/sys/kernel/random/uuid)\n./swarm plane worker '{\"Store\":\"resp:10.128.0.5:45557/rooms:\",\"Kind\":\"task\",\"Incarnation\":\"\",\"TTL\":2000000000,\"Poll\":100000000,\"WorkMin\":200000000,\"WorkMax\":200000000,\"Seed\":0,\"CrashProb\":0,\"SplitEvery\":7,\"StopWhenDry\":true,\"Seats\":false,\"Roles\":true,\"Broken\":{\"NoEpochCheck\":false,\"NoDoneCheck\":false,\"NoPendingCheck\":false,\"NoIdempotency\":false,\"EpochReuse\":false}}' --incarnation \"$ID\" > /workspace/out/peer.log 2>&1\n"
+  ]
+}
