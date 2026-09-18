@@ -1,0 +1,13 @@
+{
+  "accepted": 1238,
+  "clone_exit": "\u003cnil\u003e",
+  "clones": 16,
+  "faults": null,
+  "items": 1238,
+  "passed": true,
+  "refusals": {},
+  "tasks": 480,
+  "unfinished": null,
+  "violations": null,
+  "wall_s": 21.471005398
+}
