@@ -55,7 +55,7 @@ Layers, lowest first: `errs`, `clock` / `ids`, `cron`, `dag`, `retry`, `state`, 
 - `type Policy struct { Base, Max time.Duration; Factor, Jitter float64; MaxAttempts int }`.
 - `(Policy) Validate() error`. `ErrInvalid` when Base <= 0, Max < Base, Factor < 1, Jitter outside [0, 1] or MaxAttempts < 1.
 - `(Policy) Retry(attempt int) bool`. True when 1 <= attempt < MaxAttempts: attempt number `attempt` has failed and another one is allowed.
-- `(Policy) Delay(attempt int, rnd func() float64) (time.Duration, error)`. The wait after failed attempt number `attempt`. `ErrInvalid` when Validate fails or attempt < 1 (checked first), `ErrState` when Retry(attempt) is false. Otherwise raw = min(Max, Base * Factor^(attempt-1)) as float nanoseconds, u = rnd() (0.5 for nil), and the result is `raw * (1 + Jitter*(2u-1))` truncated to whole nanoseconds; it is not capped again. Base 1s, Factor 2, Max 5s, Jitter 0.5, MaxAttempts 5: attempt 1 with u 0.5 is 1s, attempt 3 with u 0 is 2s, attempt 4 with u 1 is 7.5s.
+- `(Policy) Delay(attempt int, rnd func() float64) (time.Duration, error)`. The wait after failed attempt number `attempt`. `ErrInvalid` when Validate fails or attempt < 1 (checked first), `ErrState` when Retry(attempt) is false. Otherwise raw = min(Max, Base * Factor^(attempt-1)) as float nanoseconds, u = rnd() (called exactly once; 0.5 for nil), and the result is `raw * (1 + Jitter*(2u-1))` truncated to whole nanoseconds; it is not capped again. Base 1s, Factor 2, Max 5s, Jitter 0.5, MaxAttempts 5: attempt 1 with u 0.5 is 1s, attempt 3 with u 0 is 2s, attempt 4 with u 1 is 7.5s.
 - `var Default = Policy{Base: time.Second, Max: time.Minute, Factor: 2, Jitter: 0, MaxAttempts: 3}`.
 
 ## state (imports errs)
@@ -76,7 +76,7 @@ Layers, lowest first: `errs`, `clock` / `ids`, `cron`, `dag`, `retry`, `state`, 
 ## lease (imports errs, clock)
 - `type Lease struct { Key, Holder string; Epoch int64; ExpiresMs int64 }`.
 - `func New(c clock.Clock) *Store`. Safe for concurrent use: concurrent Acquire calls on one key with different holders give exactly one winner.
-- `(*Store) Acquire(key, holder string, ttl time.Duration) (Lease, error)`. `ErrInvalid` for an empty key or holder, or ttl under one millisecond. `ErrConflict` when the key has a live lease with another holder. When the key's live lease is holder's own, it is renewed: same Epoch, ExpiresMs = `Millis + ttl` in milliseconds. Otherwise a new lease is made with Epoch = `Epoch(key) + 1`; epochs start at 1 and never go backwards, whatever expired or was released in between.
+- `(*Store) Acquire(key, holder string, ttl time.Duration) (Lease, error)`. `ErrInvalid` for an empty key or holder, or ttl under one millisecond. `ErrConflict` when the key has a live lease with another holder. When the key's live lease is holder's own, it is renewed: same Epoch, ExpiresMs = `Millis + ttl` with ttl truncated to whole milliseconds. Otherwise a new lease is made with Epoch = `Epoch(key) + 1`; epochs start at 1 and never go backwards, whatever expired or was released in between.
 - `(*Store) Check(key, holder string, epoch int64) error`. nil when the key's live lease has that holder and epoch; `ErrExpired` when there is no live lease; `ErrState` when there is one with another holder or epoch.
 - `(*Store) Release(key, holder string, epoch int64) error`. Check, then drop the lease.
 - `(*Store) Get(key string) (Lease, bool)`. The live lease, if any. `(*Store) Epoch(key string) int64`. The last epoch issued for key, 0 for never.
@@ -84,7 +84,7 @@ Layers, lowest first: `errs`, `clock` / `ids`, `cron`, `dag`, `retry`, `state`, 
 ## queue (imports errs, clock)
 - `type Item struct { ID string; Priority int; ReadyMs int64; Payload string }`.
 - `func New(c clock.Clock) *Queue`. Safe for concurrent use: concurrent Pop calls never return the same item.
-- `(*Queue) Push(id string, priority int, delay time.Duration, payload string) error`. `ErrInvalid` for an empty id or negative delay, `ErrConflict` when id is in the queue. ReadyMs = `Millis + delay` in milliseconds.
+- `(*Queue) Push(id string, priority int, delay time.Duration, payload string) error`. `ErrInvalid` for an empty id or negative delay, `ErrConflict` when id is in the queue. ReadyMs = `Millis + delay` with delay truncated to whole milliseconds, so a delay under one millisecond is ready at once.
 - `(*Queue) Pop() (Item, bool)`. Removes and returns the best ready item: highest Priority first, then smallest ReadyMs, then earliest Push. False when no item is ready. `(*Queue) Peek() (Item, bool)`. The same without removing.
 - `(*Queue) Remove(id string) bool`. True when it was queued. `(*Queue) Has(id string) bool`.
 - `(*Queue) Len() int`. All queued items. `(*Queue) Ready() int`. Those ready now.
@@ -97,7 +97,7 @@ Layers, lowest first: `errs`, `clock` / `ids`, `cron`, `dag`, `retry`, `state`, 
 - `func New(c clock.Clock, w io.Writer) *Log`. `w` may be nil.
 - `func Load(c clock.Clock, r io.Reader, w io.Writer) (*Log, error)`. A Log holding `ReadAll(r)`; later Appends continue from the last Seq. Loading writes nothing to `w`.
 - `(*Log) Append(run, task string, from, to state.State, note string) (Entry, error)`. `ErrInvalid` for an empty run or a pair CanTransition refuses. Seq starts at 1 and rises by 1, AtMs is `clock.Millis(c)`. Writes `Encode(entry) + "\n"` to `w`; lines reach `w` in Seq order even under concurrent Appends.
-- `(*Log) Entries() []Entry`. All, in order. `(*Log) ForRun(run string) []Entry`. Those with that Run. `(*Log) Last(run, task string) (state.State, bool)`. The To of the latest entry for that run and task. Copies; safe for concurrent use.
+- `(*Log) Entries() []Entry`. All, in order. `(*Log) ForRun(run string) []Entry`. Those with that Run. `(*Log) Last(run, task string) (state.State, bool)`. The To of the latest entry for that run and task; None and false when there is none. Copies; safe for concurrent use.
 
 ## worker (imports errs, clock, lease, queue)
 - `type Result struct { ItemID, Worker string; Epoch int64; OK bool; Output, Msg string }`. Msg is the handler error's text, "" on success.
@@ -121,7 +121,7 @@ Layers, lowest first: `errs`, `clock` / `ids`, `cron`, `dag`, `retry`, `state`, 
 
 ## engine (imports everything it needs)
 - `type Config struct { Retry retry.Policy; LeaseTTL time.Duration; Workers []string; Rand func() float64 }`.
-- `type Task struct { Run, Workflow, Name string; Attempt int; Inputs map[string]string }`. Inputs maps each direct dependency to its output. `type Handler func(t Task) (string, error)`. A handler must not call the engine; it may move the clock.
+- `type Task struct { Run, Workflow, Name string; Attempt int; Inputs map[string]string }`. Inputs (non-nil, a copy) maps each direct dependency to its output. `type Handler func(t Task) (string, error)`. A handler must not call the engine; it may move the clock.
 - `type Run struct { ID, Workflow string; State state.State; Tasks map[string]state.State; Attempts map[string]int; Outputs map[string]string; CreatedMs, UpdatedMs int64 }`. Attempts counts claims per task; Outputs holds the outputs of succeeded tasks.
 - `func New(c clock.Clock, cfg Config, h Handler, events io.Writer) (*Engine, error)`. `ErrInvalid` when `cfg.Retry.Validate()` fails, LeaseTTL is under one millisecond, Workers is empty or holds an empty or repeated name, or h is nil. The engine owns one `ids.Gen`, `lease.Store`, `queue.Queue`, `worker.Pool` (ttl LeaseTTL), `plan.Planner`, `log.Log` (writing to `events`, which may be nil) and `metrics.Registry`, all on `c`. The registry starts with counters `runs_submitted`, `runs_succeeded`, `runs_failed`, `runs_cancelled`, `tasks_claimed`, `tasks_succeeded`, `tasks_failed`, `tasks_retried`, `leases_expired`, `results_stale` and the histogram `task_ms` with bounds 10, 100, 1000, 10000. Every method is serialized; safe for concurrent use.
 - `(*Engine) Register(s plan.Spec) error`. `plan.Compile` then `Planner.Add`; their errors pass through.
@@ -129,7 +129,7 @@ Layers, lowest first: `errs`, `clock` / `ids`, `cron`, `dag`, `retry`, `state`, 
 - `(*Engine) Tick() error`. In this order:
   1. Fire: `Planner.Due()`; each fire is submitted as by Submit, in the order returned.
   2. Expire: for each run in submission order and each task in Order() that is Running whose lease is not live, `leases_expired` +1 and the attempt fails with message `lease expired` (see failure below).
-  3. Enqueue: for each run in Pending or Running and each task from `Graph.Ready(succeeded tasks)` that is Pending and whose item id `Queue.Has` not: push `<run>/<task>` with the workflow's Priority, delay 0, Payload = task name. The first push of a Pending run logs the run `Pending -> Running` (Note "").
+  3. Enqueue: for each run in Pending or Running, in submission order, and each task from `Graph.Ready(succeeded tasks)` in that order that is Pending and whose item id `Queue.Has` not: push `<run>/<task>` with the workflow's Priority, delay 0, Payload = task name. The first push of a Pending run logs the run `Pending -> Running` (Note "").
   4. Work: for each name in `cfg.Workers` in order, one `Work(name)`; a result is passed to `Report`, whose `ErrExpired` is swallowed.
 - `(*Engine) Work(name string) (worker.Result, bool, error)`. `Pool.Run(name)`. Inside the claim, before the handler runs: the task's Attempts +1, `Pending -> Running` logged with Note `attempt N`, `tasks_claimed` +1; the handler gets Task with that Attempt and Inputs copied from Outputs; after it returns `task_ms` observes the clock's milliseconds spent in the handler. The result is not applied.
 - `(*Engine) Report(r worker.Result) error`. `ErrNotFound` when r.ItemID is not `<run>/<task>` of a known run and task. Stale (`results_stale` +1, `ErrExpired`, nothing else changes) when the task is not Running or `r.Epoch != lease.Epoch(r.ItemID)`. Otherwise the lease is released (its error ignored) and:

@@ -454,7 +454,7 @@ func (r *teamRun) seed() error {
 	if err := hgit("", "clone", "-q", origin, seed); err != nil {
 		return err
 	}
-	spec, err := goals.ReadFile("testdata/" + r.goal + "/SPEC.md")
+	spec, err := goalSpec(r.goal)
 	if r.goalFile != "" {
 		spec, err = os.ReadFile(r.goalFile)
 		r.goal = ""
@@ -720,8 +720,66 @@ func Grade(goal, origin, into string) Graded {
 // plantHidden copies the hidden tests into a checkout and returns the
 // package-qualified names the grader expects to see pass.
 func plantHidden(goal, into string) ([]string, error) {
+	want, err := plantPart(goal, goal, "", into)
+	if err != nil {
+		return nil, err
+	}
+	for dir, part := range parts(goal) {
+		more, err := plantPart(goal, part, dir+"/", into)
+		if err != nil {
+			return nil, err
+		}
+		want = append(want, more...)
+	}
+	sort.Strings(want)
+	return want, nil
+}
+
+// parts reads a composite goal's parts.json: {"kv": "kvlab", ...} means the
+// kvlab spec and hidden tests live under kv/ with imports goal/kv/pkg.
+func parts(goal string) map[string]string {
+	data, err := goals.ReadFile("testdata/" + goal + "/parts.json")
+	if err != nil {
+		return nil
+	}
+	var m map[string]string
+	_ = json.Unmarshal(data, &m)
+	return m
+}
+
+// goalSpec is the spec a team is handed: the goal's own SPEC.md, and for a
+// composite goal each part's spec after it with its directory named.
+func goalSpec(goal string) ([]byte, error) {
+	spec, err := goals.ReadFile("testdata/" + goal + "/SPEC.md")
+	if err != nil {
+		return nil, err
+	}
+	ps := parts(goal)
+	var dirs []string
+	for d := range ps {
+		dirs = append(dirs, d)
+	}
+	sort.Strings(dirs)
+	for _, d := range dirs {
+		part, err := goals.ReadFile("testdata/" + ps[d] + "/SPEC.md")
+		if err != nil {
+			return nil, err
+		}
+		text := strings.ReplaceAll(string(part), "`"+ps[d]+"/", "`"+goal+"/"+d+"/")
+		text = strings.ReplaceAll(text, "module named `"+ps[d]+"`", "subsystem `"+d+"/` of module `"+goal+"`")
+		spec = append(spec, []byte("\n\n---\n\n# Subsystem `"+d+"/` (spec of "+ps[d]+", packages under `"+d+"/`, imports `"+goal+"/"+d+"/<pkg>`)\n\n"+text)...)
+	}
+	return spec, nil
+}
+
+// plantPart drops one spec's hidden tests into a checkout under dir and
+// returns the package-qualified test names the grader expects.
+func plantPart(goal, part, dir, into string) ([]string, error) {
 	var want []string
-	root := "testdata/" + goal + "/hidden"
+	root := "testdata/" + part + "/hidden"
+	if _, err := fs.Stat(goals, root); err != nil {
+		return nil, nil
+	}
 	prefix := layoutPrefix(into)
 	err := fs.WalkDir(goals, root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -734,19 +792,18 @@ func plantHidden(goal, into string) ([]string, error) {
 		pkg := filepath.Base(filepath.Dir(p))
 		for _, line := range strings.Split(string(data), "\n") {
 			if name, ok := strings.CutPrefix(line, "func TestHidden"); ok {
-				want = append(want, goal+"/"+prefix+pkg+".TestHidden"+name[:strings.Index(name, "(")])
+				want = append(want, goal+"/"+prefix+dir+pkg+".TestHidden"+name[:strings.Index(name, "(")])
 			}
 		}
-		if prefix != "" {
-			data = bytes.ReplaceAll(data, []byte(`"`+goal+`/`), []byte(`"`+goal+`/`+prefix))
+		if part != goal || prefix != "" {
+			data = bytes.ReplaceAll(data, []byte(`"`+part+`/`), []byte(`"`+goal+`/`+prefix+dir))
 		}
-		dst := filepath.Join(into, prefix, pkg)
+		dst := filepath.Join(into, prefix, dir, pkg)
 		if err := os.MkdirAll(dst, 0o755); err != nil {
 			return err
 		}
 		return os.WriteFile(filepath.Join(dst, "zz_hidden_test.go"), data, 0o644)
 	})
-	sort.Strings(want)
 	return want, err
 }
 
