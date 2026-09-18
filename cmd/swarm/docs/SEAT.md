@@ -7,7 +7,7 @@ Rooms clone, a rented box.
 
 ```
 swarm seat run --seat p3 --prompt /path/prompt.txt --dir /work/p3 --remote git://host/origin.git \
-               [--resume SESSION_ID] [--model M] [--turns N] [--secrets FILE] [--skip-permissions]
+               [--resume SESSION_ID] [--branch B] [--model M] [--turns N] [--secrets FILE] [--skip-permissions]
 ```
 
 - Clones `--remote` into `--dir` when it is not a checkout, names the seat as committer.
@@ -29,13 +29,14 @@ swarm seat run --seat p3 --prompt /path/prompt.txt --dir /work/p3 --remote git:/
 
 `swarm gym team --seat-cmd '<shell>'` hands every turn to that shell instead of running
 `claude` itself. The shell sees `SEAT`, `PROMPT_FILE`, `RESUME` (empty on the first turn),
-`DIR`, `REMOTE`, `MODEL`, `TURNS`, `SWARM_SEAT` and `SWARM_STORE`, and must leave the seat's JSON
+`DIR`, `REMOTE`, `BRANCH` (a child team of a team of teams works on its own branch; pass it as
+`--branch`), `MODEL`, `TURNS`, `SWARM_SEAT` and `SWARM_STORE`, and must leave the seat's JSON
 line last on stdout. Where it runs is its business.
 
 The substrate that runs here, used to prove the seam:
 
 ```
---seat-cmd 'swarm seat run --seat "$SEAT" --prompt "$PROMPT_FILE" --dir "$DIR" --remote "$REMOTE" --resume "$RESUME" --model "$MODEL" --turns "$TURNS"'
+--seat-cmd 'swarm seat run --seat "$SEAT" --prompt "$PROMPT_FILE" --dir "$DIR" --remote "$REMOTE" --branch "$BRANCH" --resume "$RESUME" --model "$MODEL" --turns "$TURNS"'
 ```
 
 A Rooms substrate has to do three things the local one gets for free: put `PROMPT_FILE`

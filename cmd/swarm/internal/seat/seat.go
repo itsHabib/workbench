@@ -32,7 +32,7 @@ type Result struct {
 
 const usage = `swarm seat run: one agent session in one checkout, as a process
 
-  swarm seat run --seat NAME --prompt FILE [--dir DIR] [--remote URL] [--resume SESSION]
+  swarm seat run --seat NAME --prompt FILE [--dir DIR] [--remote URL] [--resume SESSION] [--branch B]
                  [--model M] [--turns N] [--tools LIST] [--secrets FILE] [--skip-permissions]
 
   --dir      the checkout to work in (default: the current directory)
@@ -58,6 +58,7 @@ func Main(args []string) int {
 	dir := fs.String("dir", ".", "checkout")
 	remote := fs.String("remote", "", "clone this when dir is not a checkout")
 	resume := fs.String("resume", "", "session id to continue")
+	branch := fs.String("branch", "", "check this branch out after cloning (default: the remote's default branch)")
 	model := fs.String("model", "", "model")
 	turns := fs.Int("turns", 150, "turn cap")
 	tools := fs.String("tools", "Read,Edit,Write,MultiEdit,Glob,Grep,Bash(git:*),Bash(go:*),Bash(swarm:*),Bash(cat:*),Bash(ls:*),Bash(gofmt:*),Bash(mkdir:*)", "allowed tools")
@@ -69,7 +70,7 @@ func Main(args []string) int {
 	}
 	res := Result{Seat: *seat}
 	start := time.Now()
-	err := run(&res, options{dir: *dir, remote: *remote, prompt: *prompt, resume: *resume, model: *model, turns: *turns, tools: *tools, secrets: *secrets, skip: *skip})
+	err := run(&res, options{branch: *branch, dir: *dir, remote: *remote, prompt: *prompt, resume: *resume, model: *model, turns: *turns, tools: *tools, secrets: *secrets, skip: *skip})
 	res.WallS = time.Since(start).Seconds()
 	if err != nil {
 		res.Error, res.Exit = err.Error(), 3
@@ -80,13 +81,13 @@ func Main(args []string) int {
 }
 
 type options struct {
-	dir, remote, prompt, resume, model, tools, secrets string
+	dir, remote, prompt, resume, model, tools, secrets, branch string
 	turns                                              int
 	skip                                               bool
 }
 
 func run(res *Result, o options) error {
-	if err := ensureCheckout(o.dir, o.remote, res.Seat); err != nil {
+	if err := ensureCheckout(o.dir, o.remote, o.branch, res.Seat); err != nil {
 		return err
 	}
 	msg, err := os.ReadFile(o.prompt)
@@ -144,7 +145,7 @@ func firstLine(s string) string {
 
 // ensureCheckout clones remote into dir when dir is not already a checkout,
 // and names the seat as the committer so the board can tell seats apart.
-func ensureCheckout(dir, remote, seat string) error {
+func ensureCheckout(dir, remote, branch, seat string) error {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		return nil
 	}
@@ -156,6 +157,11 @@ func ensureCheckout(dir, remote, seat string) error {
 	}
 	for _, kv := range [][]string{{"user.name", seat}, {"user.email", seat + "@seat.invalid"}, {"commit.gpgsign", "false"}} {
 		_ = exec.Command("git", "-C", dir, "config", kv[0], kv[1]).Run()
+	}
+	if branch != "" && branch != "main" {
+		if out, err := exec.Command("git", "-C", dir, "checkout", "-q", "-b", branch, "origin/"+branch).CombinedOutput(); err != nil {
+			return fmt.Errorf("checkout %s: %v: %s", branch, err, strings.TrimSpace(string(out)))
+		}
 	}
 	return nil
 }
