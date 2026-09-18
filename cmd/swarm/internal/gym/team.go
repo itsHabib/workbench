@@ -143,6 +143,7 @@ type teamRun struct {
 	brainModel, metricsAddr  string
 	deadline                 time.Duration
 	originFrom, verifyCmd    string
+	seatTools                string
 	escalated                bool
 	live                     []string
 	shape, model, store, out string
@@ -183,6 +184,7 @@ func teamCmd(args []string) int {
 	wakes := fl.Int("wakes", 8, "most times a stopped seat is resumed")
 	childMax := fl.Int("team-max", 4, "teams: most seats a child team may grow to")
 	originFrom := fl.String("origin", "", "start from a clone of this repository (a path or URL) instead of an empty module; the goal file is added as SPEC.md")
+	seatTools := fl.String("seat-tools", "", "extra allowed tools for seats, comma-separated, e.g. Bash(node:*),Bash(npm:*) (added automatically when --verify mentions node, npm, python or make)")
 	verifyCmd := fl.String("verify", "", "shell that verifies a checkout (default: go build, vet and test); used by --reconcile, by merges, and by the grade when there are no hidden tests")
 	deadline := fl.Duration("deadline", 0, "when the work should be done, from the start; growth and the brain read the projection against it")
 	brainOn := fl.Bool("brain", false, "a model judges the telemetry every interval and may add, retire, form, disband, nudge or escalate; replaces the fixed growth rule")
@@ -211,7 +213,7 @@ func teamCmd(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), *wall)
 	defer cancel()
 	self, _ := os.Executable()
-	r := &teamRun{originFrom: *originFrom, verifyCmd: *verifyCmd, deadline: *deadline, brainOn: *brainOn, brainEvery: *brainEvery, brainModel: *brainModel, costCap: *costCap, metricsAddr: *metricsAddr, lives: map[string]*liveSeat{}, childRuns: map[string]*teamRun{}, branch: "main", childMax: *childMax, twistTest: *twistTest, twist: *twist, twistAfter: *twistAfter, goalFile: *goalFile, reconcile: *reconcile, module: "goal", seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
+	r := &teamRun{seatTools: *seatTools, originFrom: *originFrom, verifyCmd: *verifyCmd, deadline: *deadline, brainOn: *brainOn, brainEvery: *brainEvery, brainModel: *brainModel, costCap: *costCap, metricsAddr: *metricsAddr, lives: map[string]*liveSeat{}, childRuns: map[string]*teamRun{}, branch: "main", childMax: *childMax, twistTest: *twistTest, twist: *twist, twistAfter: *twistAfter, goalFile: *goalFile, reconcile: *reconcile, module: "goal", seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
 	r.env = append(childEnv(filepath.Dir(self), filepath.Join(abs, "fleet-state")), "SWARM_STORE="+*store)
 	if err := r.seed(); err != nil {
 		fmt.Fprintln(os.Stderr, "seed:", err)
@@ -597,11 +599,24 @@ func (r *teamRun) spawn(seat, role string, roster []string) {
 		sr := SeatResult{Seat: seat, Role: role, JoinedS: time.Since(r.start).Seconds(), CostKnown: true}
 		t0 := time.Now()
 		session, msg := "", teamPrompt(r.shape, r.branch, role, seat, roster)
+		stalled := 0
 		for {
 			ls.mu.Lock()
 			ls.running = true
 			ls.mu.Unlock()
+			before := sr.Turns
 			session = r.turn(&sr, dir, session, msg)
+			if sr.Wakes > 0 && sr.Turns-before <= 2 {
+				stalled++
+			} else {
+				stalled = 0
+			}
+			if stalled >= 3 {
+				fmt.Printf("[%4.0fs] %s: three wakes without progress, not resuming again\n", time.Since(r.start).Seconds(), seat)
+				ls.mu.Lock()
+				ls.retired = true
+				ls.mu.Unlock()
+			}
 			ls.mu.Lock()
 			ls.running, ls.stopped, ls.turns, ls.cost, ls.wakes = false, time.Now(), sr.Turns, sr.CostUSD, sr.Wakes
 			retired := ls.retired
@@ -629,13 +644,29 @@ func (r *teamRun) spawn(seat, role string, roster []string) {
 	}()
 }
 
-// turn runs one headless session to the end of its turn: a fresh one, or a
-// resume of the seat's last with a wake message. It returns the session id.
-func (r *teamRun) turn(sr *SeatResult, dir, session, msg string) string {
+// tools is the seat's allowlist: the Go set, plus whatever the verifier
+// names, plus anything the run adds. A seat that cannot run the checker
+// its goal names spends its wakes reporting that it is blocked.
+func (r *teamRun) tools() string {
 	tools := "Read,Edit,Write,MultiEdit,Glob,Grep,Bash(git:*),Bash(go:*),Bash(swarm:*),Bash(cat:*),Bash(ls:*),Bash(gofmt:*),Bash(mkdir:*)"
+	for _, name := range []string{"node", "npm", "npx", "python3", "python", "make", "cargo"} {
+		if strings.Contains(r.verifyCmd, name) {
+			tools += ",Bash(" + name + ":*)"
+		}
+	}
+	if r.seatTools != "" {
+		tools += "," + r.seatTools
+	}
 	if r.shape == "solo" {
 		tools += ",Task,Agent"
 	}
+	return tools
+}
+
+// turn runs one headless session to the end of its turn: a fresh one, or a
+// resume of the seat's last with a wake message. It returns the session id.
+func (r *teamRun) turn(sr *SeatResult, dir, session, msg string) string {
+	tools := r.tools()
 	args := []string{"-p", msg, "--output-format", "json", "--permission-mode", "acceptEdits", "--max-turns", fmt.Sprint(r.turns), "--model", r.model, "--allowedTools", tools}
 	if session != "" {
 		args = append(args, "--resume", session)
@@ -676,7 +707,7 @@ func (r *teamRun) remoteTurn(sr *SeatResult, dir, session, msg string) *exec.Cmd
 	cmd.Dir = r.out
 	cmd.Env = append(append([]string{}, r.env...),
 		"SEAT="+sr.Seat, "PROMPT_FILE="+promptFile, "RESUME="+session, "DIR="+dir,
-		"REMOTE="+r.origin(), "BRANCH="+r.branch, "MODEL="+r.model, "TURNS="+fmt.Sprint(r.turns), "SWARM_SEAT="+sr.Seat)
+		"REMOTE="+r.origin(), "BRANCH="+r.branch, "TOOLS="+r.tools(), "MODEL="+r.model, "TURNS="+fmt.Sprint(r.turns), "SWARM_SEAT="+sr.Seat)
 	return cmd
 }
 

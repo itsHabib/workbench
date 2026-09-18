@@ -61,7 +61,7 @@ func Main(args []string) int {
 	branch := fs.String("branch", "", "check this branch out after cloning (default: the remote's default branch)")
 	model := fs.String("model", "", "model")
 	turns := fs.Int("turns", 150, "turn cap")
-	tools := fs.String("tools", "Read,Edit,Write,MultiEdit,Glob,Grep,Bash(git:*),Bash(go:*),Bash(swarm:*),Bash(cat:*),Bash(ls:*),Bash(gofmt:*),Bash(mkdir:*)", "allowed tools")
+	tools := fs.String("tools", defaultTools(), "allowed tools (default: $TOOLS when set, else the Go set)")
 	secrets := fs.String("secrets", "", "KEY=VALUE file to load")
 	skip := fs.Bool("skip-permissions", false, "run claude with --dangerously-skip-permissions (needs a non-root user)")
 	if fs.Parse(args[1:]) != nil || *seat == "" || *prompt == "" {
@@ -214,4 +214,11 @@ func parseSecrets(r io.Reader) []string {
 		out = append(out, line)
 	}
 	return out
+}
+
+func defaultTools() string {
+	if v := os.Getenv("TOOLS"); v != "" {
+		return v
+	}
+	return "Read,Edit,Write,MultiEdit,Glob,Grep,Bash(git:*),Bash(go:*),Bash(swarm:*),Bash(cat:*),Bash(ls:*),Bash(gofmt:*),Bash(mkdir:*)"
 }

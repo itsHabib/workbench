@@ -30,7 +30,7 @@ swarm seat run --seat p3 --prompt /path/prompt.txt --dir /work/p3 --remote git:/
 `swarm gym team --seat-cmd '<shell>'` hands every turn to that shell instead of running
 `claude` itself. The shell sees `SEAT`, `PROMPT_FILE`, `RESUME` (empty on the first turn),
 `DIR`, `REMOTE`, `BRANCH` (a child team of a team of teams works on its own branch; pass it as
-`--branch`), `MODEL`, `TURNS`, `SWARM_SEAT` and `SWARM_STORE`, and must leave the seat's JSON
+`--branch`), `TOOLS` (the seat's allowed-tools list; `swarm seat run` reads it as its default), `MODEL`, `TURNS`, `SWARM_SEAT` and `SWARM_STORE`, and must leave the seat's JSON
 line last on stdout. Where it runs is its business.
 
 The substrate that runs here, used to prove the seam:
