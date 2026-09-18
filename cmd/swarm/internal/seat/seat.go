@@ -82,8 +82,8 @@ func Main(args []string) int {
 
 type options struct {
 	dir, remote, prompt, resume, model, tools, secrets, branch string
-	turns                                              int
-	skip                                               bool
+	turns                                                      int
+	skip                                                       bool
 }
 
 func run(res *Result, o options) error {
