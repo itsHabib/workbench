@@ -68,3 +68,20 @@ func TestWorkWIPLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Two founders who each add a team for the same directory get one team.
+func TestTeamUnitsCannotOverlap(t *testing.T) {
+	s := onPlane(t)
+	_, err := s.WorkAdd("shop-team", "shop", nil, "p1", "", true, "build shop/")
+	refused(t, err, "bad_work")
+	if _, err := s.WorkAdd("shop-team", "shop", []string{"shop"}, "p1", "", true, "build shop/"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.WorkAdd("shop-subsystem", "shop again", []string{"shop/"}, "p2", "", true, "build shop/")
+	refused(t, err, "overlaps")
+	_, err = s.WorkAdd("shop-cart", "part of shop", []string{"shop/cart"}, "p2", "", true, "cart only")
+	refused(t, err, "overlaps")
+	if _, err := s.WorkAdd("sched-team", "sched", []string{"sched"}, "p2", "", true, "build sched/"); err != nil {
+		t.Fatal(err)
+	}
+}

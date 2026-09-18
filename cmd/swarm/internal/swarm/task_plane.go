@@ -68,6 +68,17 @@ func (s *State) WorkAdd(id, title string, files []string, by, parent string, tea
 		w := workFromItem(it)
 		return &w, refuse("exists", "%s already exists (%s): %s", id, w.State, w.Title)
 	}
+	if team {
+		// A team's job is named by the directories it owns, so two founders
+		// who each add "the shop subsystem" under different ids collide here
+		// instead of forming two teams that build the same thing.
+		if len(files) == 0 {
+			return nil, refuse("bad_work", "a --team unit needs --files naming the directories that team owns")
+		}
+		if other, path := s.teamOverlap(st, files); other != "" {
+			return nil, refuse("overlaps", "%s already owns %s; claim or join that instead of adding another", other, path)
+		}
+	}
 	w := Work{ID: id, Title: title, Files: files, AddedBy: by, At: Now(), Parent: parent, Team: team, Brief: brief}
 	payload, _ := json.Marshal(w)
 	if err := st.Put(ctx, plane.Item{Kind: kindWork, ID: id, Payload: string(payload)}); err != nil {
@@ -182,6 +193,30 @@ func (s *State) WorkDone(id, seat, result, head string) (*Work, error) {
 	w.State, w.DoneBy = "done", seat
 	w.Head, w.Result = splitHead(result)
 	return &w, nil
+}
+
+// teamOverlap finds an existing team unit owning a path that contains, or
+// is contained by, one of the given paths.
+func (s *State) teamOverlap(st plane.Store, files []string) (string, string) {
+	items, err := st.List(context.Background(), kindWork)
+	if err != nil {
+		return "", ""
+	}
+	for _, it := range items {
+		w := workFromItem(it)
+		if !w.Team {
+			continue
+		}
+		for _, have := range w.Files {
+			for _, want := range files {
+				h, n := strings.Trim(have, "/")+"/", strings.Trim(want, "/")+"/"
+				if strings.HasPrefix(h, n) || strings.HasPrefix(n, h) {
+					return w.ID, have
+				}
+			}
+		}
+	}
+	return "", ""
 }
 
 func (s *State) heldBy(st plane.Store, seat string) ([]string, error) {
