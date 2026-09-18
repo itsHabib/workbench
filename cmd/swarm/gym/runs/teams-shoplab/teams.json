@@ -1,0 +1,902 @@
+{
+  "at": "2026-09-18T17:47:15.193701Z",
+  "shape": "teams",
+  "model": "claude-sonnet-5",
+  "store": "resp:127.0.0.1:56440/teams1:",
+  "seats": [
+    {
+      "seat": "p1",
+      "role": "peer",
+      "joined_s": 0.170572333,
+      "wall_s": 809.460851792,
+      "turns": 73,
+      "cost_usd": 1.7314384000000005,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p2",
+      "role": "peer",
+      "joined_s": 0.228879583,
+      "wall_s": 809.738636417,
+      "turns": 6,
+      "cost_usd": 1.7401152000000004,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p3",
+      "role": "joiner",
+      "joined_s": 40.406981083,
+      "wall_s": 769.478434792,
+      "turns": 62,
+      "cost_usd": 1.4999936000000005,
+      "cost_known": true,
+      "wakes": 0
+    }
+  ],
+  "hidden_passed": 84,
+  "hidden_total": 86,
+  "builds": true,
+  "own_test_files": 17,
+  "wall_s": 829.368121958,
+  "cost_usd": 4.971547200000002,
+  "turns": 141,
+  "work": [
+    {
+      "team": false,
+      "brief": "",
+      "id": "errs",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "errs package: sentinel errors and Code()"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "id": "money",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "money package: Money type, Parse/String/Mul/BP/Div/Sum/Allocate"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "id": "sku",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p3",
+      "holder": "",
+      "title": "sku package: SKU type, Parse/MustParse/String/Sort"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "id": "idem",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "idem package: idempotency Store"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "id": "outbox",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "outbox package: Event encode/decode, Log"
+    },
+    {
+      "team": false,
+      "brief": "",
+      "id": "command",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "command package: Cmd Parse, Ops"
+    },
+    {
+      "team": true,
+      "brief": "Build packages catalog/, inventory/, shipping/, discount/, ledger/ exactly per SPEC.md at repo root. Each imports only errs, money, sku (already on main — do not modify them). catalog: Product/Catalog CRUD keyed by sku.SKU. inventory: on-hand/reserve/commit/release with ttl expiry, concurrency-safe (no oversell). shipping: Zone parsing + Rate() domestic/international tiered pricing. discount: Coupon Book with Quote/Redeem, concurrency-safe use counting. ledger: double-entry Txn posting, Balance/TrialBalance. You may assume errs.Err* sentinels, money.Money (Parse/String/Mul/BP/Div/Sum/Allocate), and sku.SKU (Parse/String/Sort) exist and behave exactly as SPEC.md describes — do not redefine them. Write table/unit tests per package including a -race concurrency test for inventory.Reserve and discount.Book. Do not touch cart/pricing/order/report/app/command.",
+      "id": "commerce-primitives",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "team-commerce-primitives",
+      "holder": "",
+      "title": "catalog, inventory, shipping, discount, ledger packages"
+    },
+    {
+      "team": true,
+      "brief": "Build packages cart/ and pricing/ exactly per SPEC.md at repo root. cart imports errs, money, sku, catalog. pricing imports errs, money, shipping, cart. Assume catalog.Catalog (Put/Get/Remove/List/Len) and shipping.Rate/ParseZone exist and behave exactly as SPEC.md describes, even before they land on main — code directly against the SPEC.md signatures (they are being built in parallel by another team and will match exactly). cart.Cart: Add/Set/Remove/Clear/Lines/Subtotal/WeightG/Items/Len, not concurrency-safe. pricing.Calc.Quote implements the subtotal/discount-allocation/tax/shipping/total logic exactly as SPEC.md's worked example (10.00 general 600g + 5.05 food 600g, discount 1.50, domestic =\u003e total 21.18). Write unit tests per package, including the worked example as a test case. Do not touch catalog/inventory/shipping/discount/ledger/order/report/app/command.",
+      "id": "cart-pricing",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "team-cart-pricing",
+      "holder": "",
+      "title": "cart and pricing packages"
+    },
+    {
+      "team": true,
+      "brief": "Build packages order/ and report/ exactly per SPEC.md at repo root. order imports errs, money, sku, pricing. report imports money, sku, order. Assume pricing.Quote/pricing.Calc exist and behave exactly as SPEC.md describes, even before they land on main — code directly against the SPEC.md signatures (built in parallel by another team, will match exactly). order.Book: Create/Get/List/Pay/Ship/Deliver/Cancel state machine per CanTransition rules, IDs O-1,O-2,..., concurrency-safe, deep-copies on read. report.Summarize/Top/String per SPEC.md's exact formatting example (orders=3 gross=42.36 refunded=21.18 net=21.18 aov=21.18). Write unit tests per package. Do not touch catalog/inventory/shipping/discount/ledger/cart/pricing/app/command.",
+      "id": "order-report",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p3",
+      "holder": "",
+      "title": "order and report packages"
+    },
+    {
+      "team": true,
+      "brief": "Build package app/ exactly per SPEC.md at repo root, the top-level App that wires errs, money, sku, idem, outbox, command, catalog, inventory, shipping, discount, ledger, cart, pricing, order, report together. This depends on every other package in the module: commerce-primitives (catalog/inventory/shipping/discount/ledger), cart-pricing (cart/pricing), and order-report (order/report) are being built in parallel by other teams. Code directly against the exact signatures and behavior SPEC.md gives for each package — they will match. If those packages are not yet on main when you start, vendor nothing; just write app/ against the spec'd APIs, and periodically 'git pull --rebase origin main' to pick up the real packages as they land, fixing any compile drift before you land yours. Implement App.New/Exec/Events per SPEC.md's full command table (PRODUCT/STOCK/AVAIL/COUPON/ADD/REMOVE/SHOW/CHECKOUT/PAY/SHIP/DELIVER/CANCEL/ORDER/BALANCE/REPORT), idempotency via idem.Do keyed on @key, and the exact outbox event sequence on success. Write unit tests covering the full order lifecycle (product-\u003estock-\u003eadd-\u003echeckout-\u003epay-\u003eship-\u003edeliver, cancel/refund paths, idempotent replay, report). This is the last package to land — expect to rebase against the other three units before your build/tests are green.",
+      "id": "app",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "team-app",
+      "holder": "",
+      "title": "app package: App.Exec command dispatcher wiring everything"
+    }
+  ],
+  "requests": 0,
+  "commits_by_author": {
+    "harness": 8,
+    "p1": 10,
+    "p2": 11,
+    "p3": 6,
+    "p4": 2
+  },
+  "failed_tests": [
+    "shoplab/outbox.TestHiddenDecodeRejects",
+    "shoplab/outbox.TestHiddenReadAll"
+  ],
+  "receipts": [
+    {
+      "head": "a158ad88f81879b13e57338840f0c6f6a2af4f4f",
+      "author": "harness",
+      "green": false,
+      "at_s": 15.363565667
+    },
+    {
+      "head": "4acc3e2e16db86ae6cac955b08d302d1c21075ab",
+      "author": "p3",
+      "green": true,
+      "at_s": 91.839895708
+    },
+    {
+      "head": "1d4b52c76acbf9277992f7a4afaff0010c597ce2",
+      "author": "p1",
+      "green": true,
+      "at_s": 108.397229625
+    },
+    {
+      "head": "4f2443736a2f870a0dfe4e9674433bba7e0f6753",
+      "author": "p2",
+      "green": true,
+      "at_s": 230.326829625
+    },
+    {
+      "head": "667a5ae49edd82ffe46f294010fcc64f02b303ce",
+      "author": "harness",
+      "green": true,
+      "at_s": 277.964885667
+    },
+    {
+      "head": "1cfce72fd1d0c03285655faa7cf7651b25f8e419",
+      "author": "harness",
+      "green": true,
+      "at_s": 446.373666833
+    },
+    {
+      "head": "af0b292eae8881cd7b8982bc410afb232b2ec84f",
+      "author": "p3",
+      "green": true,
+      "at_s": 479.723081917
+    },
+    {
+      "head": "d5f7188e2771ed4cb7c9b651a306a7b5b1e213f2",
+      "author": "harness",
+      "green": true,
+      "at_s": 814.312803792
+    }
+  ],
+  "children": [
+    {
+      "unit": "order-report",
+      "branch": "team/order-report",
+      "merged": false,
+      "note": "child branch is not green",
+      "result": {
+        "at": "2026-09-18T17:48:00.605296Z",
+        "shape": "swat",
+        "model": "claude-sonnet-5",
+        "store": "resp:127.0.0.1:56440/teams1-order-report:",
+        "seats": [
+          {
+            "seat": "p1",
+            "role": "peer",
+            "joined_s": 0.215021042,
+            "wall_s": 186.334265542,
+            "turns": 41,
+            "cost_usd": 1.0469748,
+            "cost_known": true,
+            "wakes": 0
+          },
+          {
+            "seat": "p2",
+            "role": "peer",
+            "joined_s": 0.344540709,
+            "wall_s": 210.260584834,
+            "turns": 46,
+            "cost_usd": 1.1526818,
+            "cost_known": true,
+            "wakes": 0
+          }
+        ],
+        "hidden_passed": 30,
+        "hidden_total": 86,
+        "builds": true,
+        "own_test_files": 6,
+        "wall_s": 210.605171667,
+        "cost_usd": 2.1996566,
+        "turns": 87,
+        "work": [
+          {
+            "team": false,
+            "brief": "",
+            "id": "order",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "order package: Book state machine"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "report",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p2",
+            "holder": "",
+            "title": "report package: Summarize/Top/String"
+          }
+        ],
+        "requests": 0,
+        "commits_by_author": {
+          "harness": 1,
+          "p1": 1,
+          "p2": 2,
+          "p3": 1
+        },
+        "failed_tests": [
+          "shoplab/app.TestHiddenCancelAndRefund",
+          "shoplab/app.TestHiddenConcurrentCheckoutsNeverOversell",
+          "shoplab/app.TestHiddenErrorsChangeNothing",
+          "shoplab/app.TestHiddenEventLog",
+          "shoplab/app.TestHiddenHappyPath",
+          "shoplab/app.TestHiddenIdempotency",
+          "shoplab/app.TestHiddenReservationExpiry",
+          "shoplab/cart.TestHiddenAddAndLines",
+          "shoplab/cart.TestHiddenAddRejects",
+          "shoplab/cart.TestHiddenItemsIsACopy",
+          "shoplab/cart.TestHiddenPricesAreReadLate",
+          "shoplab/cart.TestHiddenSetRemoveClear",
+          "shoplab/catalog.TestHiddenConcurrent",
+          "shoplab/catalog.TestHiddenListSorted",
+          "shoplab/catalog.TestHiddenNotFoundAndRemove",
+          "shoplab/catalog.TestHiddenPutGetReplace",
+          "shoplab/catalog.TestHiddenPutRejects",
+          "shoplab/discount.TestHiddenAddRejects",
+          "shoplab/discount.TestHiddenMaxUsesUnderConcurrency",
+          "shoplab/discount.TestHiddenMinSubtotalAndExpiry",
+          "shoplab/discount.TestHiddenPercentAndFixed",
+          "shoplab/discount.TestHiddenQuoteDoesNotConsume",
+          "shoplab/inventory.TestHiddenNoOversell",
+          "shoplab/inventory.TestHiddenReceiveAndCounts",
+          "shoplab/inventory.TestHiddenReleaseAndCommit",
+          "shoplab/inventory.TestHiddenReservationExpiry",
+          "shoplab/inventory.TestHiddenReserveAllOrNothing",
+          "shoplab/inventory.TestHiddenReserveRejects",
+          "shoplab/ledger.TestHiddenConcurrentPosts",
+          "shoplab/ledger.TestHiddenPostAndBalances",
+          "shoplab/ledger.TestHiddenPostRejects",
+          "shoplab/ledger.TestHiddenSameAccountTwice",
+          "shoplab/ledger.TestHiddenTxnsAreCopies",
+          "shoplab/order.TestHiddenCancelAndRefund",
+          "shoplab/order.TestHiddenConcurrentPayOnce",
+          "shoplab/order.TestHiddenCreate",
+          "shoplab/order.TestHiddenHappyPath",
+          "shoplab/order.TestHiddenTransitionTable",
+          "shoplab/order.TestHiddenWrongStateAndUnknown",
+          "shoplab/outbox.TestHiddenLogAppend",
+          "shoplab/pricing.TestHiddenFreeShippingUsesDiscountedSubtotal",
+          "shoplab/pricing.TestHiddenRatesAreCopied",
+          "shoplab/pricing.TestHiddenRejects",
+          "shoplab/pricing.TestHiddenSpecExample",
+          "shoplab/pricing.TestHiddenTaxIsPerLine",
+          "shoplab/pricing.TestHiddenUntaxedAndInternational",
+          "shoplab/report.TestHiddenAOVRounds",
+          "shoplab/report.TestHiddenByStateAndUnits",
+          "shoplab/report.TestHiddenEmpty",
+          "shoplab/report.TestHiddenMoneyTotals",
+          "shoplab/report.TestHiddenTop",
+          "shoplab/shipping.TestHiddenDomesticFreeOverFifty",
+          "shoplab/shipping.TestHiddenDomesticSteps",
+          "shoplab/shipping.TestHiddenInternational",
+          "shoplab/shipping.TestHiddenParseZone",
+          "shoplab/shipping.TestHiddenRateRejects"
+        ],
+        "receipts": [
+          {
+            "head": "1110c7348281697b9bde80d542471611efce96fb",
+            "author": "harness",
+            "green": false,
+            "at_s": 15.465897375
+          },
+          {
+            "head": "0802275b4a45f5a9d4969a992d73d337ac709c70",
+            "author": "p1",
+            "green": false,
+            "at_s": 120.8293525
+          },
+          {
+            "head": "1c1bb72dd479b2298e881c6ebd59d27b66b2e145",
+            "author": "p2",
+            "green": false,
+            "at_s": 150.987852125
+          }
+        ]
+      }
+    },
+    {
+      "unit": "commerce-primitives",
+      "branch": "team/commerce-primitives",
+      "merged": true,
+      "result": {
+        "at": "2026-09-18T17:47:45.514833Z",
+        "shape": "swat",
+        "model": "claude-sonnet-5",
+        "store": "resp:127.0.0.1:56440/teams1-commerce-primitives:",
+        "seats": [
+          {
+            "seat": "p1",
+            "role": "peer",
+            "joined_s": 0.160446833,
+            "wall_s": 224.044891583,
+            "turns": 50,
+            "cost_usd": 1.1906649999999999,
+            "cost_known": true,
+            "wakes": 0
+          },
+          {
+            "seat": "p2",
+            "role": "peer",
+            "joined_s": 0.233937167,
+            "wall_s": 224.058745542,
+            "turns": 33,
+            "cost_usd": 0.7980071999999999,
+            "cost_known": true,
+            "wakes": 0
+          },
+          {
+            "seat": "p3",
+            "role": "joiner",
+            "joined_s": 40.39595775,
+            "wall_s": 191.192814458,
+            "turns": 36,
+            "cost_usd": 1.0107167999999997,
+            "cost_known": true,
+            "wakes": 0
+          },
+          {
+            "seat": "p4",
+            "role": "joiner",
+            "joined_s": 60.550142458,
+            "wall_s": 162.784331,
+            "turns": 27,
+            "cost_usd": 0.7094659999999999,
+            "cost_known": true,
+            "wakes": 0
+          }
+        ],
+        "hidden_passed": 30,
+        "hidden_total": 86,
+        "builds": true,
+        "own_test_files": 6,
+        "wall_s": 232.629530833,
+        "cost_usd": 3.708855,
+        "turns": 146,
+        "work": [
+          {
+            "team": false,
+            "brief": "",
+            "id": "catalog",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p3",
+            "holder": "",
+            "title": "catalog package: Product/Catalog CRUD"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "inventory",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p4",
+            "holder": "",
+            "title": "inventory package: reserve/commit/release, ttl, concurrency-safe"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "shipping",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "shipping package: Zone parsing + Rate()"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "discount",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "discount package: Coupon Book Quote/Redeem, concurrency-safe"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "ledger",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p2",
+            "holder": "",
+            "title": "ledger package: double-entry Txn posting, Balance/TrialBalance"
+          }
+        ],
+        "requests": 1,
+        "commits_by_author": {
+          "harness": 1,
+          "p1": 1,
+          "p2": 2,
+          "p3": 1
+        },
+        "failed_tests": [
+          "shoplab/app.TestHiddenCancelAndRefund",
+          "shoplab/app.TestHiddenConcurrentCheckoutsNeverOversell",
+          "shoplab/app.TestHiddenErrorsChangeNothing",
+          "shoplab/app.TestHiddenEventLog",
+          "shoplab/app.TestHiddenHappyPath",
+          "shoplab/app.TestHiddenIdempotency",
+          "shoplab/app.TestHiddenReservationExpiry",
+          "shoplab/cart.TestHiddenAddAndLines",
+          "shoplab/cart.TestHiddenAddRejects",
+          "shoplab/cart.TestHiddenItemsIsACopy",
+          "shoplab/cart.TestHiddenPricesAreReadLate",
+          "shoplab/cart.TestHiddenSetRemoveClear",
+          "shoplab/catalog.TestHiddenConcurrent",
+          "shoplab/catalog.TestHiddenListSorted",
+          "shoplab/catalog.TestHiddenNotFoundAndRemove",
+          "shoplab/catalog.TestHiddenPutGetReplace",
+          "shoplab/catalog.TestHiddenPutRejects",
+          "shoplab/discount.TestHiddenAddRejects",
+          "shoplab/discount.TestHiddenMaxUsesUnderConcurrency",
+          "shoplab/discount.TestHiddenMinSubtotalAndExpiry",
+          "shoplab/discount.TestHiddenPercentAndFixed",
+          "shoplab/discount.TestHiddenQuoteDoesNotConsume",
+          "shoplab/inventory.TestHiddenNoOversell",
+          "shoplab/inventory.TestHiddenReceiveAndCounts",
+          "shoplab/inventory.TestHiddenReleaseAndCommit",
+          "shoplab/inventory.TestHiddenReservationExpiry",
+          "shoplab/inventory.TestHiddenReserveAllOrNothing",
+          "shoplab/inventory.TestHiddenReserveRejects",
+          "shoplab/ledger.TestHiddenConcurrentPosts",
+          "shoplab/ledger.TestHiddenPostAndBalances",
+          "shoplab/ledger.TestHiddenPostRejects",
+          "shoplab/ledger.TestHiddenSameAccountTwice",
+          "shoplab/ledger.TestHiddenTxnsAreCopies",
+          "shoplab/order.TestHiddenCancelAndRefund",
+          "shoplab/order.TestHiddenConcurrentPayOnce",
+          "shoplab/order.TestHiddenCreate",
+          "shoplab/order.TestHiddenHappyPath",
+          "shoplab/order.TestHiddenTransitionTable",
+          "shoplab/order.TestHiddenWrongStateAndUnknown",
+          "shoplab/outbox.TestHiddenLogAppend",
+          "shoplab/pricing.TestHiddenFreeShippingUsesDiscountedSubtotal",
+          "shoplab/pricing.TestHiddenRatesAreCopied",
+          "shoplab/pricing.TestHiddenRejects",
+          "shoplab/pricing.TestHiddenSpecExample",
+          "shoplab/pricing.TestHiddenTaxIsPerLine",
+          "shoplab/pricing.TestHiddenUntaxedAndInternational",
+          "shoplab/report.TestHiddenAOVRounds",
+          "shoplab/report.TestHiddenByStateAndUnits",
+          "shoplab/report.TestHiddenEmpty",
+          "shoplab/report.TestHiddenMoneyTotals",
+          "shoplab/report.TestHiddenTop",
+          "shoplab/shipping.TestHiddenDomesticFreeOverFifty",
+          "shoplab/shipping.TestHiddenDomesticSteps",
+          "shoplab/shipping.TestHiddenInternational",
+          "shoplab/shipping.TestHiddenParseZone",
+          "shoplab/shipping.TestHiddenRateRejects"
+        ],
+        "receipts": [
+          {
+            "head": "7c40f3f15dec646b419ffc752ce0694ed9023cf6",
+            "author": "harness",
+            "green": false,
+            "at_s": 15.429270125
+          },
+          {
+            "head": "f826e51b023b4800cb5ee9121077dce4778fdd95",
+            "author": "p1",
+            "green": true,
+            "at_s": 92.12683475
+          },
+          {
+            "head": "6b7aa7dd7d7a3171ba0ad13bfcc5c18e28620b2f",
+            "author": "p2",
+            "green": true,
+            "at_s": 123.627277833
+          },
+          {
+            "head": "6d72700e7cc22d5597a84b492b86836fb4bcd488",
+            "author": "p1",
+            "green": true,
+            "at_s": 155.402508708
+          },
+          {
+            "head": "99812c1838a3d84fb8ff39c59929ba33b542c162",
+            "author": "p3",
+            "green": true,
+            "at_s": 217.579522792
+          }
+        ]
+      }
+    },
+    {
+      "unit": "cart-pricing",
+      "branch": "team/cart-pricing",
+      "merged": true,
+      "result": {
+        "at": "2026-09-18T17:48:00.586423Z",
+        "shape": "swat",
+        "model": "claude-sonnet-5",
+        "store": "resp:127.0.0.1:56440/teams1-cart-pricing:",
+        "seats": [
+          {
+            "seat": "p1",
+            "role": "peer",
+            "joined_s": 0.20785625,
+            "wall_s": 359.22153125,
+            "turns": 46,
+            "cost_usd": 1.1656179999999998,
+            "cost_known": true,
+            "wakes": 0
+          },
+          {
+            "seat": "p2",
+            "role": "peer",
+            "joined_s": 0.343827375,
+            "wall_s": 364.682950875,
+            "turns": 56,
+            "cost_usd": 1.3389464000000002,
+            "cost_known": true,
+            "wakes": 1
+          }
+        ],
+        "hidden_passed": 56,
+        "hidden_total": 86,
+        "builds": true,
+        "own_test_files": 11,
+        "wall_s": 380.959000875,
+        "cost_usd": 2.5045644,
+        "turns": 102,
+        "work": [
+          {
+            "team": false,
+            "brief": "",
+            "id": "cart",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p2",
+            "holder": "",
+            "title": "cart package: Cart type, Add/Set/Remove/Clear/Lines/Subtotal/WeightG/Items/Len"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "pricing",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "pricing package: Calc/Quote implementing subtotal/discount-allocation/tax/shipping/total"
+          }
+        ],
+        "requests": 0,
+        "commits_by_author": {
+          "harness": 3,
+          "p1": 3,
+          "p2": 4,
+          "p3": 3,
+          "p4": 1
+        },
+        "failed_tests": [
+          "shoplab/app.TestHiddenCancelAndRefund",
+          "shoplab/app.TestHiddenConcurrentCheckoutsNeverOversell",
+          "shoplab/app.TestHiddenErrorsChangeNothing",
+          "shoplab/app.TestHiddenEventLog",
+          "shoplab/app.TestHiddenHappyPath",
+          "shoplab/app.TestHiddenIdempotency",
+          "shoplab/app.TestHiddenReservationExpiry",
+          "shoplab/cart.TestHiddenAddAndLines",
+          "shoplab/cart.TestHiddenAddRejects",
+          "shoplab/cart.TestHiddenItemsIsACopy",
+          "shoplab/cart.TestHiddenPricesAreReadLate",
+          "shoplab/cart.TestHiddenSetRemoveClear",
+          "shoplab/order.TestHiddenCancelAndRefund",
+          "shoplab/order.TestHiddenConcurrentPayOnce",
+          "shoplab/order.TestHiddenCreate",
+          "shoplab/order.TestHiddenHappyPath",
+          "shoplab/order.TestHiddenTransitionTable",
+          "shoplab/order.TestHiddenWrongStateAndUnknown",
+          "shoplab/outbox.TestHiddenLogAppend",
+          "shoplab/pricing.TestHiddenFreeShippingUsesDiscountedSubtotal",
+          "shoplab/pricing.TestHiddenRatesAreCopied",
+          "shoplab/pricing.TestHiddenRejects",
+          "shoplab/pricing.TestHiddenSpecExample",
+          "shoplab/pricing.TestHiddenTaxIsPerLine",
+          "shoplab/pricing.TestHiddenUntaxedAndInternational",
+          "shoplab/report.TestHiddenAOVRounds",
+          "shoplab/report.TestHiddenByStateAndUnits",
+          "shoplab/report.TestHiddenEmpty",
+          "shoplab/report.TestHiddenMoneyTotals",
+          "shoplab/report.TestHiddenTop"
+        ],
+        "receipts": [
+          {
+            "head": "7cafd193b080e6757e85dbb1b9ac047123673433",
+            "author": "harness",
+            "green": false,
+            "at_s": 15.484776542
+          },
+          {
+            "head": "0c092a7ffd24c78dd6c66165891030c19905f7cf",
+            "author": "p1",
+            "green": false,
+            "at_s": 165.988099208
+          },
+          {
+            "head": "2e0abdc7fd5ac1c1592eafbca40eb979aecaadf2",
+            "author": "p1",
+            "green": false,
+            "at_s": 211.199582583
+          },
+          {
+            "head": "b6bd2f4440654e5b63fcf0191c5efa41f29ba1af",
+            "author": "p2",
+            "green": true,
+            "at_s": 365.905405542
+          }
+        ]
+      }
+    },
+    {
+      "unit": "app",
+      "branch": "team/app",
+      "merged": true,
+      "result": {
+        "at": "2026-09-18T17:48:00.625159Z",
+        "shape": "swat",
+        "model": "claude-sonnet-5",
+        "store": "resp:127.0.0.1:56440/teams1-app:",
+        "seats": [
+          {
+            "seat": "p1",
+            "role": "peer",
+            "joined_s": 0.221020875,
+            "wall_s": 752.71018525,
+            "turns": 124,
+            "cost_usd": 3.7734424,
+            "cost_known": true,
+            "wakes": 2
+          },
+          {
+            "seat": "p2",
+            "role": "peer",
+            "joined_s": 0.355792375,
+            "wall_s": 725.880229917,
+            "turns": 85,
+            "cost_usd": 2.4226389999999993,
+            "cost_known": true,
+            "wakes": 1
+          },
+          {
+            "seat": "p3",
+            "role": "joiner",
+            "joined_s": 60.53139775,
+            "wall_s": 665.052970833,
+            "turns": 34,
+            "cost_usd": 0.8540889999999999,
+            "cost_known": true,
+            "wakes": 1
+          },
+          {
+            "seat": "p4",
+            "role": "joiner",
+            "joined_s": 80.650763458,
+            "wall_s": 644.783403375,
+            "turns": 32,
+            "cost_usd": 0.8005062000000001,
+            "cost_known": true,
+            "wakes": 1
+          }
+        ],
+        "hidden_passed": 78,
+        "hidden_total": 86,
+        "builds": true,
+        "own_test_files": 15,
+        "wall_s": 754.865487083,
+        "cost_usd": 7.850676599999999,
+        "turns": 275,
+        "work": [
+          {
+            "team": false,
+            "brief": "",
+            "id": "errs-money",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p2",
+            "holder": "",
+            "title": "errs + money packages"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "sku",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "sku package"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "idem",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "idem package"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "outbox",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p4",
+            "holder": "",
+            "title": "outbox package"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "command",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p3",
+            "holder": "",
+            "title": "command package"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "app-core",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p2",
+            "holder": "",
+            "title": "app: New/Exec skeleton + PRODUCT/STOCK/AVAIL/COUPON/ADD/REMOVE/SHOW"
+          },
+          {
+            "team": false,
+            "brief": "",
+            "id": "app-checkout",
+            "state": "done",
+            "added_by": "p1",
+            "done_by": "p1",
+            "holder": "",
+            "title": "app: CHECKOUT/PAY/SHIP/DELIVER/CANCEL/ORDER/BALANCE/REPORT + idem + events"
+          }
+        ],
+        "requests": 1,
+        "commits_by_author": {
+          "harness": 6,
+          "p1": 6,
+          "p2": 8,
+          "p3": 5,
+          "p4": 1
+        },
+        "failed_tests": [
+          "shoplab/app.TestHiddenCancelAndRefund",
+          "shoplab/app.TestHiddenConcurrentCheckoutsNeverOversell",
+          "shoplab/app.TestHiddenErrorsChangeNothing",
+          "shoplab/app.TestHiddenEventLog",
+          "shoplab/app.TestHiddenHappyPath",
+          "shoplab/app.TestHiddenIdempotency",
+          "shoplab/app.TestHiddenReservationExpiry",
+          "shoplab/outbox.TestHiddenLogAppend"
+        ],
+        "receipts": [
+          {
+            "head": "c42c2f81a81d43f7e6a096cf0d6843f225dddf4f",
+            "author": "harness",
+            "green": false,
+            "at_s": 15.446013791
+          },
+          {
+            "head": "6358850fd1222fcfdee3f21a86f7ef1a22a00ca2",
+            "author": "p1",
+            "green": true,
+            "at_s": 106.207354666
+          },
+          {
+            "head": "58031edc76c400ac4a50c863ad5e808c79439bf0",
+            "author": "p2",
+            "green": true,
+            "at_s": 122.344143541
+          },
+          {
+            "head": "fcae06ffd50feba39e9b03d1c64cd183eadc7dd8",
+            "author": "p1",
+            "green": true,
+            "at_s": 138.495919375
+          },
+          {
+            "head": "d629d083cac71e1d8d895f03d231083b48af3dfc",
+            "author": "p3",
+            "green": true,
+            "at_s": 169.863960125
+          },
+          {
+            "head": "3588fbacf403dfbe799de2288a7f3b07556ae5d0",
+            "author": "p4",
+            "green": true,
+            "at_s": 188.099481958
+          },
+          {
+            "head": "cb63c9cbeb56054ba01bef49f230e1388a206738",
+            "author": "p1",
+            "green": true,
+            "at_s": 431.364839333
+          },
+          {
+            "head": "ca9105004859956da7d85d3bcdb85e042531a566",
+            "author": "p2",
+            "green": true,
+            "at_s": 570.805462208
+          },
+          {
+            "head": "9ef7cf47debe2686d385163a93984b8914afb6aa",
+            "author": "p1",
+            "green": true,
+            "at_s": 739.813835666
+          }
+        ]
+      }
+    }
+  ]
+}

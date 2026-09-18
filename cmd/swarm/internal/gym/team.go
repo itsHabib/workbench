@@ -48,6 +48,7 @@ type TeamResult struct {
 	Failed    []string       `json:"failed_tests,omitempty"`
 	GradeNote string         `json:"grade_note,omitempty"`
 	Receipts  []receipt      `json:"receipts,omitempty"`
+	Children  []ChildResult  `json:"children,omitempty"`
 }
 
 // SeatResult is one session's bill.
@@ -64,6 +65,8 @@ type SeatResult struct {
 }
 
 type workRow struct {
+	Team    bool   `json:"team"`
+	Brief   string `json:"brief"`
 	ID      string `json:"id"`
 	State   string `json:"state"`
 	AddedBy string `json:"added_by"`
@@ -76,8 +79,10 @@ const verbsCard = `
 How the team coordinates. The only shared things are the git remote "origin" and the swarm commands below. There is no chat.
   swarm work list                                    every unit of work and who holds it
   swarm work add <id> --title "..." --files a,b      add a unit (short kebab-case id). Refused "exists" means someone already added it.
-  swarm work claim <id>                              take a unit. Refused "held_by_other" means it is taken: pick another.
-  swarm work done <id> --head <sha> --result "..."   after your commit for it is on origin main
+  swarm work next                                    open units, the ones nearest what you already touched first
+  swarm work claim <id>                              take a unit (you may hold two: line up your follow-on while you land the first). Refused "held_by_other" means it is taken: pick another.
+  swarm work done <id> --head <sha> --result "..."   after your commit for it is on origin BRANCH
+  swarm work add <id> --title "..." --team --brief "..."   (founders only) a part big enough for a team of its own
   swarm work drop <id>                               give a unit back if you cannot finish it
   swarm ask --scope <pkg> --question "..." --options "a|b"    a decision more than one seat depends on
   swarm requests                                     open questions. Answer one with: swarm claim <req-id>  then  swarm rule <req-id> --ruling "..."
@@ -85,25 +90,31 @@ How the team coordinates. The only shared things are the git remote "origin" and
   swarm nudge <seat> "..."                           a note to one seat
   swarm inbox                                        your notes
   swarm idle --timeout 4m                            block until there is something for you (a note, a question, open work, or all done)
-Rules: claim before you touch files. Small commits. To land: git pull --rebase origin main, run go build ./... and go test ./..., then git push origin HEAD:main. If the push is rejected, pull --rebase and try again. Never force-push.
+Rules: claim before you touch files. Small commits. To land: git pull --rebase origin BRANCH, run go build ./... and go test ./..., then git push origin HEAD:BRANCH. If the push is rejected, pull --rebase and try again. Never force-push.
 Your session ends when your turn ends. Never leave a command running in the background and stop: wait with swarm idle in the foreground, and if it times out run it again.
 One shell command per tool call; no && and no ;. Do not look for files named zz_hidden_test.go.`
 
-func teamPrompt(shape, _, role, seat string, roster []string) string {
+func teamPrompt(shape, branch, role, seat string, roster []string) string {
+	return strings.ReplaceAll(teamPromptText(shape, role, seat, roster), "BRANCH", branch)
+}
+
+func teamPromptText(shape, role, seat string, roster []string) string {
 	others := strings.Join(roster, ", ")
 	switch {
 	case shape == "solo":
-		return "Build what SPEC.md describes, all of it, and land it on origin main. You may use subagents. To land: git pull --rebase origin main, go build ./... and go test ./..., git push origin HEAD:main. One shell command per tool call. Do not look for files named zz_hidden_test.go. Stop when the spec's definition of done holds on origin main."
+		return "Build what SPEC.md describes, all of it, and land it on origin BRANCH. You may use subagents. To land: git pull --rebase origin BRANCH, go build ./... and go test ./..., git push origin HEAD:BRANCH. One shell command per tool call. Do not look for files named zz_hidden_test.go. Stop when the spec's definition of done holds on origin BRANCH."
 	case role == "lead":
-		return "You are " + seat + ", the lead of a team building what SPEC.md describes. Your builders are: " + others + ". You do not write product code. You break the goal into units with swarm work add, hand each unit to a builder with swarm nudge <seat> \"take <id>: ...\", answer their questions in swarm requests, watch swarm work list and git log origin/main, and check the result builds and tests pass on origin main. Hand out the first units straight away so nobody waits. Use swarm idle between checks. Stop when the spec's definition of done holds on origin main and every unit is done." + verbsCard
+		return "You are " + seat + ", the lead of a team building what SPEC.md describes. Your builders are: " + others + ". You do not write product code. You break the goal into units with swarm work add, hand each unit to a builder with swarm nudge <seat> \"take <id>: ...\", answer their questions in swarm requests, watch swarm work list and git log origin/BRANCH, and check the result builds and tests pass on origin BRANCH. Hand out the first units straight away so nobody waits. Use swarm idle between checks. Stop when the spec's definition of done holds on origin BRANCH and every unit is done." + verbsCard
 	case role == "builder":
 		return "You are " + seat + ", a builder on a team building what SPEC.md describes. Your lead is seat lead. Start with swarm inbox: the lead hands you units by note. Work only units the lead handed you: claim, build with tests, land, mark done, then run swarm idle for the next. If something is unclear or touches another package, swarm ask and wait for the ruling rather than guessing. Stop when swarm idle says every unit of work is done." + verbsCard
 	case role == "joiner":
-		return "You are " + seat + ", joining a team already building what SPEC.md describes. The others are: " + others + ". Nobody is in charge. Read swarm decisions and swarm work list, git pull origin main, then claim an open unit and build it with tests. When nothing is open, run swarm idle. Stop when it says every unit of work is done and origin main builds and passes." + verbsCard
+		return "You are " + seat + ", joining a team already building what SPEC.md describes. The others are: " + others + ". Nobody is in charge. Read swarm decisions and swarm work list, git pull origin BRANCH, then claim an open unit and build it with tests. When nothing is open, run swarm idle. Stop when it says every unit of work is done and origin BRANCH builds and passes." + verbsCard
+	case shape == "teams" && role == "peer":
+		return "You are " + seat + ", one of two founders of a team of teams building what SPEC.md describes. The other founder is: " + others + ". Nobody is in charge. Agree the plan first: the seat whose name sorts first posts the breakdown and the shared interfaces as one swarm ask; the other claims and rules it. This goal is too big for one team, so cut it into a few large parts that can be built in parallel and add each part with swarm work add <id> --title ... --team --brief \"what that team must build, which packages, what it may assume from the others\". A team of its own forms for every --team unit, works on its own branch, and its result is merged into BRANCH for you when it is green; you never build those parts. Keep the shared foundation (the lowest packages everyone imports) as ordinary units and build it yourselves first, so the teams can import it. Then claim, build, land, mark done. When nothing is open, run swarm idle. Stop when it says every unit of work is done and origin BRANCH builds and passes." + verbsCard
 	case shape == "swat":
-		return "You are " + seat + ", one of two peers starting a build of what SPEC.md describes. The other is: " + others + ". Nobody is in charge. Agree the plan before writing code: the seat whose name sorts first posts the breakdown and the shared interfaces as one swarm ask; the other claims and rules it, amending if needed. Then add the units with swarm work add and get to work: claim, build with tests, land, mark done. More peers may join when there is open work, so keep units small and independent and keep the list honest. When nothing is open, run swarm idle. Stop when it says every unit of work is done and origin main builds and passes." + verbsCard
+		return "You are " + seat + ", one of two peers starting a build of what SPEC.md describes. The other is: " + others + ". Nobody is in charge. Agree the plan before writing code: the seat whose name sorts first posts the breakdown and the shared interfaces as one swarm ask; the other claims and rules it, amending if needed. Then add the units with swarm work add and get to work: claim, build with tests, land, mark done. More peers may join when there is open work, so keep units small and independent and keep the list honest. When nothing is open, run swarm idle. Stop when it says every unit of work is done and origin BRANCH builds and passes." + verbsCard
 	}
-	return "You are " + seat + ", one of " + fmt.Sprint(len(roster)+1) + " equal peers building what SPEC.md describes. The others are: " + others + ". Nobody is in charge and nobody will hand you a task. Look at swarm work list first: if it is empty, break the goal into units and add them; if someone beat you to it, use theirs. Then claim, build with tests, land, mark done, repeat. Raise anything two packages must agree on with swarm ask. When nothing is open, run swarm idle. Stop when it says every unit of work is done and origin main builds and passes." + verbsCard
+	return "You are " + seat + ", one of " + fmt.Sprint(len(roster)+1) + " equal peers building what SPEC.md describes. The others are: " + others + ". Nobody is in charge and nobody will hand you a task. Look at swarm work list first: if it is empty, break the goal into units and add them; if someone beat you to it, use theirs. Then claim, build with tests, land, mark done, repeat. Raise anything two packages must agree on with swarm ask. When nothing is open, run swarm idle. Stop when it says every unit of work is done and origin BRANCH builds and passes." + verbsCard
 }
 
 type receipt struct {
@@ -115,8 +126,12 @@ type receipt struct {
 
 type teamRun struct {
 	receipts                 []receipt
+	children                 []ChildResult
 	live                     []string
 	shape, model, store, out string
+	branch, brief            string
+	originPath               string
+	childMax                 int
 	goal, self, seatCmd      string
 	goalFile, module         string
 	reconcile                bool
@@ -135,7 +150,7 @@ type teamRun struct {
 
 func teamCmd(args []string) int {
 	fl := flag.NewFlagSet("gym team", flag.ContinueOnError)
-	shape := fl.String("shape", "flat", "solo|flat|swat|tree")
+	shape := fl.String("shape", "flat", "solo|flat|swat|tree|teams")
 	n := fl.Int("n", 3, "seats (swat: the most it may grow to)")
 	model := fl.String("model", "claude-sonnet-5", "model for every seat")
 	store := fl.String("store", "", "coordination store (default file:<out>/plane)")
@@ -149,6 +164,7 @@ func teamCmd(args []string) int {
 	twistAfter := fl.Duration("twist-after", 4*time.Minute, "when the twist is delivered")
 	reconcile := fl.Bool("reconcile", false, "a controller verifies every landing on origin main and nudges its author when red")
 	wakes := fl.Int("wakes", 8, "most times a stopped seat is resumed")
+	childMax := fl.Int("team-max", 4, "teams: most seats a child team may grow to")
 	seatCmd := fl.String("seat-cmd", "", "shell that runs one seat turn somewhere else (see docs/SEAT.md); empty runs claude here")
 	if fl.Parse(args) != nil || *out == "" {
 		fmt.Fprint(os.Stderr, usage)
@@ -170,13 +186,22 @@ func teamCmd(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), *wall)
 	defer cancel()
 	self, _ := os.Executable()
-	r := &teamRun{twistTest: *twistTest, twist: *twist, twistAfter: *twistAfter, goalFile: *goalFile, reconcile: *reconcile, module: "goal", seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
+	r := &teamRun{branch: "main", childMax: *childMax, twistTest: *twistTest, twist: *twist, twistAfter: *twistAfter, goalFile: *goalFile, reconcile: *reconcile, module: "goal", seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
 	r.env = append(childEnv(filepath.Dir(self), filepath.Join(abs, "fleet-state")), "SWARM_STORE="+*store)
 	if err := r.seed(); err != nil {
 		fmt.Fprintln(os.Stderr, "seed:", err)
 		return 3
 	}
-	r.launch(*n)
+	res := r.run(*n)
+	data, _ := json.MarshalIndent(res, "", "  ")
+	_ = os.WriteFile(filepath.Join(abs, "result.json"), data, 0o644)
+	fmt.Print(TeamTable([]TeamResult{res}))
+	return 0
+}
+
+// run drives one team to its end: seats, controllers, and the result.
+func (r *teamRun) run(n int) TeamResult {
+	r.launch(n)
 	if r.reconcile {
 		r.wg.Add(1)
 		go r.reconciler()
@@ -185,16 +210,21 @@ func teamCmd(args []string) int {
 		r.wg.Add(1)
 		go r.twister()
 	}
+	if r.shape == "teams" {
+		r.wg.Add(1)
+		go r.teamsController()
+	}
 	r.wg.Wait()
-	res := r.result()
-	data, _ := json.MarshalIndent(res, "", "  ")
-	_ = os.WriteFile(filepath.Join(abs, "result.json"), data, 0o644)
-	fmt.Print(TeamTable([]TeamResult{res}))
-	return 0
+	return r.result()
 }
 
 func (r *teamRun) launch(n int) {
 	switch r.shape {
+	case "teams":
+		r.spawn("p1", "peer", []string{"p2"})
+		r.spawn("p2", "peer", []string{"p1"})
+		r.wg.Add(1)
+		go r.grow(n)
 	case "solo":
 		r.spawn("solo", "solo", nil)
 	case "tree":
@@ -308,7 +338,7 @@ func (r *teamRun) reconciler() {
 }
 
 func (r *teamRun) originHead() (head, author string) {
-	out, err := exec.Command("git", "--git-dir", filepath.Join(r.out, "origin.git"), "log", "-1", "--format=%H %an", "main").Output()
+	out, err := exec.Command("git", "--git-dir", r.origin(), "log", "-1", "--format=%H %an", r.branch).Output()
 	if err != nil {
 		return "", ""
 	}
@@ -319,7 +349,7 @@ func (r *teamRun) originHead() (head, author string) {
 func (r *teamRun) verifyHead(head string) (bool, string) {
 	dir := filepath.Join(r.out, "verify", head[:12])
 	_ = os.RemoveAll(dir)
-	if err := hgit("", "clone", "-q", filepath.Join(r.out, "origin.git"), dir); err != nil {
+	if err := hgit("", "clone", "-q", "-b", r.branch, r.origin(), dir); err != nil {
 		return false, err.Error()
 	}
 	var log strings.Builder
@@ -353,30 +383,43 @@ func (r *teamRun) grow(limit int) {
 			return
 		case <-time.After(20 * time.Second):
 		}
-		open, held, done, total := r.workCounts()
+		open, _, done, total := r.workCounts()
 		if total > 0 && done == total {
 			return
 		}
-		idle := len(live) - held
+		idle := len(live) - r.holders()
 		if open < 2 || open <= idle {
 			continue
 		}
 		seat := fmt.Sprintf("p%d", len(live)+1)
-		fmt.Printf("[%4.0fs] grow: %d open, %d held, %d seats -> adding %s\n", time.Since(r.start).Seconds(), open, held, len(live), seat)
+		fmt.Printf("[%4.0fs] grow: %d open, %d idle, %d seats -> adding %s\n", time.Since(r.start).Seconds(), open, idle, len(live), seat)
 		r.spawn(seat, "joiner", live)
 		live = append(live, seat)
 	}
 }
 
+// holders is how many distinct seats hold at least one unit.
+func (r *teamRun) holders() int {
+	seen := map[string]bool{}
+	for _, w := range r.workList() {
+		if w.State == "claimed" && w.Holder != "" {
+			seen[w.Holder] = true
+		}
+	}
+	return len(seen)
+}
+
 func (r *teamRun) workCounts() (open, held, done, total int) {
 	for _, w := range r.workList() {
 		total++
-		switch w.State {
-		case "open":
+		switch {
+		case w.State == "open" && w.Team:
+			// a team's job: the harness claims it within a poll, not a seat
+		case w.State == "open":
 			open++
-		case "claimed":
+		case w.State == "claimed":
 			held++
-		case "done":
+		case w.State == "done":
 			done++
 		}
 	}
@@ -441,15 +484,25 @@ func hgit(dir string, args ...string) error {
 	return nil
 }
 
+func (r *teamRun) origin() string {
+	if r.originPath != "" {
+		return r.originPath
+	}
+	return filepath.Join(r.out, "origin.git")
+}
+
 func (r *teamRun) spawn(seat, role string, roster []string) {
 	dir := filepath.Join(r.out, "seats", seat)
 	_ = os.MkdirAll(filepath.Dir(dir), 0o755)
-	if err := hgit("", "clone", "-q", filepath.Join(r.out, "origin.git"), dir); err != nil {
+	if err := hgit("", "clone", "-q", r.origin(), dir); err != nil {
 		fmt.Fprintln(os.Stderr, "clone:", err)
 		return
 	}
 	for _, kv := range [][]string{{"user.name", seat}, {"user.email", seat + "@example.invalid"}, {"commit.gpgsign", "false"}, {"core.hooksPath", "/dev/null"}} {
 		_ = hgit(dir, "config", kv[0], kv[1])
+	}
+	if r.branch != "main" {
+		_ = hgit(dir, "checkout", "-q", "-b", r.branch, "origin/"+r.branch)
 	}
 	r.mu.Lock()
 	r.live = append(r.live, seat)
@@ -459,7 +512,7 @@ func (r *teamRun) spawn(seat, role string, roster []string) {
 		defer r.wg.Done()
 		sr := SeatResult{Seat: seat, Role: role, JoinedS: time.Since(r.start).Seconds(), CostKnown: true}
 		t0 := time.Now()
-		session, msg := "", teamPrompt(r.shape, r.goal, role, seat, roster)
+		session, msg := "", teamPrompt(r.shape, r.branch, role, seat, roster)
 		for {
 			session = r.turn(&sr, dir, session, msg)
 			if session == "" || r.ctx.Err() != nil || sr.Wakes >= r.wakes {
@@ -526,7 +579,7 @@ func (r *teamRun) remoteTurn(sr *SeatResult, dir, session, msg string) *exec.Cmd
 	cmd.Dir = r.out
 	cmd.Env = append(append([]string{}, r.env...),
 		"SEAT="+sr.Seat, "PROMPT_FILE="+promptFile, "RESUME="+session, "DIR="+dir,
-		"REMOTE="+filepath.Join(r.out, "origin.git"), "MODEL="+r.model, "TURNS="+fmt.Sprint(r.turns), "SWARM_SEAT="+sr.Seat)
+		"REMOTE="+r.origin(), "BRANCH="+r.branch, "MODEL="+r.model, "TURNS="+fmt.Sprint(r.turns), "SWARM_SEAT="+sr.Seat)
 	return cmd
 }
 
@@ -570,7 +623,14 @@ func (r *teamRun) result() TeamResult {
 	}
 	res.Requests = r.countRequests()
 	res.Receipts = r.receipts
-	g := Grade(r.goal, filepath.Join(r.out, "origin.git"), filepath.Join(r.out, "grade"))
+	res.Children = r.children
+	for _, c := range r.children {
+		// a team of teams is billed as a whole
+		res.CostUSD += c.Result.CostUSD
+		res.Turns += c.Result.Turns
+		res.Seats = append(res.Seats, c.Result.Seats...)
+	}
+	g := Grade(r.goal, r.origin(), filepath.Join(r.out, "grade"))
 	res.Total = g.Passed + len(g.Failed)
 	res.Passed, res.Builds, res.OwnTests, res.Failed, res.Commits, res.GradeNote = g.Passed, g.Builds, g.OwnTests, g.Failed, g.Commits, g.Note
 	return res

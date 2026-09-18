@@ -9,10 +9,10 @@ import (
 // that lost its lease cannot land the unit, and waiting wakes on progress.
 func TestWorkClaimFencesAndIdleWakes(t *testing.T) {
 	s := onPlane(t)
-	if _, err := s.WorkAdd("parse", "parser", []string{"a.go"}, "alice", ""); err != nil {
+	if _, err := s.WorkAdd("parse", "parser", []string{"a.go"}, "alice", "", false, ""); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.WorkAdd("parse", "again", nil, "bob", "")
+	_, err := s.WorkAdd("parse", "again", nil, "bob", "", false, "")
 	refused(t, err, "exists")
 	if _, err := s.WorkClaim("parse", "bob", time.Minute); err != nil {
 		t.Fatal(err)
@@ -42,5 +42,29 @@ func TestWorkClaimFencesAndIdleWakes(t *testing.T) {
 	ws, _ := s.WorkList()
 	if len(ws) != 1 || ws[0].State != "done" || ws[0].DoneBy != "alice" || ws[0].Head != "abc123" || ws[0].Result != "done" {
 		t.Fatalf("%+v", ws)
+	}
+}
+
+// A seat may hold two units, not three; the third claim is refused so one
+// seat cannot empty the list while the others idle.
+func TestWorkWIPLimit(t *testing.T) {
+	s := onPlane(t)
+	for _, id := range []string{"a", "b", "c"} {
+		if _, err := s.WorkAdd(id, id, nil, "x", "", false, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []string{"a", "b"} {
+		if _, err := s.WorkClaim(id, "p1", time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := s.WorkClaim("c", "p1", time.Minute)
+	refused(t, err, "wip_full")
+	if _, err := s.WorkClaim("a", "p1", time.Minute); err != nil {
+		t.Fatal("renewing a held unit counted against the limit:", err)
+	}
+	if _, err := s.WorkClaim("c", "p2", time.Minute); err != nil {
+		t.Fatal(err)
 	}
 }

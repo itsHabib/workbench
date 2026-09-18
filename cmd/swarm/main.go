@@ -101,7 +101,8 @@ type cli struct {
 	s    *swarm.State
 	seat string
 
-	title, files, result, head, verdict, tail string
+	title, files, result, head, verdict, tail, brief string
+	team                                             bool
 
 	as, scope, question, options, needs, ruling, evidence, supersedes, to, why        string
 	operator, lead, verifier, diskMin, resource, dir, cmd, wakeModel, wakeTools, base string
@@ -158,6 +159,8 @@ func parse(verb string, args []string) (*cli, error) {
 	fs.DurationVar(&c.window, "window", time.Hour, "load window")
 	fs.StringVar(&c.title, "title", "", "work title")
 	fs.StringVar(&c.files, "files", "", "comma-separated paths the work touches")
+	fs.BoolVar(&c.team, "team", false, "work add: this unit is a team's job")
+	fs.StringVar(&c.brief, "brief", "", "work add --team: what that team must build")
 	fs.StringVar(&c.verdict, "verdict", "", "pass or fail")
 	fs.StringVar(&c.tail, "tail", "", "last lines of the verifier output")
 	fs.StringVar(&c.head, "head", "", "commit that carries the finished unit")
@@ -593,17 +596,36 @@ func (c *cli) work() error {
 	var err error
 	switch c.arg(0) {
 	case "add":
-		w, err = c.s.WorkAdd(c.arg(1), c.title, split(c.files, ","), c.seat, c.supersedes)
+		w, err = c.s.WorkAdd(c.arg(1), c.title, split(c.files, ","), c.seat, c.supersedes, c.team, c.brief)
 	case "claim":
 		w, err = c.s.WorkClaim(c.arg(1), c.seat, c.ttl)
 	case "drop":
 		w, err = c.s.WorkDrop(c.arg(1), c.seat)
 	case "done":
 		w, err = c.s.WorkDone(c.arg(1), c.seat, c.result, c.head)
+	case "next":
+		ws, err := c.s.WorkNext(c.seat, c.base)
+		if err != nil {
+			return err
+		}
+		if c.jsonOut {
+			return c.emit(ws)
+		}
+		for i, w := range ws {
+			mark := "  "
+			if i == 0 && len(w.Files) > 0 {
+				mark = "* "
+			}
+			fmt.Printf("%s%-24s %s  [%s]\n", mark, w.ID, w.Title, strings.Join(w.Files, ","))
+		}
+		if len(ws) == 0 {
+			fmt.Println("nothing open")
+		}
+		return nil
 	case "list", "":
 		return c.workList()
 	default:
-		return fmt.Errorf("work: add|list|claim|done|drop")
+		return fmt.Errorf("work: add|list|next|claim|done|drop")
 	}
 	if err != nil {
 		return c.record(err)

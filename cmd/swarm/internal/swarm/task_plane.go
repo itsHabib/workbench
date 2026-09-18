@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,7 +24,9 @@ type Work struct {
 	AddedBy string    `json:"added_by"`
 	At      time.Time `json:"at"`
 	Parent  string    `json:"parent,omitempty"`
-	State   string    `json:"state"` // open | claimed | done
+	Team    bool      `json:"team,omitempty"`  // a team's job, not one seat's
+	Brief   string    `json:"brief,omitempty"` // what that team must build
+	State   string    `json:"state"`           // open | claimed | done
 	Holder  string    `json:"holder,omitempty"`
 	Epoch   int       `json:"epoch,omitempty"`
 	Until   time.Time `json:"until,omitempty"`
@@ -48,7 +53,7 @@ func workFromItem(it plane.Item) Work {
 
 // WorkAdd puts a unit of work on the plane. Adding an id that exists is a
 // no-op, so two seats that think of the same task do not double it.
-func (s *State) WorkAdd(id, title string, files []string, by, parent string) (*Work, error) {
+func (s *State) WorkAdd(id, title string, files []string, by, parent string, team bool, brief string) (*Work, error) {
 	id = strings.TrimSpace(id)
 	if id == "" || title == "" {
 		return nil, refuse("bad_work", "work needs an id and --title")
@@ -63,7 +68,7 @@ func (s *State) WorkAdd(id, title string, files []string, by, parent string) (*W
 		w := workFromItem(it)
 		return &w, refuse("exists", "%s already exists (%s): %s", id, w.State, w.Title)
 	}
-	w := Work{ID: id, Title: title, Files: files, AddedBy: by, At: Now(), Parent: parent}
+	w := Work{ID: id, Title: title, Files: files, AddedBy: by, At: Now(), Parent: parent, Team: team, Brief: brief}
 	payload, _ := json.Marshal(w)
 	if err := st.Put(ctx, plane.Item{Kind: kindWork, ID: id, Payload: string(payload)}); err != nil {
 		return nil, err
@@ -92,6 +97,16 @@ func (s *State) WorkList() ([]Work, error) {
 	return out, nil
 }
 
+// WIPLimit is how many units one seat may hold at once. SWARM_WIP overrides
+// it. Two lets a seat line up its own follow-on while it lands the first;
+// a larger number lets one seat hoard the list while the others idle.
+func WIPLimit() int {
+	if v, err := strconv.Atoi(os.Getenv("SWARM_WIP")); err == nil && v > 0 {
+		return v
+	}
+	return 2
+}
+
 // WorkClaim leases a unit to seat. Claiming what you already hold renews
 // it. A unit whose holder went away becomes claimable when its lease lapses.
 func (s *State) WorkClaim(id, seat string, ttl time.Duration) (*Work, error) {
@@ -109,6 +124,12 @@ func (s *State) WorkClaim(id, seat string, ttl time.Duration) (*Work, error) {
 		return nil, refuse("no_such_work", "%s", id)
 	}
 	owner := incarnation(seat)
+	if it.Owner != owner {
+		held, _ := s.heldBy(st, seat)
+		if len(held) >= WIPLimit() {
+			return nil, refuse("wip_full", "%s already holds %s; finish or drop one first", seat, strings.Join(held, ", "))
+		}
+	}
 	var g plane.Grant
 	if it.Owner == owner && Now().Before(it.Until) {
 		g, err = st.Renew(ctx, plane.Grant{Kind: kindWork, ID: id, Epoch: it.Epoch, Owner: owner}, ttl)
@@ -161,6 +182,62 @@ func (s *State) WorkDone(id, seat, result, head string) (*Work, error) {
 	w.State, w.DoneBy = "done", seat
 	w.Head, w.Result = splitHead(result)
 	return &w, nil
+}
+
+func (s *State) heldBy(st plane.Store, seat string) ([]string, error) {
+	items, err := st.List(context.Background(), kindWork)
+	if err != nil {
+		return nil, err
+	}
+	var held []string
+	for _, it := range items {
+		if w := workFromItem(it); w.State == "claimed" && w.Holder == seat {
+			held = append(held, w.ID)
+		}
+	}
+	return held, nil
+}
+
+// WorkNext ranks the open units for a seat by how much they touch what
+// the seat has already changed on the base branch. Context is the thing
+// a seat has that a fresh one does not, so the list routes work to it.
+func (s *State) WorkNext(seat, base string) ([]Work, error) {
+	ws, err := s.WorkList()
+	if err != nil {
+		return nil, err
+	}
+	touched := map[string]bool{}
+	if base == "" {
+		base = "main"
+	}
+	for _, ref := range []string{"origin/" + base, base} {
+		lines, err := gitLines(s.Repo, "log", "--author="+seat, "--name-only", "--format=", ref)
+		if err != nil {
+			continue
+		}
+		for _, l := range lines {
+			if l != "" {
+				touched[l] = true
+				touched[filepath.Dir(l)] = true
+			}
+		}
+		break
+	}
+	var open []Work
+	score := map[string]int{}
+	for _, w := range ws {
+		if w.State != "open" {
+			continue
+		}
+		for _, f := range w.Files {
+			if touched[f] || touched[filepath.Dir(f)] {
+				score[w.ID]++
+			}
+		}
+		open = append(open, w)
+	}
+	sort.SliceStable(open, func(i, j int) bool { return score[open[i].ID] > score[open[j].ID] })
+	return open, nil
 }
 
 // WorkDrop gives a unit back so another seat can take it. The epoch is not

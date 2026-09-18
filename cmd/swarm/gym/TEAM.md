@@ -204,3 +204,29 @@ rework. Raw results and the receipt list in `runs/launch-cycletime/`.
 That is the red path exercised end to end: a verdict on the store, a note to the author, a fix,
 a green verdict for the fixing commit. Cost of the change with the acceptance test: about $6 and
 three minutes more than the change without one.
+
+## Run 8: a team of teams on shoplab
+
+Shape `teams`: two founders, growth to three, and any unit added with `--team --brief` forms a
+child team of its own (two founders, growth to four, own branch off main, own store namespace,
+own reconcile controller). The harness claims the unit, runs the child, and when the child's
+list is done and its branch is green, merges the branch into main and marks the unit done. A
+child that is not green is handed back to the founders by note.
+
+| shape | seats in total | hidden tests | wall | cost | turns |
+|---|---|---|---|---|---|
+| swat (run 2) | 6 | 85/86 | 465s | $8.88 | 188 |
+| teams | 3 founders + 4 teams of 2 to 4, 15 seats | 84/86 | 829s | $21.24 | 468 |
+
+What the founders did without being told how: kept the six foundation packages for
+themselves and built them first, and cut the rest into four team briefs by layer (commerce
+primitives; cart and pricing; order and report; app). Three child branches merged
+automatically, each verified green on the merged tree first. The order-and-report team
+finished red, was handed back, and a founder merged and fixed it by hand. The app team was
+the tail: it could not finish until the others had merged, and it grew to four seats waiting.
+Raw results in `runs/teams-shoplab/`.
+
+On a goal one team can hold, a team of teams costs more than twice as much and takes almost
+twice as long, which is the expected price of a layer. The mechanism is what this run was for:
+the founders route work down as briefs and results come back up as merged branches, and no
+seat above a team writes code. The goal that needs it is the next one.
