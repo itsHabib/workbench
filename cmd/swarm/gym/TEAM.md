@@ -269,11 +269,11 @@ bundle: a lesson plan per lecture, twenty lectures, checked by `node scripts/che
 
 | seats | plans | checker on main | wall | cost | turns | red landings |
 |---|---|---|---|---|---|---|
-| 2, grew to 6 | 20 of 20 | 0 errors, 88 warnings | 1371s | $30.51 | 716 | 12 of 40 |
+| 2, grew to 6 | 20 of 20 | 0 errors, 88 warnings | 1371s | $30.51 | 716 | 17 of 20 receipts |
 
 The founders made one unit per lecture without being told to. The projection added a third
 seat at 162 seconds when the finish slipped past the deadline, then more as the pace measured
-in. Twelve landings went red on real content errors the checker caught (a section topic that
+in. Seventeen of twenty verified landings went red on real content errors the checker caught (a section topic that
 did not match its chunk, a task with no visual to grade against) and were sent back to their
 authors by note; all twenty plans ended clean. The deadline was missed by two minutes.
 
