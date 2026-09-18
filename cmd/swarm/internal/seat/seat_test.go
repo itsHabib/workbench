@@ -33,3 +33,12 @@ func TestEnvironmentDropsHarnessMarkerAndSetsSeat(t *testing.T) {
 		t.Fatalf("%v", env)
 	}
 }
+
+func TestFirstLineTruncates(t *testing.T) {
+	if got := firstLine("401 Invalid bearer token\nmore"); got != "401 Invalid bearer token" {
+		t.Fatal(got)
+	}
+	if got := firstLine(strings.Repeat("x", 300)); len(got) != 200 {
+		t.Fatal(len(got))
+	}
+}

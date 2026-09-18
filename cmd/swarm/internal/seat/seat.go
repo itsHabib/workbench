@@ -116,6 +116,8 @@ func run(res *Result, o options) error {
 		NumTurns  int     `json:"num_turns"`
 		Cost      float64 `json:"total_cost_usd"`
 		SessionID string  `json:"session_id"`
+		IsError   bool    `json:"is_error"`
+		Result    string  `json:"result"`
 	}
 	if json.Unmarshal(out, &got) != nil {
 		if runErr != nil {
@@ -124,7 +126,20 @@ func run(res *Result, o options) error {
 		return errors.New("claude printed no result")
 	}
 	res.Turns, res.CostUSD, res.SessionID = got.NumTurns, got.Cost, got.SessionID
+	if got.IsError {
+		// claude -p exits 0 with is_error set, so a bad token or a refused
+		// model would otherwise look like a finished turn.
+		return fmt.Errorf("session error: %s", firstLine(got.Result))
+	}
 	return nil
+}
+
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
+	if len(line) > 200 {
+		line = line[:200]
+	}
+	return line
 }
 
 // ensureCheckout clones remote into dir when dir is not already a checkout,
