@@ -162,3 +162,25 @@ first attempt failed authentication in five seconds per seat with exit 3 and cos
 token file held a double paste. The grader needs Go on the runner's machine even when the
 seats do not, which the harness now checks before starting. Raw results in
 `runs/team-kvlab-rooms/`.
+
+## Run 6: SWAT on shoplab with the seats inside Rooms
+
+Same arguments as the local shoplab SWAT run, seats in Rooms clones on the rented box,
+`--reconcile` on, swarm at 51476aa.
+
+| where | seats | hidden tests | wall | cost | turns | seconds per turn |
+|---|---|---|---|---|---|---|
+| local clones | 2, grew to 6 | 85/86 | 465s | $8.88 | 188 | 13.1 |
+| Rooms clones | 2, grew to 6 | 78/86 | 1655s | $25.65 | 616 | 14.9 |
+
+One run each. The per-turn cost is the same to within two seconds, so the host to guest hop,
+git over the network and the per-guest build cache are not where the time went. The Rooms
+run took three times as many turns: nine wakes across five seats against none locally, and
+the integrating package (`app`, seven of the eight failures) was marked done without passing.
+Three of the local run's seat turn counts are known to be under-reported by the session
+output, so the turn ratio is an upper bound. Reconcile verified fifteen landings green; the
+red path is still unexercised. Raw results in `runs/team-shoplab-rooms/`.
+
+What to take from runs 5 and 6 together: the seam works, a seat inside a microVM behaves as a
+seat, and the substrate's own overhead per turn is small. Why the same team needed more turns
+in guests is the open question; the per-turn prompts in `logs/` are where to look.

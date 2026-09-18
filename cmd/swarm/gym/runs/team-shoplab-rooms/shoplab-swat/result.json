@@ -1,0 +1,323 @@
+{
+  "at": "2026-09-18T04:26:39.034544386Z",
+  "shape": "swat",
+  "model": "claude-sonnet-5",
+  "store": "resp:10.128.0.4:6379/shoplab-swat:",
+  "seats": [
+    {
+      "seat": "p1",
+      "role": "peer",
+      "joined_s": 0.042154523,
+      "wall_s": 1647.164778934,
+      "turns": 112,
+      "cost_usd": 3.6252462000000008,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p2",
+      "role": "peer",
+      "joined_s": 0.053715053,
+      "wall_s": 1654.607830722,
+      "turns": 112,
+      "cost_usd": 4.241614400000001,
+      "cost_known": true,
+      "wakes": 2
+    },
+    {
+      "seat": "p3",
+      "role": "joiner",
+      "joined_s": 140.155692136,
+      "wall_s": 1505.535203838,
+      "turns": 79,
+      "cost_usd": 2.7483338,
+      "cost_known": true,
+      "wakes": 1
+    },
+    {
+      "seat": "p4",
+      "role": "joiner",
+      "joined_s": 160.177164387,
+      "wall_s": 1479.029715207,
+      "turns": 115,
+      "cost_usd": 6.667652100000001,
+      "cost_known": true,
+      "wakes": 4
+    },
+    {
+      "seat": "p5",
+      "role": "joiner",
+      "joined_s": 180.212153155,
+      "wall_s": 1472.171836358,
+      "turns": 102,
+      "cost_usd": 4.926278400000001,
+      "cost_known": true,
+      "wakes": 1
+    },
+    {
+      "seat": "p6",
+      "role": "joiner",
+      "joined_s": 200.2399954,
+      "wall_s": 1437.07483795,
+      "turns": 96,
+      "cost_usd": 3.440298500000001,
+      "cost_known": true,
+      "wakes": 1
+    }
+  ],
+  "hidden_passed": 78,
+  "hidden_total": 86,
+  "builds": true,
+  "own_test_files": 16,
+  "wall_s": 1654.661573579,
+  "cost_usd": 25.649423400000007,
+  "turns": 616,
+  "work": [
+    {
+      "id": "errs",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p3",
+      "holder": "",
+      "title": "errs: sentinel errors + Code()"
+    },
+    {
+      "id": "money",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p4",
+      "holder": "",
+      "title": "money: Money type, Parse/String/Mul/BP/Div/Sum/Allocate"
+    },
+    {
+      "id": "sku",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "sku: SKU type, Parse/MustParse/String/Sort"
+    },
+    {
+      "id": "idem",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "idem: idempotency Store with ttl"
+    },
+    {
+      "id": "outbox",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p3",
+      "holder": "",
+      "title": "outbox: Event encode/decode, Log"
+    },
+    {
+      "id": "catalog",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "catalog: Product catalog CRUD"
+    },
+    {
+      "id": "inventory",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "inventory: stock, reservations with ttl"
+    },
+    {
+      "id": "shipping",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p6",
+      "holder": "",
+      "title": "shipping: Zone + Rate"
+    },
+    {
+      "id": "discount",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p5",
+      "holder": "",
+      "title": "discount: Coupon Book Quote/Redeem"
+    },
+    {
+      "id": "ledger",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p6",
+      "holder": "",
+      "title": "ledger: double-entry Ledger"
+    },
+    {
+      "id": "command",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p5",
+      "holder": "",
+      "title": "command: Cmd parser"
+    },
+    {
+      "id": "cart",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p3",
+      "holder": "",
+      "title": "cart: Cart lines over catalog"
+    },
+    {
+      "id": "pricing",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p4",
+      "holder": "",
+      "title": "pricing: Quote calc (tax/discount/shipping)"
+    },
+    {
+      "id": "order",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p6",
+      "holder": "",
+      "title": "order: Order Book + state machine"
+    },
+    {
+      "id": "report",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "report: Summarize orders"
+    },
+    {
+      "id": "app",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p5",
+      "holder": "",
+      "title": "app: App wiring Exec/Events"
+    }
+  ],
+  "requests": 1,
+  "commits_by_author": {
+    "harness": 1,
+    "p1": 2,
+    "p2": 3,
+    "p3": 3,
+    "p4": 2,
+    "p5": 3,
+    "p6": 3
+  },
+  "failed_tests": [
+    "shoplab/app.TestHiddenCancelAndRefund",
+    "shoplab/app.TestHiddenConcurrentCheckoutsNeverOversell",
+    "shoplab/app.TestHiddenErrorsChangeNothing",
+    "shoplab/app.TestHiddenEventLog",
+    "shoplab/app.TestHiddenHappyPath",
+    "shoplab/app.TestHiddenIdempotency",
+    "shoplab/app.TestHiddenReservationExpiry",
+    "shoplab/outbox.TestHiddenReadAll"
+  ],
+  "receipts": [
+    {
+      "head": "10c9a76188d94c217bac310917cafb387b8ce271",
+      "author": "harness",
+      "green": false,
+      "at_s": 15.088682587
+    },
+    {
+      "head": "4cee5405174d01504196f37451506856cc293c98",
+      "author": "p3",
+      "green": true,
+      "at_s": 211.237538274
+    },
+    {
+      "head": "2add18a9d566868b803938e14af11cca070a1d4f",
+      "author": "p2",
+      "green": true,
+      "at_s": 241.628811827
+    },
+    {
+      "head": "0df40f95cda6f29544db6bd9269a4767ca14814e",
+      "author": "p1",
+      "green": true,
+      "at_s": 317.111255033
+    },
+    {
+      "head": "a156b94f9f057083104ab916554329575fdc6e79",
+      "author": "p5",
+      "green": true,
+      "at_s": 347.565488333
+    },
+    {
+      "head": "416a53bf0f8b56e53b84a49bd8931a0bec37da25",
+      "author": "p4",
+      "green": true,
+      "at_s": 378.121193067
+    },
+    {
+      "head": "0f0319036b459b47f05a48ec855f9842abc4494a",
+      "author": "p6",
+      "green": true,
+      "at_s": 408.645014273
+    },
+    {
+      "head": "4774315d88c99dfdab133933bf43bc246dde0774",
+      "author": "p6",
+      "green": true,
+      "at_s": 424.146982365
+    },
+    {
+      "head": "ac5910de644932ea249d94c1d393fd2bbb8962ce",
+      "author": "p2",
+      "green": true,
+      "at_s": 439.670933066
+    },
+    {
+      "head": "a600ba78402dad72bbb8e1b9b6f46c8b9e6af673",
+      "author": "p5",
+      "green": true,
+      "at_s": 455.194935958
+    },
+    {
+      "head": "4f173dd179a3e2b48d1c4115e2c9d42d49920767",
+      "author": "p1",
+      "green": true,
+      "at_s": 470.753322104
+    },
+    {
+      "head": "7488f06815e7e381eb59f7d1a8d4109a5c9fe0ee",
+      "author": "p3",
+      "green": true,
+      "at_s": 486.338248036
+    },
+    {
+      "head": "178012578de5f1918fd5f1e4121b757e552fd3e1",
+      "author": "p4",
+      "green": true,
+      "at_s": 592.04687884
+    },
+    {
+      "head": "72102df98885cac7ca3b5b1c2be67734ab86d931",
+      "author": "p6",
+      "green": true,
+      "at_s": 893.068651625
+    },
+    {
+      "head": "43d2a7814dd51e6d967811627eeb2232f912b186",
+      "author": "p2",
+      "green": true,
+      "at_s": 923.855590715
+    },
+    {
+      "head": "3eaee46c3816291a5818be87dd0dc8238546d32f",
+      "author": "p5",
+      "green": true,
+      "at_s": 1029.851770503
+    }
+  ]
+}

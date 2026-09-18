@@ -1,0 +1,38 @@
+[  15s] reconcile: 10c9a761 by harness RED, nudging
+[ 140s] grow: 6 open, 1 held, 2 seats -> adding p3
+[ 160s] grow: 12 open, 1 held, 3 seats -> adding p4
+[ 180s] grow: 13 open, 3 held, 4 seats -> adding p5
+[ 200s] grow: 13 open, 3 held, 5 seats -> adding p6
+[ 211s] reconcile: 4cee5405 by p3 green
+[ 242s] reconcile: 2add18a9 by p2 green
+[ 286s] wake p2: Wake: there is unclaimed work: run `swarm work list`. The team is not finished.
+[ 308s] wake p2: Wake: there is unclaimed work: run `swarm work list`. The team is not finished.
+[ 317s] reconcile: 0df40f95 by p1 green
+[ 348s] reconcile: a156b94f by p5 green
+[ 378s] reconcile: 416a53bf by p4 green
+[ 409s] reconcile: 0f031903 by p6 green
+[ 424s] reconcile: 4774315d by p6 green
+[ 440s] reconcile: ac5910de by p2 green
+[ 443s] wake p4: …now, or run swarm work drop pricing so someone else can. To wait for others, run swarm idle in the foreground.
+[ 455s] reconcile: a600ba78 by p5 green
+[ 471s] reconcile: 4f173dd1 by p1 green
+[ 486s] reconcile: 7488f068 by p3 green
+[ 509s] wake p4: …now, or run swarm work drop pricing so someone else can. To wait for others, run swarm idle in the foreground.
+[ 592s] reconcile: 17801257 by p4 green
+[ 738s] wake p4: …now, or run swarm work drop pricing so someone else can. To wait for others, run swarm idle in the foreground.
+[ 893s] reconcile: 72102df9 by p6 green
+[ 924s] reconcile: 43d2a781 by p2 green
+[1030s] reconcile: 3eaee46c by p5 green
+[1191s] wake p4: …now, or run swarm work drop pricing so someone else can. To wait for others, run swarm idle in the foreground.
+[1620s] wake p5: Wake: there is unclaimed work: run `swarm work list`. The team is not finished.
+[1620s] wake p3: Wake: there is unclaimed work: run `swarm work list`. The team is not finished.
+[1621s] wake p6: Wake: there is unclaimed work: run `swarm work list`. The team is not finished.
+[1637s] p6 (joiner) stopped: 96 turns $3.44, 1 wakes
+[1639s] p4 (joiner) stopped: 115 turns $6.67, 4 wakes
+[1646s] p3 (joiner) stopped: 79 turns $2.75, 1 wakes
+[1647s] p1 (peer) stopped: 112 turns $3.63, 0 wakes
+[1652s] p5 (joiner) stopped: 102 turns $4.93, 1 wakes
+[1655s] p2 (peer) stopped: 112 turns $4.24, 2 wakes
+| shape | seats | hidden tests | builds | wall | cost | turns | units (added by) | questions |
+|---|---|---|---|---|---|---|---|---|
+| swat | 6 | 78/86 | true | 1655s | $25.65 | 616 | 16, 16 done (p1:16) | 1 |
