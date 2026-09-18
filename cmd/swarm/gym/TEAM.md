@@ -144,3 +144,21 @@ red, so the nudge path is still unexercised. Raw results in `runs/launch-cycleti
 
 Cost of the change: about $8 and six minutes on top of the first run's $4.38. The ledger
 carried it: later commits cite the ruling id in their messages.
+
+## Run 5: the same flat run with the seats inside Rooms microVMs
+
+Run by the rooms lead on a rented box: each seat a Firecracker clone (2 GiB, 2 vCPU) started
+from one snapshot, a sleeping room per seat that the runner sends turns into, the token
+delivered at clone time and read by `swarm seat run` from the guest's secrets file, seats
+pushing their own branches over git:// to the box, store on the box's Redis.
+
+| shape | seats | hidden tests | wall | cost | turns |
+|---|---|---|---|---|---|
+| flat, local clones (run 1) | 2 | 20/20 | 180s | $1.84 | 88 |
+| flat, Rooms clones | 2 | 20/20 | 230s | $2.62 | 106 |
+
+Same result, same shape of work (one peer added all five units, the other took two). The
+first attempt failed authentication in five seconds per seat with exit 3 and cost nothing: the
+token file held a double paste. The grader needs Go on the runner's machine even when the
+seats do not, which the harness now checks before starting. Raw results in
+`runs/team-kvlab-rooms/`.

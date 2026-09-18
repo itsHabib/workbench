@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "status": "cancelled",
+  "exit_code": 143,
+  "started_at": "2026-09-18T04:18:15.031729926Z",
+  "ended_at": "2026-09-18T04:22:06.803293188Z",
+  "command": [
+    "sh",
+    "-c",
+    "sleep 1500"
+  ]
+}

@@ -1,0 +1,83 @@
+{
+  "at": "2026-09-18T04:18:16.527782355Z",
+  "shape": "flat",
+  "model": "claude-sonnet-5",
+  "store": "resp:10.128.0.4:6379/kvlab:",
+  "seats": [
+    {
+      "seat": "p1",
+      "role": "peer",
+      "joined_s": 0.040636977,
+      "wall_s": 226.954783569,
+      "turns": 64,
+      "cost_usd": 1.5114256999999995,
+      "cost_known": true,
+      "wakes": 0
+    },
+    {
+      "seat": "p2",
+      "role": "peer",
+      "joined_s": 0.052189749,
+      "wall_s": 229.985314091,
+      "turns": 42,
+      "cost_usd": 1.108544,
+      "cost_known": true,
+      "wakes": 0
+    }
+  ],
+  "hidden_passed": 20,
+  "hidden_total": 20,
+  "builds": true,
+  "own_test_files": 5,
+  "wall_s": 230.037533925,
+  "cost_usd": 2.6199696999999995,
+  "turns": 106,
+  "work": [
+    {
+      "id": "store",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "store package: in-memory TTL key-value store"
+    },
+    {
+      "id": "wal",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "wal package: encode/decode/replay write-ahead log"
+    },
+    {
+      "id": "query",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "query package: command parser"
+    },
+    {
+      "id": "stats",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p2",
+      "holder": "",
+      "title": "stats package: percentile and summary"
+    },
+    {
+      "id": "engine",
+      "state": "done",
+      "added_by": "p1",
+      "done_by": "p1",
+      "holder": "",
+      "title": "engine package: ties store+wal+query+stats together"
+    }
+  ],
+  "requests": 0,
+  "commits_by_author": {
+    "harness": 1,
+    "p1": 3,
+    "p2": 2
+  }
+}

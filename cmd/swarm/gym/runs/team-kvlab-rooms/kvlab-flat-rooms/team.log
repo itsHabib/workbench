@@ -1,0 +1,5 @@
+[ 227s] p1 (peer) stopped: 64 turns $1.51, 0 wakes
+[ 230s] p2 (peer) stopped: 42 turns $1.11, 0 wakes
+| shape | seats | hidden tests | builds | wall | cost | turns | units (added by) | questions |
+|---|---|---|---|---|---|---|---|---|
+| flat | 2 | 0/20 | false | 230s | $2.62 | 106 | 5, 5 done (p1:5) | 0 |

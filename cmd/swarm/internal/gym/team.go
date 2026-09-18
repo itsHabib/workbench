@@ -153,6 +153,11 @@ func teamCmd(args []string) int {
 		fmt.Fprint(os.Stderr, usage)
 		return 3
 	}
+	if _, err := exec.LookPath("go"); err != nil {
+		// The seats may run anywhere, but the grader builds and tests here.
+		fmt.Fprintln(os.Stderr, "gym team: go is not on this machine's PATH; the seats could succeed and the grader could not. Install Go here, or run team-table --regrade later on a machine that has it.")
+		return 3
+	}
 	abs, _ := filepath.Abs(*out)
 	if err := os.MkdirAll(filepath.Join(abs, "logs"), 0o755); err != nil {
 		fmt.Fprintln(os.Stderr, err)
