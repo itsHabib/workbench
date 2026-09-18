@@ -107,7 +107,7 @@ func teamPrompt(shape, _, role, seat string, roster []string) string {
 
 type teamRun struct {
 	shape, model, store, out string
-	goal, self               string
+	goal, self, seatCmd      string
 	wakes                    int
 	turns                    int
 	wall                     time.Duration
@@ -130,6 +130,7 @@ func teamCmd(args []string) int {
 	turns := fl.Int("turns", 150, "turn cap per session")
 	goal := fl.String("goal", "kvlab", "which sandbox goal: a directory under testdata")
 	wakes := fl.Int("wakes", 8, "most times a stopped seat is resumed")
+	seatCmd := fl.String("seat-cmd", "", "shell that runs one seat turn somewhere else (see docs/SEAT.md); empty runs claude here")
 	if fl.Parse(args) != nil || *out == "" {
 		fmt.Fprint(os.Stderr, usage)
 		return 3
@@ -145,7 +146,7 @@ func teamCmd(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), *wall)
 	defer cancel()
 	self, _ := os.Executable()
-	r := &teamRun{goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
+	r := &teamRun{seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
 	r.env = append(childEnv(filepath.Dir(self), filepath.Join(abs, "fleet-state")), "SWARM_STORE="+*store)
 	if err := r.seed(); err != nil {
 		fmt.Fprintln(os.Stderr, "seed:", err)
@@ -331,6 +332,9 @@ func (r *teamRun) turn(sr *SeatResult, dir, session, msg string) string {
 	cmd := exec.CommandContext(r.ctx, "claude", args...)
 	cmd.Dir = dir
 	cmd.Env = append(append([]string{}, r.env...), "SWARM_SEAT="+sr.Seat)
+	if r.seatCmd != "" {
+		cmd = r.remoteTurn(sr, dir, session, msg)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	_ = cmd.Run()
@@ -339,7 +343,7 @@ func (r *teamRun) turn(sr *SeatResult, dir, session, msg string) string {
 		Cost      float64 `json:"total_cost_usd"`
 		SessionID string  `json:"session_id"`
 	}
-	if json.Unmarshal(stdout.Bytes(), &res) != nil {
+	if json.Unmarshal(lastJSONLine(stdout.Bytes()), &res) != nil {
 		sr.CostKnown = false
 	}
 	sr.Turns += res.NumTurns
@@ -348,6 +352,21 @@ func (r *teamRun) turn(sr *SeatResult, dir, session, msg string) string {
 	_ = os.WriteFile(filepath.Join(r.out, "logs", name+".out.json"), stdout.Bytes(), 0o644)
 	_ = os.WriteFile(filepath.Join(r.out, "logs", name+".err.txt"), stderr.Bytes(), 0o644)
 	return res.SessionID
+}
+
+// remoteTurn hands one turn to the substrate named by --seat-cmd. The shell
+// gets the seat, the prompt as a file, the session to resume, the checkout,
+// the origin, the model and the turn cap in its environment, and must print
+// the seat runner's JSON line last. Which machine it runs on is its business.
+func (r *teamRun) remoteTurn(sr *SeatResult, dir, session, msg string) *exec.Cmd {
+	promptFile := filepath.Join(r.out, "logs", fmt.Sprintf("%s.%d.prompt", sr.Seat, sr.Wakes))
+	_ = os.WriteFile(promptFile, []byte(msg), 0o644)
+	cmd := exec.CommandContext(r.ctx, "sh", "-c", r.seatCmd)
+	cmd.Dir = r.out
+	cmd.Env = append(append([]string{}, r.env...),
+		"SEAT="+sr.Seat, "PROMPT_FILE="+promptFile, "RESUME="+session, "DIR="+dir,
+		"REMOTE="+filepath.Join(r.out, "origin.git"), "MODEL="+r.model, "TURNS="+fmt.Sprint(r.turns), "SWARM_SEAT="+sr.Seat)
+	return cmd
 }
 
 // wakeReason blocks until a stopped seat has something to do and says what,
@@ -496,6 +515,22 @@ func plantHidden(goal, into string) ([]string, error) {
 	})
 	sort.Strings(want)
 	return want, err
+}
+
+// lastJSONLine is the seat's result: claude prints one JSON document, a
+// seat runner prints one JSON line last, after whatever the substrate said.
+func lastJSONLine(out []byte) []byte {
+	trimmed := bytes.TrimSpace(out)
+	if bytes.HasPrefix(trimmed, []byte("{")) && json.Valid(trimmed) {
+		return trimmed
+	}
+	lines := bytes.Split(trimmed, []byte("\n"))
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := bytes.TrimSpace(lines[i]); bytes.HasPrefix(l, []byte("{")) {
+			return l
+		}
+	}
+	return trimmed
 }
 
 // layoutPrefix finds where a team put its packages. The specs name packages,

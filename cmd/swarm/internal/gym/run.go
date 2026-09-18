@@ -46,7 +46,8 @@ const usage = `swarm gym: which model is good enough for which seat
   swarm gym table --out DIR
   swarm gym capacity [--threads 2,4,8,16] [--notes both] [--reps 1] --out DIR
                 how many interleaved threads one agent keeps straight, in its head and with a notes file
-  swarm gym team --shape solo|flat|swat|tree [--n 3] [--store resp:HOST:PORT/PREFIX] --out DIR
+  swarm gym team --shape solo|flat|swat|tree [--n 3] [--goal kvlab|shoplab] [--store resp:HOST:PORT/PREFIX]
+                [--seat-cmd SHELL] --out DIR
                 one goal, no task cards, one team shape; graded by hidden tests on origin main
   swarm gym team-table DIR...
 `

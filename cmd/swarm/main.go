@@ -16,6 +16,7 @@ import (
 
 	"github.com/itsHabib/workbench/cmd/swarm/internal/gym"
 	"github.com/itsHabib/workbench/cmd/swarm/internal/poc"
+	"github.com/itsHabib/workbench/cmd/swarm/internal/seat"
 	"github.com/itsHabib/workbench/cmd/swarm/internal/swarm"
 )
 
@@ -64,6 +65,9 @@ func main() {
 	}
 	if verb == "plane" {
 		os.Exit(planeMain(args))
+	}
+	if verb == "seat" {
+		os.Exit(seat.Main(args))
 	}
 	if verb == "gym" {
 		os.Exit(gym.Main(args))

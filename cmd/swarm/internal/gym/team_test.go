@@ -55,3 +55,14 @@ func TestTeamGraderPassesReferenceAndFailsEmpty(t *testing.T) {
 		t.Fatalf("empty: %+v", g)
 	}
 }
+
+func TestLastJSONLine(t *testing.T) {
+	whole := []byte("{\n \"num_turns\": 3\n}\n")
+	if string(lastJSONLine(whole)) != strings.TrimSpace(string(whole)) {
+		t.Fatal("claude's document not taken whole")
+	}
+	runner := []byte("rooms: clone up\n{\"seat\":\"p1\",\"num_turns\":2}\n")
+	if string(lastJSONLine(runner)) != `{"seat":"p1","num_turns":2}` {
+		t.Fatalf("%s", lastJSONLine(runner))
+	}
+}
