@@ -65,14 +65,16 @@ type SeatResult struct {
 }
 
 type workRow struct {
-	Team    bool   `json:"team"`
-	Brief   string `json:"brief"`
-	ID      string `json:"id"`
-	State   string `json:"state"`
-	AddedBy string `json:"added_by"`
-	DoneBy  string `json:"done_by"`
-	Holder  string `json:"holder"`
-	Title   string `json:"title"`
+	Team    bool      `json:"team"`
+	Brief   string    `json:"brief"`
+	After   []string  `json:"after"`
+	DoneAt  time.Time `json:"done_at"`
+	ID      string    `json:"id"`
+	State   string    `json:"state"`
+	AddedBy string    `json:"added_by"`
+	DoneBy  string    `json:"done_by"`
+	Holder  string    `json:"holder"`
+	Title   string    `json:"title"`
 }
 
 const verbsCard = `
@@ -139,6 +141,8 @@ type teamRun struct {
 	brainOn                  bool
 	brainEvery               time.Duration
 	brainModel, metricsAddr  string
+	deadline                 time.Duration
+	escalated                bool
 	live                     []string
 	shape, model, store, out string
 	branch, brief            string
@@ -177,6 +181,7 @@ func teamCmd(args []string) int {
 	reconcile := fl.Bool("reconcile", false, "a controller verifies every landing on origin main and nudges its author when red")
 	wakes := fl.Int("wakes", 8, "most times a stopped seat is resumed")
 	childMax := fl.Int("team-max", 4, "teams: most seats a child team may grow to")
+	deadline := fl.Duration("deadline", 0, "when the work should be done, from the start; growth and the brain read the projection against it")
 	brainOn := fl.Bool("brain", false, "a model judges the telemetry every interval and may add, retire, form, disband, nudge or escalate; replaces the fixed growth rule")
 	brainEvery := fl.Duration("brain-every", 60*time.Second, "how often the brain judges")
 	brainModel := fl.String("brain-model", "claude-sonnet-5", "model the brain uses")
@@ -203,7 +208,7 @@ func teamCmd(args []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), *wall)
 	defer cancel()
 	self, _ := os.Executable()
-	r := &teamRun{brainOn: *brainOn, brainEvery: *brainEvery, brainModel: *brainModel, costCap: *costCap, metricsAddr: *metricsAddr, lives: map[string]*liveSeat{}, childRuns: map[string]*teamRun{}, branch: "main", childMax: *childMax, twistTest: *twistTest, twist: *twist, twistAfter: *twistAfter, goalFile: *goalFile, reconcile: *reconcile, module: "goal", seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
+	r := &teamRun{deadline: *deadline, brainOn: *brainOn, brainEvery: *brainEvery, brainModel: *brainModel, costCap: *costCap, metricsAddr: *metricsAddr, lives: map[string]*liveSeat{}, childRuns: map[string]*teamRun{}, branch: "main", childMax: *childMax, twistTest: *twistTest, twist: *twist, twistAfter: *twistAfter, goalFile: *goalFile, reconcile: *reconcile, module: "goal", seatCmd: *seatCmd, goal: *goal, self: self, wakes: *wakes, shape: *shape, model: *model, store: *store, out: abs, turns: *turns, wall: *wall, ctx: ctx, start: time.Now()}
 	r.env = append(childEnv(filepath.Dir(self), filepath.Join(abs, "fleet-state")), "SWARM_STORE="+*store)
 	if err := r.seed(); err != nil {
 		fmt.Fprintln(os.Stderr, "seed:", err)
@@ -425,7 +430,18 @@ func (r *teamRun) grow(limit int) {
 			return
 		}
 		idle := len(live) - r.holders()
-		if open < 2 || open <= idle {
+		if r.deadline > 0 {
+			pr := project(r.workList(), len(live), idle, time.Since(r.start), r.deadline)
+			if pr.Recommend == "escalate" && !r.escalated {
+				r.escalated = true
+				_ = os.WriteFile(filepath.Join(r.out, "ESCALATION.md"), []byte(fmt.Sprintf("projected finish %.0fs against deadline %.0fs: %s\n", pr.FinishS, pr.DeadlineS, pr.Why)), 0o644)
+				fmt.Printf("[%4.0fs] ESCALATION: %s (finish %.0fs, deadline %.0fs)\n", time.Since(r.start).Seconds(), pr.Why, pr.FinishS, pr.DeadlineS)
+			}
+			if pr.Recommend != "add_seat" {
+				continue
+			}
+			fmt.Printf("[%4.0fs] projection: finish %.0fs vs deadline %.0fs, one more seat gains %.0fs\n", time.Since(r.start).Seconds(), pr.FinishS, pr.DeadlineS, pr.SeatGainS)
+		} else if open < 2 || open <= idle {
 			continue
 		}
 		seat := fmt.Sprintf("p%d", len(live)+1)

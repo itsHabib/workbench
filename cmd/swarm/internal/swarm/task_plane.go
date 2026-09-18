@@ -24,6 +24,9 @@ type Work struct {
 	AddedBy string    `json:"added_by"`
 	At      time.Time `json:"at"`
 	Parent  string    `json:"parent,omitempty"`
+	After   []string  `json:"after,omitempty"` // units this one waits on
+	DoneAt  time.Time `json:"done_at,omitempty"`
+	ClaimAt time.Time `json:"claim_at,omitempty"`
 	Team    bool      `json:"team,omitempty"`  // a team's job, not one seat's
 	Brief   string    `json:"brief,omitempty"` // what that team must build
 	State   string    `json:"state"`           // open | claimed | done
@@ -44,6 +47,7 @@ func workFromItem(it plane.Item) Work {
 	switch {
 	case it.State == plane.Done:
 		w.State, w.DoneBy = "done", seatOf(it.DoneBy)
+		w.DoneAt, _ = splitDoneAt(it.Result)
 		w.Head, w.Result = splitHead(it.Result)
 	case it.Owner != "" && Now().Before(it.Until):
 		w.State, w.Holder, w.Until = "claimed", seatOf(it.Owner), it.Until
@@ -53,7 +57,7 @@ func workFromItem(it plane.Item) Work {
 
 // WorkAdd puts a unit of work on the plane. Adding an id that exists is a
 // no-op, so two seats that think of the same task do not double it.
-func (s *State) WorkAdd(id, title string, files []string, by, parent string, team bool, brief string) (*Work, error) {
+func (s *State) WorkAdd(id, title string, files []string, by, parent string, team bool, brief string, after []string) (*Work, error) {
 	id = strings.TrimSpace(id)
 	if id == "" || title == "" {
 		return nil, refuse("bad_work", "work needs an id and --title")
@@ -79,7 +83,7 @@ func (s *State) WorkAdd(id, title string, files []string, by, parent string, tea
 			return nil, refuse("overlaps", "%s already owns %s; claim or join that instead of adding another", other, path)
 		}
 	}
-	w := Work{ID: id, Title: title, Files: files, AddedBy: by, At: Now(), Parent: parent, Team: team, Brief: brief}
+	w := Work{ID: id, Title: title, Files: files, AddedBy: by, At: Now(), Parent: parent, Team: team, Brief: brief, After: after}
 	payload, _ := json.Marshal(w)
 	if err := st.Put(ctx, plane.Item{Kind: kindWork, ID: id, Payload: string(payload)}); err != nil {
 		return nil, err
@@ -136,6 +140,9 @@ func (s *State) WorkClaim(id, seat string, ttl time.Duration) (*Work, error) {
 	}
 	owner := incarnation(seat)
 	if it.Owner != owner {
+		if blocked := s.blockedBy(st, workFromItem(it)); blocked != "" {
+			return nil, refuse("blocked", "%s waits on %s, which is not done", id, blocked)
+		}
 		held, _ := s.heldBy(st, seat)
 		if len(held) >= WIPLimit() {
 			return nil, refuse("wip_full", "%s already holds %s; finish or drop one first", seat, strings.Join(held, ", "))
@@ -167,6 +174,7 @@ func (s *State) WorkDone(id, seat, result, head string) (*Work, error) {
 	if head != "" {
 		result = "head:" + head + "\n" + result
 	}
+	result = "done_at:" + Now().UTC().Format(time.RFC3339Nano) + "\n" + result
 	st, err := s.Plane()
 	if err != nil {
 		return nil, err
@@ -219,6 +227,17 @@ func (s *State) teamOverlap(st plane.Store, files []string) (string, string) {
 	return "", ""
 }
 
+// blockedBy names the first unit this one waits on that is not done.
+func (s *State) blockedBy(st plane.Store, w Work) string {
+	for _, dep := range w.After {
+		it, err := st.Get(context.Background(), kindWork, dep)
+		if err != nil || it.State != plane.Done {
+			return dep
+		}
+	}
+	return ""
+}
+
 func (s *State) heldBy(st plane.Store, seat string) ([]string, error) {
 	items, err := st.List(context.Background(), kindWork)
 	if err != nil {
@@ -258,10 +277,14 @@ func (s *State) WorkNext(seat, base string) ([]Work, error) {
 		}
 		break
 	}
+	done := map[string]bool{}
+	for _, w := range ws {
+		done[w.ID] = w.State == "done"
+	}
 	var open []Work
 	score := map[string]int{}
 	for _, w := range ws {
-		if w.State != "open" {
+		if w.State != "open" || !readyOf(w, done) {
 			continue
 		}
 		for _, f := range w.Files {
@@ -351,9 +374,29 @@ func (s *State) Idle(seat string, timeout time.Duration) string {
 // splitHead separates the commit a result names from its prose. The head
 // rides inside the committed result so it is fenced by the same epoch.
 func splitHead(result string) (head, rest string) {
+	_, result = splitDoneAt(result)
 	line, after, _ := strings.Cut(result, "\n")
 	if sha, ok := strings.CutPrefix(line, "head:"); ok {
 		return sha, after
 	}
 	return "", result
+}
+
+func splitDoneAt(result string) (time.Time, string) {
+	line, after, _ := strings.Cut(result, "\n")
+	if ts, ok := strings.CutPrefix(line, "done_at:"); ok {
+		t, _ := time.Parse(time.RFC3339Nano, ts)
+		return t, after
+	}
+	return time.Time{}, result
+}
+
+// readyOf is true when every unit w waits on is done.
+func readyOf(w Work, done map[string]bool) bool {
+	for _, dep := range w.After {
+		if !done[dep] {
+			return false
+		}
+	}
+	return true
 }

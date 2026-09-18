@@ -69,6 +69,7 @@ type Telemetry struct {
 	Landings    int              `json:"landings"`
 	OpenAsks    int              `json:"open_questions"`
 	Recent      []BrainDecision  `json:"recent_decisions,omitempty"`
+	Projection  Projection       `json:"projection"`
 }
 
 // ChildTelemetry is one child team as the parent brain sees it.
@@ -108,6 +109,8 @@ Actions you may return, each with a one-sentence why:
 - disband_team (target: unit id): stop a child team that is stuck, red, or duplicating work.
 - nudge (target: seat, why is the message): a note to one seat. Use for a seat holding a unit far longer than its peers take, or holding two units while others idle.
 - escalate (why): something a person must decide: cost about to exceed the cap with the goal far from done, a red landing nobody fixes, a question open for a long time. Escalation stops nothing; it is a flag.
+
+Time: the telemetry carries a projection (projected finish, the critical path, how much one more seat would gain, and the deadline when there is one) computed from the team's own measured pace. Trust its arithmetic; your job is judgment on top of it: whether the pace it measured is about to change, whether a seat is the real limit, whether the deadline is worth its cost. With a deadline, a finish past it is a reason to add a seat only when the seat gain is real; when the critical path is the limit, escalate instead, early, so a person can move the deadline or cut scope.
 
 Rules: prefer hold. At most two actions per judgment. Never add a seat and retire one in the same judgment. Do not add seats when fewer than two units are open. Do not retire a running seat that holds a unit. Do not form a team on a goal that has fewer than eight open units. Say what you see in one or two sentences, then the actions.
 
@@ -209,6 +212,17 @@ func (r *teamRun) telemetry() Telemetry {
 		tel.CostUSD += t.CostUSD
 	}
 	tel.OpenAsks = r.countOpenRequests()
+	active, idle := 0, 0
+	for _, s := range tel.Seats {
+		if s.Retired {
+			continue
+		}
+		active++
+		if !s.Running || len(s.Holds) == 0 {
+			idle++
+		}
+	}
+	tel.Projection = project(r.workList(), active, idle, time.Since(r.start), r.deadline)
 	return tel
 }
 

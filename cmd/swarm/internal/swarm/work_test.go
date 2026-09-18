@@ -9,10 +9,10 @@ import (
 // that lost its lease cannot land the unit, and waiting wakes on progress.
 func TestWorkClaimFencesAndIdleWakes(t *testing.T) {
 	s := onPlane(t)
-	if _, err := s.WorkAdd("parse", "parser", []string{"a.go"}, "alice", "", false, ""); err != nil {
+	if _, err := s.WorkAdd("parse", "parser", []string{"a.go"}, "alice", "", false, "", nil); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.WorkAdd("parse", "again", nil, "bob", "", false, "")
+	_, err := s.WorkAdd("parse", "again", nil, "bob", "", false, "", nil)
 	refused(t, err, "exists")
 	if _, err := s.WorkClaim("parse", "bob", time.Minute); err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestWorkClaimFencesAndIdleWakes(t *testing.T) {
 func TestWorkWIPLimit(t *testing.T) {
 	s := onPlane(t)
 	for _, id := range []string{"a", "b", "c"} {
-		if _, err := s.WorkAdd(id, id, nil, "x", "", false, ""); err != nil {
+		if _, err := s.WorkAdd(id, id, nil, "x", "", false, "", nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -72,16 +72,46 @@ func TestWorkWIPLimit(t *testing.T) {
 // Two founders who each add a team for the same directory get one team.
 func TestTeamUnitsCannotOverlap(t *testing.T) {
 	s := onPlane(t)
-	_, err := s.WorkAdd("shop-team", "shop", nil, "p1", "", true, "build shop/")
+	_, err := s.WorkAdd("shop-team", "shop", nil, "p1", "", true, "build shop/", nil)
 	refused(t, err, "bad_work")
-	if _, err := s.WorkAdd("shop-team", "shop", []string{"shop"}, "p1", "", true, "build shop/"); err != nil {
+	if _, err := s.WorkAdd("shop-team", "shop", []string{"shop"}, "p1", "", true, "build shop/", nil); err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.WorkAdd("shop-subsystem", "shop again", []string{"shop/"}, "p2", "", true, "build shop/")
+	_, err = s.WorkAdd("shop-subsystem", "shop again", []string{"shop/"}, "p2", "", true, "build shop/", nil)
 	refused(t, err, "overlaps")
-	_, err = s.WorkAdd("shop-cart", "part of shop", []string{"shop/cart"}, "p2", "", true, "cart only")
+	_, err = s.WorkAdd("shop-cart", "part of shop", []string{"shop/cart"}, "p2", "", true, "cart only", nil)
 	refused(t, err, "overlaps")
-	if _, err := s.WorkAdd("sched-team", "sched", []string{"sched"}, "p2", "", true, "build sched/"); err != nil {
+	if _, err := s.WorkAdd("sched-team", "sched", []string{"sched"}, "p2", "", true, "build sched/", nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A unit that waits on another cannot be claimed until that one is done.
+func TestWorkAfterBlocksClaim(t *testing.T) {
+	s := onPlane(t)
+	if _, err := s.WorkAdd("a", "a", nil, "x", "", false, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.WorkAdd("b", "b", nil, "x", "", false, "", []string{"a"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.WorkClaim("b", "p1", time.Minute)
+	refused(t, err, "blocked")
+	next, _ := s.WorkNext("p1", "main")
+	if len(next) != 1 || next[0].ID != "a" {
+		t.Fatalf("next %+v", next)
+	}
+	if _, err := s.WorkClaim("a", "p1", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.WorkDone("a", "p1", "ok", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.WorkClaim("b", "p2", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	ws, _ := s.WorkList()
+	if ws[0].DoneAt.IsZero() || ws[0].Result != "ok" {
+		t.Fatalf("%+v", ws[0])
 	}
 }

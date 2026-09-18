@@ -101,8 +101,8 @@ type cli struct {
 	s    *swarm.State
 	seat string
 
-	title, files, result, head, verdict, tail, brief, payload string
-	team                                                      bool
+	title, files, result, head, verdict, tail, brief, payload, after string
+	team                                                             bool
 
 	as, scope, question, options, needs, ruling, evidence, supersedes, to, why        string
 	operator, lead, verifier, diskMin, resource, dir, cmd, wakeModel, wakeTools, base string
@@ -161,6 +161,7 @@ func parse(verb string, args []string) (*cli, error) {
 	fs.StringVar(&c.files, "files", "", "comma-separated paths the work touches")
 	fs.BoolVar(&c.team, "team", false, "work add: this unit is a team's job")
 	fs.StringVar(&c.brief, "brief", "", "work add --team: what that team must build")
+	fs.StringVar(&c.after, "after", "", "work add: units this one waits on, comma-separated")
 	fs.StringVar(&c.payload, "payload", "", "journal: the JSON to record")
 	fs.StringVar(&c.verdict, "verdict", "", "pass or fail")
 	fs.StringVar(&c.tail, "tail", "", "last lines of the verifier output")
@@ -598,7 +599,7 @@ func (c *cli) work() error {
 	var err error
 	switch c.arg(0) {
 	case "add":
-		w, err = c.s.WorkAdd(c.arg(1), c.title, split(c.files, ","), c.seat, c.supersedes, c.team, c.brief)
+		w, err = c.s.WorkAdd(c.arg(1), c.title, split(c.files, ","), c.seat, c.supersedes, c.team, c.brief, split(c.after, ","))
 	case "claim":
 		w, err = c.s.WorkClaim(c.arg(1), c.seat, c.ttl)
 	case "drop":
@@ -649,7 +650,11 @@ func (c *cli) workList() error {
 		if w.State == "done" {
 			who = w.DoneBy
 		}
-		fmt.Printf("%-8s %-24s %-12s %s  [%s]\n", w.State, w.ID, who, w.Title, strings.Join(w.Files, ","))
+		after := ""
+		if len(w.After) > 0 {
+			after = "  after " + strings.Join(w.After, ",")
+		}
+		fmt.Printf("%-8s %-24s %-12s %s  [%s]%s\n", w.State, w.ID, who, w.Title, strings.Join(w.Files, ","), after)
 	}
 	if len(ws) == 0 {
 		fmt.Println("no work yet")
