@@ -36,6 +36,15 @@ ID and content. The retry must return the same import ID and the one-record
 result/list entry must remain unique. The original `mid_import_recovery` check
 still reports `not_covered` if completion occurs before kill.
 
+## V4 oracle correction
+
+V3 still prescribed `failed` as the terminal label for malformed CSV, although
+the shared brief permits either terminal status and defines correctness through
+records and row errors. V4 accepts HTTP 400/422 rejection or any terminal import
+with zero records and useful errors. The prior controller malformed-CSV finding
+is retained as a false positive if its output already met that observable
+contract. No architecture or internal lifecycle is inferred from the label.
+
 This protocol evaluates each app only through the launch and HTTP seams in the
 shared brief. It is a conformance report, not a self-reported score and not a
 winner selection. Every check records one of:
@@ -100,8 +109,8 @@ tests, and must be supplied to both builders at the same readiness point.
 2. **Ten-MiB cap.** A JSON request body larger than 10 MiB must be rejected with
    HTTP 400 or 413 without creating an inspectable successful import.
 3. **Malformed CSV.** An unterminated quoted field must be rejected with HTTP
-   400/422 or produce a terminal `failed` import with a useful error. It must
-   not yield records from the malformed input.
+   400/422 or produce a terminal import with a useful error. It must not yield
+   records from the malformed input; either terminal status is acceptable.
 4. **Concurrent service.** While a 50,000-row import client request thread is in
    flight, issue `GET /health` and a small valid import from separate clients.
    Health must return HTTP 200 JSON within 2 seconds; the small import's submit
