@@ -1,0 +1,30 @@
+{
+  "app_dir": "/private/tmp/import-v3-baseline.0Btvld/experiments/work-controller/import-lab/controller-app",
+  "checks": [
+    {
+      "detail": "import completed synchronously before kill",
+      "evidence": {
+        "import_id": "ee71fa7e658c",
+        "request_bytes": 8499121
+      },
+      "name": "mid_import_recovery",
+      "status": "not_covered"
+    },
+    {
+      "detail": "accepted-result retry returned a different import id",
+      "evidence": {},
+      "name": "accepted_result_crash_retry",
+      "status": "fail"
+    }
+  ],
+  "counts": {
+    "error": 0,
+    "fail": 1,
+    "not_covered": 1,
+    "pass": 0
+  },
+  "data_dir": "data-nivyg902",
+  "elapsed_ms": 810,
+  "round": "recovery",
+  "schema": "import-lab-harness-v1"
+}
