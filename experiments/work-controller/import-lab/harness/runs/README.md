@@ -50,3 +50,33 @@ status, latency, and transport error. Small raw bodies and server error logs are
 committed beside it. The 54 MiB of full large bodies and temporary data stores
 was moved intact to `/tmp/import-lab-raw` on the runner host and intentionally
 excluded from Git.
+
+## V3 adversarial correction and baseline
+
+V3 was frozen at commit `2dcefd2e12130fe3f084d92c4583f9c8b5360fb0`
+before its baseline runs. Protocol SHA-256 is
+`68e41f9a0c77a1435c03493c66d7e82d08fb0bff1dfdd9ba12b1bbb8044a1d36`
+and harness SHA-256 is
+`c162c182bd1e790c30eb1c15491bf85f334046e855415f8a450925ed3da960ce`.
+The pinned candidate commits were exported with `git archive` to
+`/tmp/import-v3-baseline.0Btvld`; live builder worktrees were not used.
+
+V3 pressure independently checks the large concurrent request's accepted HTTP
+status and exact 50,000 unique-record terminal result. It measures the small
+request from submit through terminal polling against one five-second budget,
+and describes the observed overlap only as client-request-thread overlap.
+
+| Candidate | V3 pressure | Small end-to-end | V3 mid-import recovery | V3 accepted-result crash/retry |
+| --- | --- | --- | --- | --- |
+| controller | 3 pass, 2 fail, 1 error | 275 ms | not covered: synchronous completion | fail: retry returned a different import ID |
+| native | 3 pass, 3 fail | 1 ms | not covered: synchronous completion | fail: retry returned a different import ID |
+
+Both tightened concurrent large requests completed with 50,000 unique records,
+both sentinels, and no errors. The original pressure conclusions did not change.
+Recovery used a deterministic 8,499,121-byte request. Synchronous completion is
+retained as `not_covered` for true mid-import recovery; the separate small
+accepted-result crash/retry check records both baseline idempotency failures.
+
+After the v3 runs, the full large bodies and data stores under
+`/tmp/import-lab-raw` total 151 MiB. Compact results, exchange hashes/sizes,
+small bodies, and process logs remain committed here.
