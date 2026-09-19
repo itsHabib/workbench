@@ -56,7 +56,7 @@ def drill(db):
 if __name__ == '__main__':
     with tempfile.TemporaryDirectory(prefix='controller-drill-') as directory:
         drill(Path(directory) / 'jobs.db')
-    output = Path(sys.argv[1]) if len(sys.argv) > 1 else root / 'runs/local-01/drill.json'
+    output = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(tempfile.mkdtemp(prefix='controller-receipt-')) / 'drill.json'
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps({'kind': 'deterministic-mechanism-drill', 'passed': True,
                                   'records': records}, indent=2) + '\n')

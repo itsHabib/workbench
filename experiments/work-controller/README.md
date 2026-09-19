@@ -56,6 +56,9 @@ it into multiple Rooms and call that a distributed system.
 
 ## Experiments
 
+The [Import desk run](import-lab/RESULTS.md) builds a real browser/API app with cheaper models,
+introduces operating pressure, replaces workers, and compares against native coordination.
+
 Run `python3 -m unittest discover -s . -p 'test_*.py' -v` for mechanism checks.
 See [RUNS.md](RUNS.md) for local, live-agent and Rooms drills. Run evidence belongs under `runs/`;
 never commit databases, credentials or private task contents. A deterministic script can test

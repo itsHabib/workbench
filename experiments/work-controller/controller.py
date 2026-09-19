@@ -135,7 +135,9 @@ def accept(db, args):
 
 
 def rows(db, table):
-    return [dict(row) for row in db.execute('SELECT * FROM ' + table + ' ORDER BY id')]
+    queries = {name: 'SELECT * FROM ' + name + ' ORDER BY id'
+               for name in ('jobs', 'workers', 'decisions')}
+    return [dict(row) for row in db.execute(queries[table])]
 
 
 def execute(args):

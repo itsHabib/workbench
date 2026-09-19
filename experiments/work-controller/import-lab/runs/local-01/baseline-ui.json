@@ -1,0 +1,20 @@
+[
+  {
+    "arm": "controller",
+    "responseSeen": true,
+    "errors": [],
+    "overflow": true,
+    "showsRowError": true,
+    "body": "Import desk\n\nCheck a small CSV before it enters your records.\n\nLocal only\nUpload records\nValidate import\nImport saved\nLatest result\n1\nvalid records\n1\nrows to fix\nRow 3: email must contain one @ with text on both sides\nID\tName\tEmail\n1\tAda\tada@example.com\nFix and retry\nRecent imports\n9fed927cba26 · completed\n1 valid · 1 errors"
+  },
+  {
+    "arm": "native",
+    "responseSeen": false,
+    "errors": [
+      "Unexpected token 'const'"
+    ],
+    "overflow": false,
+    "showsRowError": false,
+    "body": "LOCAL DATA UTILITY\nImport desk\n\nValidate a small CSV, keep good rows, and repair the ones that need attention.\n\nNew import\nRequired columns: id, name, email\nCSV records\nValidate import\nRecent imports\nRefresh\nLoading…"
+  }
+]

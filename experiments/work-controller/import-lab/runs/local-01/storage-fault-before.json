@@ -1,0 +1,6 @@
+{
+  "fault": "write failure on first import, then retry same request",
+  "replay": true,
+  "returned_id": "afdfee481981",
+  "survives_restart": false
+}

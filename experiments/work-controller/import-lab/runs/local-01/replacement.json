@@ -1,0 +1,56 @@
+{
+  "at": "2026-09-19T18:58:32.759757+00:00",
+  "kind": "deliberate-checkpoint-replacement-not-abrupt-crash",
+  "controller_checkpoint": "de594faca9e89a92517713c72562f2d9251065e4",
+  "native_checkpoint": "60e3b2e",
+  "events": [
+    {
+      "args": [
+        "register",
+        "import-replacement",
+        "Fresh Luna worker; resumes pressure fixes from persisted job and HANDOFF.md"
+      ],
+      "exit": 0,
+      "result": {
+        "context": "Fresh Luna worker; resumes pressure fixes from persisted job and HANDOFF.md",
+        "worker": "import-replacement"
+      }
+    },
+    {
+      "args": [
+        "reassign",
+        "pressure-import-desk",
+        "--worker",
+        "import-replacement",
+        "--reason",
+        "Deliberate worker-context replacement after committed checkpoint; old agent completed, no active writer"
+      ],
+      "exit": 0,
+      "result": {
+        "evidence": null,
+        "id": "pressure-import-desk",
+        "result": null,
+        "state": "assigned",
+        "text": "Address observed import pressure and browser failures under newly explicit operating needs; choose only needed mechanisms",
+        "token": null,
+        "worker": "import-replacement"
+      }
+    },
+    {
+      "args": [
+        "complete",
+        "pressure-import-desk",
+        "--worker",
+        "import-builder",
+        "--token",
+        "2",
+        "--result",
+        "Injected late old-attempt result to test rejection"
+      ],
+      "exit": 1,
+      "result": {
+        "error": "stale attempt or wrong worker"
+      }
+    }
+  ]
+}
