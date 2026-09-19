@@ -30,15 +30,16 @@ def validate_csv(source):
             if None in row:
                 errors.append({"row": number, "message": "too many columns"})
                 continue
-            values = {field: (row.get(field) or "").strip() for field in FIELDS}
+            raw_values = {field: (row.get(field) or "") for field in FIELDS}
+            values = {field: value.strip() for field, value in raw_values.items()}
             missing_values = [field for field, value in values.items() if not value]
             if missing_values:
                 errors.append({"row": number, "message": "missing " + ", ".join(missing_values)})
                 continue
-            email = values["email"]
-            if " " in email:
+            if " " in raw_values["email"]:
                 errors.append({"row": number, "message": "email must not contain spaces"})
                 continue
+            email = values["email"]
             if email.count("@") != 1:
                 errors.append({"row": number, "message": "email must contain one @ with text on both sides"})
                 continue
