@@ -35,7 +35,7 @@ Chromium evidence belongs in the integration coordinator's receipts.
 records `row-N,Name N,row-N@example.com` for N from 0 through 49,999. The
 compact JSON request is 2,166,695 bytes with SHA-256
 `afb44ea58603e45b7af2bed9ead331131264bc656edc450e0e50cd3e2206d61a`.
-Both candidates returned exactly 50,000 records with the first and last
+Both candidates returned a 50,000-record count with the first and last
 sentinels and no errors.
 
 - controller large result: 3,816,742 response bytes, SHA-256
@@ -62,7 +62,7 @@ The pinned candidate commits were exported with `git archive` to
 `/tmp/import-v3-baseline.0Btvld`; live builder worktrees were not used.
 
 V3 pressure independently checks the large concurrent request's accepted HTTP
-status and exact 50,000 unique-record terminal result. It measures the small
+status, 50,000-record count, uniqueness, first/last sentinels, and zero errors. It measures the small
 request from submit through terminal polling against one five-second budget,
 and describes the observed overlap only as client-request-thread overlap.
 
@@ -102,8 +102,8 @@ was clean at execution and passed the harness:
 
 - build: 5/5 pass
 - pressure: 6/6 pass; the concurrency probe observed 1 ms health, 306 ms small
-  import end to end, and an independently verified exact 50,000-record large
-  result
+  import end to end, and independently verified the large result's 50,000-row
+  count, uniqueness, sentinels, and zero errors
 - recovery: `accepted_result_crash_retry` pass;
   `mid_import_recovery` remains `not_covered` because the near-limit import
   completed synchronously before kill
@@ -116,16 +116,35 @@ storage-fault probe later found mutate-before-save behavior that this harness
 does not exercise, so the experiment coordinator requested another controller
 revision and final rerun.
 
-Native final commit `e30c99780e109acd3a797f0016abcf1e0d82d644` was
+Native intermediate commit `e30c99780e109acd3a797f0016abcf1e0d82d644` was
 clean at execution:
 
 - build: 5/5 pass
 - pressure: 6/6 pass; the concurrency probe observed 0 ms health, 50 ms small
-  import end to end, and an independently verified exact 50,000-record large
-  result
+  import end to end, and independently verified the large result's 50,000-row
+  count, uniqueness, sentinels, and zero errors
 - recovery: `accepted_result_crash_retry` pass;
   `mid_import_recovery` remains `not_covered` because the near-limit import
   completed synchronously before kill
 
 These are conformance counts and bounded latency observations, not a performance
 comparison or winner decision.
+
+A bounded final diff review found that this native revision strips email values
+before checking for spaces and accepts extra header columns while discarding
+their values. Direct probes confirmed both invalid shapes became valid records.
+The coordinator requested a native repair; the passing v4 receipts remain
+useful but are intermediate evidence.
+
+Controller final commit `8293173265227463369b82c6a1aebd4f59df5d12` was
+clean at execution after the storage-fault rollback repair:
+
+- build: 5/5 pass
+- pressure: 6/6 pass; the concurrency probe observed 0 ms health, 283 ms small
+  import end to end, and independently verified the large result's 50,000-row
+  count, uniqueness, sentinels, and zero errors
+- recovery: `accepted_result_crash_retry` pass;
+  `mid_import_recovery` remains `not_covered` because synchronous completion
+  occurred before kill
+
+The review found no additional controller contract issue in the bounded pass.
