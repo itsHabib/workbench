@@ -72,7 +72,7 @@ class ImportStore:
     def create_or_replay(self, source, request_id=None):
         fingerprint = hashlib.sha256(source.encode("utf-8")).hexdigest()
         with self.lock:
-            if request_id:
+            if request_id is not None:
                 for existing in self.items:
                     if existing.get("request_id") != request_id:
                         continue
@@ -81,7 +81,7 @@ class ImportStore:
                     raise RequestConflict("request_id is already used for different CSV")
             records, errors = validate_csv(source)
             item = {"id": uuid.uuid4().hex[:12], "status": "completed", "records": records, "errors": errors}
-            if request_id:
+            if request_id is not None:
                 item["request_id"] = request_id
                 item["fingerprint"] = fingerprint
             prior_items = self.items
