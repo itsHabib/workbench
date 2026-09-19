@@ -18,6 +18,13 @@ class HarnessUnitTests(unittest.TestCase):
         parser.feed('<link rel="stylesheet" href="https://example.com/app.css">')
         self.assertEqual(parser.external_assets, ["https://example.com/app.css"])
 
+    def test_ui_controls_do_not_require_form_element(self) -> None:
+        parser = harness.UISurfaceParser()
+        parser.feed('<textarea></textarea><button>Import</button>')
+        self.assertFalse(parser.has_form)
+        self.assertTrue(parser.has_csv_input)
+        self.assertTrue(parser.has_submit)
+
     def test_fifty_thousand_row_fixture_is_below_cap(self) -> None:
         csv_text, count, first, last = harness.make_csv(50_000)
         body = json.dumps({"csv": csv_text}, separators=(",", ":")).encode()

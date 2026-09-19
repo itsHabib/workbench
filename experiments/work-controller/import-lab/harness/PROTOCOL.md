@@ -1,6 +1,22 @@
 # Import desk external-check protocol
 
-Status: frozen before either candidate implementation or its tests were inspected.
+Status: v1 frozen before either candidate implementation or its tests were
+inspected. The narrow v2 correction below was made after the first baseline run.
+
+## V2 oracle correction
+
+The first baseline exposed two requirements that v1 had added beyond the shared
+brief. V2 removes them without changing any candidate:
+
+- A browser UI needs a CSV input surface and submit control, but does not need a
+  literal HTML `form`; JavaScript-driven controls satisfy the stated seam.
+- A mixed-validity import may use either terminal status. The shared status
+  vocabulary includes `failed`, and the functional contract requires returned
+  valid records plus row errors rather than prescribing `completed` for a
+  partial result.
+
+The original v1 results remain retained as false-positive evidence. No pressure
+or recovery threshold changed.
 
 This protocol evaluates each app only through the launch and HTTP seams in the
 shared brief. It is a conformance report, not a self-reported score and not a
@@ -40,14 +56,15 @@ one-based lines including the header.
 
 1. **Startup and health.** The server becomes reachable within 5 seconds.
    `GET /health` returns HTTP 200 and a JSON object.
-2. **Browser surface.** `GET /` returns HTTP 200 HTML containing a form, a CSV
-   input surface (file input or textarea), and a submit control. The HTML must
+2. **Browser surface.** `GET /` returns HTTP 200 HTML containing a CSV input
+   surface (file input or textarea) and a submit control. The HTML must
    not depend on an external `http://` or `https://` script, stylesheet, image,
    or module URL.
 3. **Mixed CSV validation.** Submit one CSV containing two valid rows and three
    invalid rows: empty `id`, missing the right side of `@`, and an address with
-   a space. Completion must contain exactly the two valid records, no invalid
-   record, and useful errors at physical rows 3, 4, and 5.
+   a space. The terminal result (`completed` or `failed`) must contain exactly
+   the two valid records, no invalid record, and useful errors at physical rows
+   3, 4, and 5.
 4. **Corrected retry.** Submit corrected content as a new request. It must
    complete with all corrected records and no row errors.
 5. **Inspection/listing.** `GET /imports/ID` must reproduce the terminal result,
