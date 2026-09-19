@@ -18,6 +18,24 @@ brief. V2 removes them without changing any candidate:
 The original v1 results remain retained as false-positive evidence. No pressure
 or recovery threshold changed.
 
+## V3 oracle correction
+
+Adversarial review found two ways the v2 concurrent-service check could pass
+without proving its full claim. V3 requires the large client request itself to
+return an accepted HTTP status and then complete with the exact 50,000 unique
+records, sentinels, and no errors. The five-second small-import threshold now
+covers submit plus polling together. "Overlap" means only that the large client
+request thread was still in flight when probes began; it does not claim proof
+that the server was processing both at the same instant.
+
+V3 also adds `accepted_result_crash_retry` to recovery. This covers a useful
+process-crash boundary for synchronous apps without mislabeling it as mid-task
+recovery: after a small valid request returns an accepted ID, kill the exact
+server process, restart on the same data directory, and retry the same request
+ID and content. The retry must return the same import ID and the one-record
+result/list entry must remain unique. The original `mid_import_recovery` check
+still reports `not_covered` if completion occurs before kill.
+
 This protocol evaluates each app only through the launch and HTTP seams in the
 shared brief. It is a conformance report, not a self-reported score and not a
 winner selection. Every check records one of:
@@ -84,12 +102,14 @@ tests, and must be supplied to both builders at the same readiness point.
 3. **Malformed CSV.** An unterminated quoted field must be rejected with HTTP
    400/422 or produce a terminal `failed` import with a useful error. It must
    not yield records from the malformed input.
-4. **Concurrent service.** While a large import request is in flight, issue
-   `GET /health` and a small valid import from separate clients. Health must
-   return HTTP 200 JSON within 2 seconds; the small import must be accepted and
-   complete correctly within 5 seconds. If the large request finishes before
-   the probes begin, repeat with concurrent large requests; a failure to create
-   overlap after that is `not_covered`, not a pass.
+4. **Concurrent service.** While a 50,000-row import client request thread is in
+   flight, issue `GET /health` and a small valid import from separate clients.
+   Health must return HTTP 200 JSON within 2 seconds; the small import's submit
+   plus all polling must complete correctly within 5 seconds. The large request
+   must return HTTP 200/201/202 and complete with exactly 50,000 unique records,
+   exact first/last sentinels, and no errors. If the large client thread
+   finishes before probes begin, the concurrency condition is `not_covered`,
+   not a pass. Client-thread overlap does not prove simultaneous server work.
 5. **Restart persistence.** After a completed import, terminate the owned server,
    restart it on a new unused loopback port with the same data directory, and
    inspect the same ID. Status, records, and errors must match the pre-restart
@@ -117,3 +137,11 @@ that case into recovery success.
 
 Native worker/session interruption is outside this process-level protocol and
 is recorded separately by the experiment coordinator.
+
+`accepted_result_crash_retry` is a second, distinct recovery check. Submit a
+small valid CSV with an explicit request ID. As soon as an accepted response
+with an import ID returns, SIGKILL the exact owned process, restart with the
+same data directory, and resubmit identical content with that request ID. It
+passes only if the retry returns the original import ID, completes with exactly
+the one expected record and no errors, and listing contains exactly one summary
+for that ID. This is lost-reply/idempotent-retry evidence, not mid-task recovery.

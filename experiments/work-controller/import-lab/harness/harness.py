@@ -115,8 +115,8 @@ class Harness:
             raise FileNotFoundError(f"missing launch file: {server}")
         self.port = unused_port()
         self.start_number += 1
-        stdout = (self.out_dir / f"server-{self.start_number}.stdout.log").open("wb")
-        stderr = (self.out_dir / f"server-{self.start_number}.stderr.log").open("wb")
+        stdout_path = self.out_dir / f"server-{self.start_number}.stdout.log"
+        stderr_path = self.out_dir / f"server-{self.start_number}.stderr.log"
         command = [
             sys.executable,
             "server.py",
@@ -125,12 +125,13 @@ class Harness:
             "--data-dir",
             str(self.data_dir),
         ]
-        self.process = subprocess.Popen(
-            command,
-            cwd=self.app_dir,
-            stdout=stdout,
-            stderr=stderr,
-        )
+        with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+            self.process = subprocess.Popen(
+                command,
+                cwd=self.app_dir,
+                stdout=stdout,
+                stderr=stderr,
+            )
         end = min(self.deadline, time.monotonic() + 5.0)
         last_error = "server did not answer"
         while time.monotonic() < end:
@@ -424,7 +425,7 @@ class Harness:
         self.run_check("request_id_idempotency", self.check_idempotency)
 
     def check_concurrency(self) -> None:
-        csv_text, _, _, _ = make_csv(50_000, prefix="concurrent")
+        csv_text, expected_count, first, last = make_csv(50_000, prefix="concurrent")
         result: dict[str, Any] = {}
         begun = threading.Event()
 
@@ -442,8 +443,16 @@ class Harness:
         overlap = worker.is_alive()
         health = self.request("GET", "/health", timeout=min(2.0, self.remaining()))
         small_csv = "id,name,email\nsmall,Small,small@example.com\n"
-        small_response, small_initial = self.submit(small_csv, request_id="concurrent-small", timeout=self.remaining(5))
-        small = self.follow(small_initial, timeout=self.remaining(5))
+        small_started = time.monotonic()
+        small_response, small_initial = self.submit(
+            small_csv,
+            request_id="concurrent-small",
+            timeout=min(5.0, self.remaining()),
+        )
+        small_remaining = 5.0 - (time.monotonic() - small_started)
+        assert small_remaining > 0, "concurrent small submit exceeded 5 seconds"
+        small = self.follow(small_initial, timeout=min(small_remaining, self.remaining()))
+        small_elapsed_ms = round((time.monotonic() - small_started) * 1000)
         worker.join(timeout=self.remaining(8))
         if not overlap:
             self.add("concurrent_service", "not_covered", "large request completed before concurrent probes began")
@@ -454,9 +463,29 @@ class Harness:
         assert small_response.status in {200, 201, 202}, f"concurrent small submit returned HTTP {small_response.status}"
         assert small.get("status") == "completed", f"concurrent small import ended {small.get('status')!r}"
         assert len(small.get("records", [])) == 1 and small.get("errors") == [], "concurrent small import result differs"
+        assert small_elapsed_ms <= 5000, f"concurrent small import took {small_elapsed_ms}ms end to end"
         assert not worker.is_alive(), "large concurrent request exceeded timeout"
         assert "error" not in result, f"large concurrent request failed: {result.get('error')}"
-        self.add("concurrent_service", "pass", "health and small import completed during large request", health_ms=health.elapsed_ms)
+        large_response = result.get("response")
+        assert isinstance(large_response, Response), "large concurrent request returned no HTTP response"
+        assert large_response.status in {200, 201, 202}, f"large concurrent submit returned HTTP {large_response.status}"
+        large = self.follow(result.get("payload"), timeout=self.remaining(8))
+        assert large.get("status") == "completed", f"large concurrent import ended {large.get('status')!r}"
+        records = large.get("records")
+        assert isinstance(records, list), "large concurrent import lacks records"
+        assert len(records) == expected_count, f"large concurrent import returned {len(records)} records"
+        keys = [canonical_record(record) for record in records]
+        assert len(set(keys)) == expected_count, "large concurrent import contains duplicate records"
+        assert canonical_record(first) in keys and canonical_record(last) in keys, "large concurrent import lost a sentinel"
+        assert large.get("errors") == [], f"large concurrent import has {len(large.get('errors', []))} errors"
+        self.add(
+            "concurrent_service",
+            "pass",
+            "client request threads overlapped; both imports and health met thresholds",
+            health_ms=health.elapsed_ms,
+            small_elapsed_ms=small_elapsed_ms,
+            large_records=expected_count,
+        )
 
     def check_idempotency(self) -> None:
         csv_text = "id,name,email\ndupe,Dupe,dupe@example.com\n"
@@ -535,6 +564,41 @@ class Harness:
             )
 
         self.run_check("mid_import_recovery", recovery)
+        self.run_check("accepted_result_crash_retry", self.check_accepted_result_crash_retry)
+
+    def check_accepted_result_crash_retry(self) -> None:
+        csv_text = "id,name,email\ncrash,Crash Retry,crash@example.com\n"
+        request_id = "accepted-crash-retry"
+        response, initial = self.submit(csv_text, request_id=request_id, timeout=self.remaining(5))
+        assert response.status in {200, 201, 202}, f"initial accepted-result submit returned HTTP {response.status}"
+        assert isinstance(initial, dict), "initial accepted-result response must be an object"
+        import_id = initial.get("id")
+        assert isinstance(import_id, str) and import_id, "initial accepted-result response lacks import id"
+        assert initial.get("status") in KNOWN_STATUSES, f"initial response has unknown status {initial.get('status')!r}"
+        self.stop(kill=True)
+        self.start()
+        retry_response, retry_initial = self.submit(csv_text, request_id=request_id, timeout=self.remaining(5))
+        assert retry_response.status in {200, 201, 202}, f"accepted-result retry returned HTTP {retry_response.status}"
+        assert isinstance(retry_initial, dict), "accepted-result retry response must be an object"
+        assert retry_initial.get("id") == import_id, "accepted-result retry returned a different import id"
+        terminal = self.follow(retry_initial, timeout=self.remaining(8))
+        expected = {"id": "crash", "name": "Crash Retry", "email": "crash@example.com"}
+        assert terminal.get("status") == "completed", f"accepted-result retry ended {terminal.get('status')!r}"
+        assert terminal.get("errors") == [], f"accepted-result retry has {len(terminal.get('errors', []))} errors"
+        assert canonical_records(terminal.get("records", [])) == [canonical_record(expected)], "accepted-result retry record differs"
+        listing_response = self.request("GET", "/imports")
+        assert listing_response.status == 200, f"listing returned HTTP {listing_response.status}"
+        listing = parse_json(listing_response)
+        summaries = listing.get("imports") if isinstance(listing, dict) else None
+        assert isinstance(summaries, list), "listing needs imports array"
+        occurrences = sum(1 for item in summaries if isinstance(item, dict) and item.get("id") == import_id)
+        assert occurrences == 1, f"accepted-result import appears {occurrences} times in listing"
+        self.add(
+            "accepted_result_crash_retry",
+            "pass",
+            "same accepted result survived process kill and identical request retry",
+            import_id=import_id,
+        )
 
     def finish(self) -> int:
         self.stop()
