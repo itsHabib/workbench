@@ -1,0 +1,165 @@
+{
+  "finished_at": "2026-09-19T19:15:01.310301+00:00",
+  "acceptance": [
+    {
+      "args": [
+        "accept",
+        "pressure-import-desk",
+        "--token",
+        "3",
+        "--evidence",
+        "Independent v4 harness verified reported fb7ad711: build5 pressure6 crashretry pass. Later finaldfe60b2 also passes; midimport notcovered. RealChromium upload passes."
+      ],
+      "result": {
+        "evidence": "Independent v4 harness verified reported fb7ad711: build5 pressure6 crashretry pass. Later finaldfe60b2 also passes; midimport notcovered. RealChromium upload passes.",
+        "id": "pressure-import-desk",
+        "result": "{\"commit\":\"fb7ad711d7a15a8ff4d01218aaaf3c97ecb2e2d8\",\"checks\":[\"python3 -m unittest discover -s experiments/work-controller/import-lab/controller-app -p test_*.py -v (3 passed)\",\"HTTP smoke: health, malformed CSV, request replay/conflict, 413 over 10 MiB, exact 10 MiB boundary, 50,000-row throughput and restart persistence\",\"Real Chromium: filepath upload, row-numbered errors, corrected retry, 390px document width equals viewport\"],\"choices\":[\"strict csv.reader parsing with zero records on malformed input\",\"synchronous locked JSON store with persisted request fingerprint\",\"10 MiB Content-Length rejection and bounded body reads\",\"compact responsive table/file-input styling\"],\"limits\":[\"pending-work restart interval not covered because the service completes imports synchronously\",\"no authentication or multi-user policy\"]}",
+        "state": "accepted",
+        "text": "Address observed import pressure and browser failures under newly explicit operating needs; choose only needed mechanisms",
+        "token": 3,
+        "worker": "import-replacement"
+      }
+    },
+    {
+      "args": [
+        "accept",
+        "storage-failure-retry",
+        "--token",
+        "4",
+        "--evidence",
+        "Parent reproduced savefailure then independently ran regression; finaldfe60b2 passes focusedtests. Original reported8293173 preserved; pre-replaceOSError covered only."
+      ],
+      "result": {
+        "evidence": "Parent reproduced savefailure then independently ran regression; finaldfe60b2 passes focusedtests. Original reported8293173 preserved; pre-replaceOSError covered only.",
+        "id": "storage-failure-retry",
+        "result": "{\"commit\":\"8293173265227463369b82c6a1aebd4f59df5d12\",\"checks\":[\"python3 -m unittest discover -s experiments/work-controller/import-lab/controller-app -p test_*.py -v (4 passed)\",\"failure-injection regression: first _save raises, in-memory state rolls back, retry persists, fresh store retrieves record\",\"git diff --check\"],\"choices\":[\"restore in-memory items on any persistence exception\",\"map persistence OSError to HTTP 503 with retry guidance\",\"keep synchronous JSON store and no new infrastructure\"],\"limits\":[\"failure injection covers OSError before durable replace; broader filesystem failure modes remain environment-dependent\",\"pressure job remains reported on historical commit fb7ad711d7a15a8ff4d01218aaaf3c97ecb2e2d8\"]}",
+        "state": "accepted",
+        "text": "Fix observed JSON store write failure: retry returns success from memory but record disappears on restart. Add failure-injection regression.",
+        "token": 4,
+        "worker": "import-replacement"
+      }
+    },
+    {
+      "args": [
+        "accept",
+        "empty-request-id",
+        "--token",
+        "5",
+        "--evidence",
+        "Parent HTTP probe on integrated dfe60b2: explicit empty string replays sameID; focusedregression covers conflictingpayload; frozenv4 allappchecks pass."
+      ],
+      "result": {
+        "evidence": "Parent HTTP probe on integrated dfe60b2: explicit empty string replays sameID; focusedregression covers conflictingpayload; frozenv4 allappchecks pass.",
+        "id": "empty-request-id",
+        "result": "{\"commit\":\"dfe60b29518f3bcca3dd9d46118f376a052acf38\",\"checks\":[\"python3 -m unittest discover -s experiments/work-controller/import-lab/controller-app -p test_*.py -v (5 passed)\",\"empty request_id regression: identical CSV replays same import and changed CSV returns RequestConflict\",\"git diff --check\"],\"choices\":[\"treat request_id presence with is not None so empty string is an explicit key\",\"preserve absent request_id as no deduplication\",\"leave prior pressure and storage-failure reported results unchanged\"],\"limits\":[\"focused store-level regression; no browser rerun needed for this API-only correction\"]}",
+        "state": "accepted",
+        "text": "Explicit empty string request_id is a string under the API contract; sameCSV replay currently creates2IDs; fix distinction absent vs empty and regress.",
+        "token": 5,
+        "worker": "import-replacement"
+      }
+    }
+  ],
+  "snapshot": {
+    "decisions": [
+      {
+        "id": 1,
+        "job": "build-import-desk",
+        "kind": "decide",
+        "reason": "First independent app outcome; start one builder, defer additional staffing until needed",
+        "worker": "import-builder"
+      },
+      {
+        "id": 2,
+        "job": "pressure-import-desk",
+        "kind": "decide",
+        "reason": "Parser/store/UI changes belong with existing app owner; measured responsiveness does not yet justify async queue or extra builder",
+        "worker": "import-builder"
+      },
+      {
+        "id": 3,
+        "job": "pressure-import-desk",
+        "kind": "reassign",
+        "reason": "Deliberate worker-context replacement after committed checkpoint; old agent completed, no active writer",
+        "worker": "import-replacement"
+      },
+      {
+        "id": 4,
+        "job": "storage-failure-retry",
+        "kind": "decide",
+        "reason": "Fresh observed consistency bug in the same store; reuse existing worker context instead of spawning",
+        "worker": "import-replacement"
+      },
+      {
+        "id": 5,
+        "job": "empty-request-id",
+        "kind": "decide",
+        "reason": "Independent HTTP review probe found concrete replay inconsistency; reuse store owner",
+        "worker": "import-replacement"
+      }
+    ],
+    "jobs": [
+      {
+        "evidence": "Initial commit560f633 independently inspected and 3 unit tests passed. Initial build accepted for external evaluation, not pressure-readiness or merge.",
+        "id": "build-import-desk",
+        "result": "{\"commit\":\"560f6338ad1d22a854ebc5d7275295a40dbe1b2b\",\"checks\":[\"python3 -m unittest discover -s experiments/work-controller/import-lab/controller-app -p test_*.py -v\",\"HTTP smoke: /health / /imports POST+GET\"],\"limits\":[\"synchronous local JSON-backed store; no auth or multi-user concurrency policy\"]}",
+        "state": "accepted",
+        "text": "Build the import desk outcome in import-lab/BRIEF.md",
+        "token": 1,
+        "worker": "import-builder"
+      },
+      {
+        "evidence": "Parent HTTP probe on integrated dfe60b2: explicit empty string replays sameID; focusedregression covers conflictingpayload; frozenv4 allappchecks pass.",
+        "id": "empty-request-id",
+        "result": "{\"commit\":\"dfe60b29518f3bcca3dd9d46118f376a052acf38\",\"checks\":[\"python3 -m unittest discover -s experiments/work-controller/import-lab/controller-app -p test_*.py -v (5 passed)\",\"empty request_id regression: identical CSV replays same import and changed CSV returns RequestConflict\",\"git diff --check\"],\"choices\":[\"treat request_id presence with is not None so empty string is an explicit key\",\"preserve absent request_id as no deduplication\",\"leave prior pressure and storage-failure reported results unchanged\"],\"limits\":[\"focused store-level regression; no browser rerun needed for this API-only correction\"]}",
+        "state": "accepted",
+        "text": "Explicit empty string request_id is a string under the API contract; sameCSV replay currently creates2IDs; fix distinction absent vs empty and regress.",
+        "token": 5,
+        "worker": "import-replacement"
+      },
+      {
+        "evidence": "Independent v4 harness verified reported fb7ad711: build5 pressure6 crashretry pass. Later finaldfe60b2 also passes; midimport notcovered. RealChromium upload passes.",
+        "id": "pressure-import-desk",
+        "result": "{\"commit\":\"fb7ad711d7a15a8ff4d01218aaaf3c97ecb2e2d8\",\"checks\":[\"python3 -m unittest discover -s experiments/work-controller/import-lab/controller-app -p test_*.py -v (3 passed)\",\"HTTP smoke: health, malformed CSV, request replay/conflict, 413 over 10 MiB, exact 10 MiB boundary, 50,000-row throughput and restart persistence\",\"Real Chromium: filepath upload, row-numbered errors, corrected retry, 390px document width equals viewport\"],\"choices\":[\"strict csv.reader parsing with zero records on malformed input\",\"synchronous locked JSON store with persisted request fingerprint\",\"10 MiB Content-Length rejection and bounded body reads\",\"compact responsive table/file-input styling\"],\"limits\":[\"pending-work restart interval not covered because the service completes imports synchronously\",\"no authentication or multi-user policy\"]}",
+        "state": "accepted",
+        "text": "Address observed import pressure and browser failures under newly explicit operating needs; choose only needed mechanisms",
+        "token": 3,
+        "worker": "import-replacement"
+      },
+      {
+        "evidence": "Parent reproduced savefailure then independently ran regression; finaldfe60b2 passes focusedtests. Original reported8293173 preserved; pre-replaceOSError covered only.",
+        "id": "storage-failure-retry",
+        "result": "{\"commit\":\"8293173265227463369b82c6a1aebd4f59df5d12\",\"checks\":[\"python3 -m unittest discover -s experiments/work-controller/import-lab/controller-app -p test_*.py -v (4 passed)\",\"failure-injection regression: first _save raises, in-memory state rolls back, retry persists, fresh store retrieves record\",\"git diff --check\"],\"choices\":[\"restore in-memory items on any persistence exception\",\"map persistence OSError to HTTP 503 with retry guidance\",\"keep synchronous JSON store and no new infrastructure\"],\"limits\":[\"failure injection covers OSError before durable replace; broader filesystem failure modes remain environment-dependent\",\"pressure job remains reported on historical commit fb7ad711d7a15a8ff4d01218aaaf3c97ecb2e2d8\"]}",
+        "state": "accepted",
+        "text": "Fix observed JSON store write failure: retry returns success from memory but record disappears on restart. Add failure-injection regression.",
+        "token": 4,
+        "worker": "import-replacement"
+      }
+    ],
+    "workers": [
+      {
+        "context": "Build the import desk outcome in import-lab/BRIEF.md",
+        "id": "import-builder"
+      },
+      {
+        "context": "Fresh Luna worker; resumes pressure fixes from persisted job and HANDOFF.md",
+        "id": "import-replacement"
+      }
+    ]
+  },
+  "artifacts": {
+    "controller-app/server.py": "2cfe30ea7e60ce8061bc7649864946df7479fd206610e9f3323bbcf5d626abff",
+    "controller-app/index.html": "45f5f81f71b13d45b5bbfba4e1dacc015c3597c0727180f6e33f34e3de9dd19a",
+    "controller-app/test_server.py": "2e5e21fe3e0d444b67ce818a448fe75fc98cf6be9cbd88b9ca3a798899da4e96",
+    "controller-app/HANDOFF.md": "73ec9f6daf73584c4414b838b58d4bdc1710aaad39e15dfe6aafb0dd985df245",
+    "native-app/server.py": "d14210bc7efe430ce80ad9b5c27dc096a0770bdf093bd3a0304d1d2103f2dadf",
+    "native-app/RECOVERY.md": "ce7759d4f0c3a734836e10fba867f23eb97f566ce2b70b5f160581d9fbd7da2b",
+    "native-app/TASKS.md": "77acb895017c6b20e0cf0d2323b07697608c4c0f4d07640cf32de66375fa6923",
+    "native-app/test_server.py": "9e76617177003b98edbb0e4ff2ccea24934ee225df3aaed29abf7f039b0599db"
+  },
+  "requested_models": {
+    "initial_builders": "gpt-5.6-luna medium",
+    "replacement_builders": "gpt-5.6-luna medium",
+    "runner": "gpt-5.6-sol medium"
+  },
+  "billing": "unavailable; no dollar savings claim"
+}

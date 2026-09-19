@@ -1,0 +1,78 @@
+{
+  "started": "2026-09-19T18:48:37.676039+00:00",
+  "decisions": [
+    {
+      "args": [
+        "init"
+      ],
+      "result": {
+        "initialized": true
+      }
+    },
+    {
+      "args": [
+        "submit",
+        "build-import-desk",
+        "Build the import desk outcome in import-lab/BRIEF.md"
+      ],
+      "result": {
+        "evidence": null,
+        "id": "build-import-desk",
+        "result": null,
+        "state": "queued",
+        "text": "Build the import desk outcome in import-lab/BRIEF.md",
+        "token": null,
+        "worker": null
+      }
+    },
+    {
+      "args": [
+        "decide",
+        "build-import-desk",
+        "--worker",
+        "import-builder",
+        "--spawn",
+        "--reason",
+        "First independent app outcome; start one builder, defer additional staffing until needed"
+      ],
+      "result": {
+        "evidence": null,
+        "id": "build-import-desk",
+        "result": null,
+        "state": "assigned",
+        "text": "Build the import desk outcome in import-lab/BRIEF.md",
+        "token": null,
+        "worker": "import-builder"
+      }
+    }
+  ],
+  "models": {
+    "builders": "gpt-5.6-luna medium",
+    "runner": "gpt-5.6-sol medium"
+  },
+  "limits": [
+    "one run per arm",
+    "same parent coordinates both",
+    "cost totals unavailable until evidence exists"
+  ],
+  "agents": {
+    "controller": "import_builder",
+    "native": "import_native",
+    "runner": "import_runner"
+  },
+  "runner_protocol": {
+    "commit": "063e003",
+    "sha256": "eb5bd5770f4a0c482cc061fb0726b7abdfbbe35da97fe647d527ae156447480a",
+    "frozen_before_candidate_inspection": true
+  },
+  "baseline_commits": {
+    "controller": "560f6338ad1d22a854ebc5d7275295a40dbe1b2b",
+    "native": "b6bacffa1c88dea1f98a13d48b7b70b0da1c1e60"
+  },
+  "oracle_v3": {
+    "commit": "2dcefd2e12130fe3f084d92c4583f9c8b5360fb0",
+    "protocol_sha256": "68e41f9a0c77a1435c03493c66d7e82d08fb0bff1dfdd9ba12b1bbb8044a1d36",
+    "harness_sha256": "c162c182bd1e790c30eb1c15491bf85f334046e855415f8a450925ed3da960ce",
+    "corrections": "Tighten concurrency assertions; add accepted-result crash/retry as separate check; baseline commits replayed under v3"
+  }
+}

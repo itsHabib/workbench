@@ -1,0 +1,12 @@
+[
+  {
+    "arm": "controller",
+    "empty_request_id_replays": true,
+    "email_with_spaces_accepted": false
+  },
+  {
+    "arm": "native",
+    "empty_request_id_replays": true,
+    "email_with_spaces_accepted": false
+  }
+]

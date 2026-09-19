@@ -1,0 +1,37 @@
+[
+  {
+    "args": [
+      "submit",
+      "empty-request-id",
+      "Explicit empty string request_id is a string under the API contract; sameCSV replay currently creates2IDs; fix distinction absent vs empty and regress."
+    ],
+    "result": {
+      "evidence": null,
+      "id": "empty-request-id",
+      "result": null,
+      "state": "queued",
+      "text": "Explicit empty string request_id is a string under the API contract; sameCSV replay currently creates2IDs; fix distinction absent vs empty and regress.",
+      "token": null,
+      "worker": null
+    }
+  },
+  {
+    "args": [
+      "decide",
+      "empty-request-id",
+      "--worker",
+      "import-replacement",
+      "--reason",
+      "Independent HTTP review probe found concrete replay inconsistency; reuse store owner"
+    ],
+    "result": {
+      "evidence": null,
+      "id": "empty-request-id",
+      "result": null,
+      "state": "assigned",
+      "text": "Explicit empty string request_id is a string under the API contract; sameCSV replay currently creates2IDs; fix distinction absent vs empty and regress.",
+      "token": null,
+      "worker": "import-replacement"
+    }
+  }
+]

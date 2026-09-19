@@ -1,0 +1,581 @@
+{
+  "kind": "deterministic-mechanism-drill",
+  "passed": true,
+  "records": [
+    {
+      "args": [
+        "init"
+      ],
+      "exit": 0,
+      "result": {
+        "initialized": true
+      }
+    },
+    {
+      "args": [
+        "register",
+        "builder",
+        "Owns parser implementation"
+      ],
+      "exit": 0,
+      "result": {
+        "context": "Owns parser implementation",
+        "worker": "builder"
+      }
+    },
+    {
+      "args": [
+        "register",
+        "replacement",
+        "Recovery worker in a separate workspace"
+      ],
+      "exit": 0,
+      "result": {
+        "context": "Recovery worker in a separate workspace",
+        "worker": "replacement"
+      }
+    },
+    {
+      "args": [
+        "submit",
+        "parser",
+        "Build the parser"
+      ],
+      "exit": 0,
+      "result": {
+        "evidence": null,
+        "id": "parser",
+        "result": null,
+        "state": "queued",
+        "text": "Build the parser",
+        "token": null,
+        "worker": null
+      }
+    },
+    {
+      "args": [
+        "submit",
+        "parser",
+        "Build the parser"
+      ],
+      "exit": 0,
+      "result": {
+        "evidence": null,
+        "id": "parser",
+        "result": null,
+        "state": "queued",
+        "text": "Build the parser",
+        "token": null,
+        "worker": null
+      }
+    },
+    {
+      "args": [
+        "submit",
+        "parser",
+        "Conflicting request"
+      ],
+      "exit": 1,
+      "result": {
+        "error": "job ID already has different text"
+      }
+    },
+    {
+      "args": [
+        "decide",
+        "parser",
+        "--worker",
+        "builder",
+        "--reason",
+        "Reuse parser context"
+      ],
+      "exit": 0,
+      "result": {
+        "evidence": null,
+        "id": "parser",
+        "result": null,
+        "state": "assigned",
+        "text": "Build the parser",
+        "token": null,
+        "worker": "builder"
+      }
+    },
+    {
+      "args": [
+        "claim",
+        "parser",
+        "--worker",
+        "builder"
+      ],
+      "exit": 0,
+      "result": {
+        "evidence": null,
+        "id": "parser",
+        "result": null,
+        "state": "running",
+        "text": "Build the parser",
+        "token": 1,
+        "worker": "builder"
+      }
+    },
+    {
+      "args": [
+        "submit",
+        "errors",
+        "Improve parser errors"
+      ],
+      "exit": 0,
+      "result": {
+        "evidence": null,
+        "id": "errors",
+        "result": null,
+        "state": "queued",
+        "text": "Improve parser errors",
+        "token": null,
+        "worker": null
+      }
+    },
+    {
+      "args": [
+        "decide",
+        "errors",
+        "--worker",
+        "builder",
+        "--reason",
+        "Related work; queue behind parser"
+      ],
+      "exit": 0,
+      "result": {
+        "evidence": null,
+        "id": "errors",
+        "result": null,
+        "state": "assigned",
+        "text": "Improve parser errors",
+        "token": null,
+        "worker": "builder"
+      }
+    },
+    {
+      "args": [
+        "claim",
+        "errors",
+        "--worker",
+        "builder"
+      ],
+      "exit": 1,
+      "result": {
+        "error": "worker is already running job: parser"
+      }
+    },
+    {
+      "args": [
+        "submit",
+        "guide",
+        "Write independent usage guide"
+      ],
+      "exit": 0,
+      "result": {
+        "evidence": null,
+        "id": "guide",
+        "result": null,
+        "state": "queued",
+        "text": "Write independent usage guide",
+        "token": null,
+        "worker": null
+      }
+    },
+    {
+      "args": [
+        "decide",
+        "guide",
+        "--worker",
+        "writer",
+        "--spawn",
+        "--reason",
+        "Independent documentation can proceed"
+      ],
+      "exit": 0,
+      "result": {
+        "evidence": null,
+        "id": "guide",
+        "result": null,
+        "state": "assigned",
+        "text": "Write independent usage guide",
+        "token": null,
+        "worker": "writer"
+      }
+    },
+    {
+      "args": [
+        "snapshot"
+      ],
+      "exit": 0,
+      "result": {
+        "decisions": [
+          {
+            "id": 1,
+            "job": "parser",
+            "kind": "decide",
+            "reason": "Reuse parser context",
+            "worker": "builder"
+          },
+          {
+            "id": 2,
+            "job": "errors",
+            "kind": "decide",
+            "reason": "Related work; queue behind parser",
+            "worker": "builder"
+          },
+          {
+            "id": 3,
+            "job": "guide",
+            "kind": "decide",
+            "reason": "Independent documentation can proceed",
+            "worker": "writer"
+          }
+        ],
+        "jobs": [
+          {
+            "evidence": null,
+            "id": "errors",
+            "result": null,
+            "state": "assigned",
+            "text": "Improve parser errors",
+            "token": null,
+            "worker": "builder"
+          },
+          {
+            "evidence": null,
+            "id": "guide",
+            "result": null,
+            "state": "assigned",
+            "text": "Write independent usage guide",
+            "token": null,
+            "worker": "writer"
+          },
+          {
+            "evidence": null,
+            "id": "parser",
+            "result": null,
+            "state": "running",
+            "text": "Build the parser",
+            "token": 1,
+            "worker": "builder"
+          }
+        ],
+        "workers": [
+          {
+            "context": "Owns parser implementation",
+            "id": "builder"
+          },
+          {
+            "context": "Recovery worker in a separate workspace",
+            "id": "replacement"
+          },
+          {
+            "context": "Write independent usage guide",
+            "id": "writer"
+          }
+        ]
+      }
+    },
+    {
+      "args": [
+        "outbox"
+      ],
+      "exit": 0,
+      "result": [
+        {
+          "delivered": 0,
+          "id": 1,
+          "job": "parser",
+          "kind": "assignment",
+          "payload": {
+            "reason": "Reuse parser context",
+            "text": "Build the parser"
+          },
+          "worker": "builder"
+        },
+        {
+          "delivered": 0,
+          "id": 2,
+          "job": "errors",
+          "kind": "assignment",
+          "payload": {
+            "reason": "Related work; queue behind parser",
+            "text": "Improve parser errors"
+          },
+          "worker": "builder"
+        },
+        {
+          "delivered": 0,
+          "id": 3,
+          "job": "guide",
+          "kind": "spawn",
+          "payload": {
+            "context": "Write independent usage guide"
+          },
+          "worker": "writer"
+        },
+        {
+          "delivered": 0,
+          "id": 4,
+          "job": "guide",
+          "kind": "assignment",
+          "payload": {
+            "reason": "Independent documentation can proceed",
+            "text": "Write independent usage guide"
+          },
+          "worker": "writer"
+        }
+      ]
+    },
+    {
+      "args": [
+        "accept",
+        "parser",
+        "--token",
+        "1",
+        "--evidence",
+        "Premature acceptance"
+      ],
+      "exit": 1,
+      "result": {
+        "error": "only a current reported result can be accepted"
+      }
+    },
+    {
+      "args": [
+        "reassign",
+        "parser",
+        "--worker",
+        "replacement",
+        "--reason",
+        "Simulated confirmed worker loss"
+      ],
+      "exit": 0,
+      "result": {
+        "evidence": null,
+        "id": "parser",
+        "result": null,
+        "state": "assigned",
+        "text": "Build the parser",
+        "token": null,
+        "worker": "replacement"
+      }
+    },
+    {
+      "args": [
+        "claim",
+        "parser",
+        "--worker",
+        "replacement"
+      ],
+      "exit": 0,
+      "result": {
+        "evidence": null,
+        "id": "parser",
+        "result": null,
+        "state": "running",
+        "text": "Build the parser",
+        "token": 2,
+        "worker": "replacement"
+      }
+    },
+    {
+      "args": [
+        "complete",
+        "parser",
+        "--worker",
+        "builder",
+        "--token",
+        "1",
+        "--result",
+        "Late old result"
+      ],
+      "exit": 1,
+      "result": {
+        "error": "stale attempt or wrong worker"
+      }
+    },
+    {
+      "args": [
+        "complete",
+        "parser",
+        "--worker",
+        "replacement",
+        "--token",
+        "2",
+        "--result",
+        "fixture result"
+      ],
+      "exit": 0,
+      "result": {
+        "evidence": null,
+        "id": "parser",
+        "result": "fixture result",
+        "state": "reported",
+        "text": "Build the parser",
+        "token": 2,
+        "worker": "replacement"
+      }
+    },
+    {
+      "args": [
+        "complete",
+        "parser",
+        "--worker",
+        "replacement",
+        "--token",
+        "2",
+        "--result",
+        "fixture result"
+      ],
+      "exit": 0,
+      "result": {
+        "evidence": null,
+        "id": "parser",
+        "result": "fixture result",
+        "state": "reported",
+        "text": "Build the parser",
+        "token": 2,
+        "worker": "replacement"
+      }
+    },
+    {
+      "args": [
+        "accept",
+        "parser",
+        "--token",
+        "1",
+        "--evidence",
+        "Stale acceptance"
+      ],
+      "exit": 1,
+      "result": {
+        "error": "stale attempt"
+      }
+    },
+    {
+      "args": [
+        "accept",
+        "parser",
+        "--token",
+        "2",
+        "--evidence",
+        "Fixture inspected; not real software verification"
+      ],
+      "exit": 0,
+      "result": {
+        "evidence": "Fixture inspected; not real software verification",
+        "id": "parser",
+        "result": "fixture result",
+        "state": "accepted",
+        "text": "Build the parser",
+        "token": 2,
+        "worker": "replacement"
+      }
+    },
+    {
+      "args": [
+        "delivered",
+        "1"
+      ],
+      "exit": 0,
+      "result": {
+        "delivered": 1
+      }
+    },
+    {
+      "args": [
+        "delivered",
+        "1"
+      ],
+      "exit": 0,
+      "result": {
+        "delivered": 1
+      }
+    },
+    {
+      "args": [
+        "snapshot"
+      ],
+      "exit": 0,
+      "result": {
+        "decisions": [
+          {
+            "id": 1,
+            "job": "parser",
+            "kind": "decide",
+            "reason": "Reuse parser context",
+            "worker": "builder"
+          },
+          {
+            "id": 2,
+            "job": "errors",
+            "kind": "decide",
+            "reason": "Related work; queue behind parser",
+            "worker": "builder"
+          },
+          {
+            "id": 3,
+            "job": "guide",
+            "kind": "decide",
+            "reason": "Independent documentation can proceed",
+            "worker": "writer"
+          },
+          {
+            "id": 4,
+            "job": "parser",
+            "kind": "reassign",
+            "reason": "Simulated confirmed worker loss",
+            "worker": "replacement"
+          }
+        ],
+        "jobs": [
+          {
+            "evidence": null,
+            "id": "errors",
+            "result": null,
+            "state": "assigned",
+            "text": "Improve parser errors",
+            "token": null,
+            "worker": "builder"
+          },
+          {
+            "evidence": null,
+            "id": "guide",
+            "result": null,
+            "state": "assigned",
+            "text": "Write independent usage guide",
+            "token": null,
+            "worker": "writer"
+          },
+          {
+            "evidence": "Fixture inspected; not real software verification",
+            "id": "parser",
+            "result": "fixture result",
+            "state": "accepted",
+            "text": "Build the parser",
+            "token": 2,
+            "worker": "replacement"
+          }
+        ],
+        "workers": [
+          {
+            "context": "Owns parser implementation",
+            "id": "builder"
+          },
+          {
+            "context": "Recovery worker in a separate workspace",
+            "id": "replacement"
+          },
+          {
+            "context": "Write independent usage guide",
+            "id": "writer"
+          }
+        ]
+      }
+    }
+  ]
+}

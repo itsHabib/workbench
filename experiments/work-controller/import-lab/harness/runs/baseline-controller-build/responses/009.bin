@@ -1,0 +1,1 @@
+{"id": "cf922bf7a681", "status": "completed", "records": [{"id": "1", "name": "Ada", "email": "ada@example.com"}, {"id": "5", "name": "Lin", "email": "lin@example.org"}], "errors": [{"row": 3, "message": "empty field: id"}, {"row": 4, "message": "email must contain one @ with text on both sides"}, {"row": 5, "message": "email must not contain spaces"}]}

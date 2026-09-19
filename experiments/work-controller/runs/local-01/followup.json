@@ -1,0 +1,70 @@
+[
+  {
+    "args": [
+      "snapshot"
+    ],
+    "result": {
+      "decisions": [
+        {
+          "id": 1,
+          "job": "lifecycle",
+          "kind": "decide",
+          "reason": "Already implementing this outcome; record ongoing work rather than spawn a duplicate",
+          "worker": "controller-worker"
+        }
+      ],
+      "jobs": [
+        {
+          "evidence": null,
+          "id": "lifecycle",
+          "result": null,
+          "state": "running",
+          "text": "Build local durable lifecycle and test concurrency, stale attempts and replay",
+          "token": 1,
+          "worker": "controller-worker"
+        }
+      ],
+      "workers": [
+        {
+          "context": "Native subagent controller_worker; owns controller.py and its tests",
+          "id": "controller-worker"
+        }
+      ]
+    }
+  },
+  {
+    "args": [
+      "submit",
+      "replay-review",
+      "Inspect replay behavior after a lost claim response; document recovery or fix if it loses ownership"
+    ],
+    "result": {
+      "evidence": null,
+      "id": "replay-review",
+      "result": null,
+      "state": "queued",
+      "text": "Inspect replay behavior after a lost claim response; document recovery or fix if it loses ownership",
+      "token": null,
+      "worker": null
+    }
+  },
+  {
+    "args": [
+      "decide",
+      "replay-review",
+      "--worker",
+      "controller-worker",
+      "--reason",
+      "Same lifecycle code and context; queue follow-up rather than spawn another builder"
+    ],
+    "result": {
+      "evidence": null,
+      "id": "replay-review",
+      "result": null,
+      "state": "assigned",
+      "text": "Inspect replay behavior after a lost claim response; document recovery or fix if it loses ownership",
+      "token": null,
+      "worker": "controller-worker"
+    }
+  }
+]

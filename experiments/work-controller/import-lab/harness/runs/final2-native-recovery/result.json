@@ -1,0 +1,32 @@
+{
+  "app_dir": "/Users/mh/dev/workbench/.claude/worktrees/codex/import-native/experiments/work-controller/import-lab/native-app",
+  "checks": [
+    {
+      "detail": "import completed synchronously before kill",
+      "evidence": {
+        "import_id": "21f0f6baa85e",
+        "request_bytes": 8499121
+      },
+      "name": "mid_import_recovery",
+      "status": "not_covered"
+    },
+    {
+      "detail": "same accepted result survived process kill and identical request retry",
+      "evidence": {
+        "import_id": "fc54fde26c51"
+      },
+      "name": "accepted_result_crash_retry",
+      "status": "pass"
+    }
+  ],
+  "counts": {
+    "error": 0,
+    "fail": 0,
+    "not_covered": 1,
+    "pass": 1
+  },
+  "data_dir": "data-1sfufclc",
+  "elapsed_ms": 493,
+  "round": "recovery",
+  "schema": "import-lab-harness-v1"
+}
