@@ -2,6 +2,7 @@
 """Small local CSV import desk."""
 import argparse
 import csv
+import hashlib
 import io
 import json
 import os
@@ -12,33 +13,42 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 FIELDS = ("id", "name", "email")
+MAX_BODY_BYTES = 10 * 1024 * 1024
+
+class RequestConflict(ValueError):
+    pass
 
 def validate_csv(source):
     errors, records = [], []
-    reader = csv.reader(io.StringIO(source))
+    reader = csv.reader(io.StringIO(source), strict=True)
     try:
         header = next(reader)
     except StopIteration:
         return records, [{"row": 1, "message": "CSV is empty; expected id, name, email header"}]
+    except csv.Error as exc:
+        return records, [{"row": 1, "message": "malformed CSV: " + str(exc)}]
     if header != list(FIELDS):
         return records, [{"row": 1, "message": "header must be exactly id,name,email"}]
-    for row_number, values in enumerate(reader, start=2):
-        if len(values) != len(FIELDS):
-            errors.append({"row": row_number, "message": "expected exactly 3 columns: id, name, email"})
-            continue
-        record = dict(zip(FIELDS, values))
-        missing = [field for field in FIELDS if not record[field].strip()]
-        if missing:
-            errors.append({"row": row_number, "message": "empty field: " + ", ".join(missing)})
-            continue
-        email = record["email"]
-        if " " in email:
-            errors.append({"row": row_number, "message": "email must not contain spaces"})
-            continue
-        if email.count("@") != 1 or not all(email.split("@")):
-            errors.append({"row": row_number, "message": "email must contain one @ with text on both sides"})
-            continue
-        records.append(record)
+    try:
+        for row_number, values in enumerate(reader, start=2):
+            if len(values) != len(FIELDS):
+                errors.append({"row": row_number, "message": "expected exactly 3 columns: id, name, email"})
+                continue
+            record = dict(zip(FIELDS, values))
+            missing = [field for field in FIELDS if not record[field].strip()]
+            if missing:
+                errors.append({"row": row_number, "message": "empty field: " + ", ".join(missing)})
+                continue
+            email = record["email"]
+            if " " in email:
+                errors.append({"row": row_number, "message": "email must not contain spaces"})
+                continue
+            if email.count("@") != 1 or not all(email.split("@")):
+                errors.append({"row": row_number, "message": "email must contain one @ with text on both sides"})
+                continue
+            records.append(record)
+    except csv.Error as exc:
+        return [], [{"row": max(reader.line_num, 1), "message": "malformed CSV: " + str(exc)}]
     return records, errors
 
 class ImportStore:
@@ -59,14 +69,27 @@ class ImportStore:
         with temporary.open("w", encoding="utf-8") as stream:
             json.dump(self.items, stream, indent=2)
         os.replace(temporary, self.path)
-    def create(self, source, request_id=None):
-        records, errors = validate_csv(source)
-        item = {"id": uuid.uuid4().hex[:12], "status": "completed", "records": records, "errors": errors}
-        if request_id:
-            item["request_id"] = request_id
+    def create_or_replay(self, source, request_id=None):
+        fingerprint = hashlib.sha256(source.encode("utf-8")).hexdigest()
         with self.lock:
+            if request_id:
+                for existing in self.items:
+                    if existing.get("request_id") != request_id:
+                        continue
+                    if existing.get("fingerprint") == fingerprint:
+                        return existing, True
+                    raise RequestConflict("request_id is already used for different CSV")
+            records, errors = validate_csv(source)
+            item = {"id": uuid.uuid4().hex[:12], "status": "completed", "records": records, "errors": errors}
+            if request_id:
+                item["request_id"] = request_id
+                item["fingerprint"] = fingerprint
             self.items.insert(0, item)
             self._save()
+        return item, False
+
+    def create(self, source, request_id=None):
+        item, _ = self.create_or_replay(source, request_id)
         return item
     def get(self, import_id):
         with self.lock:
@@ -77,6 +100,14 @@ class ImportStore:
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "ImportDesk/1.0"
+    def _discard(self, length):
+        remaining = length
+        while remaining > 0:
+            chunk = self.rfile.read(min(65536, remaining))
+            if not chunk:
+                return
+            remaining -= len(chunk)
+
     def _json(self, status, value):
         payload = json.dumps(value).encode("utf-8")
         self.send_response(status)
@@ -111,15 +142,30 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            body = json.loads(self.rfile.read(length))
+            if length < 0:
+                raise ValueError("invalid content length")
+            if length > MAX_BODY_BYTES:
+                self._discard(length)
+                self._json(413, {"error": "request body exceeds 10 MiB limit"})
+                return
+            raw = self.rfile.read(length)
+            body = json.loads(raw)
             source = body["csv"]
             if not isinstance(source, str):
                 raise ValueError("csv must be a string")
+            request_id = body.get("request_id")
+            if request_id is not None and not isinstance(request_id, str):
+                raise ValueError("request_id must be a string")
         except (ValueError, KeyError, TypeError, json.JSONDecodeError):
             self._json(400, {"error": "request must include csv as a string"})
             return
-        item = self.server.store.create(source, body.get("request_id"))
-        self._json(201, {"id": item["id"], "status": item["status"]})
+        try:
+            item, replay = self.server.store.create_or_replay(source, request_id)
+        except RequestConflict as exc:
+            self._json(409, {"error": str(exc)})
+            return
+        self._json(200 if replay else 201,
+                   {"id": item["id"], "status": item["status"]})
     def log_message(self, *_args):
         return
 
