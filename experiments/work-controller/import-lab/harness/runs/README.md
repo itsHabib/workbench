@@ -131,10 +131,12 @@ These are conformance counts and bounded latency observations, not a performance
 comparison or winner decision.
 
 A bounded final diff review found that this native revision strips email values
-before checking for spaces and accepts extra header columns while discarding
-their values. Direct probes confirmed both invalid shapes became valid records.
-The coordinator requested a native repair; the passing v4 receipts remain
-useful but are intermediate evidence.
+before checking for spaces. A direct probe confirmed an email containing spaces
+became a valid normalized record, contrary to the explicit email rule. The same
+probe observed that extra header columns are accepted and discarded, but the
+brief does not explicitly forbid extra columns, so that observation is not a
+finding. The coordinator requested an email-validation repair; the passing v4
+receipts remain useful but are intermediate evidence.
 
 Controller final commit `8293173265227463369b82c6a1aebd4f59df5d12` was
 clean at execution after the storage-fault rollback repair:
