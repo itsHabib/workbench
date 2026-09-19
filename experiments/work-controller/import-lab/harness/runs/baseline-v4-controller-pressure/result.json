@@ -1,0 +1,63 @@
+{
+  "app_dir": "/private/tmp/import-v3-baseline.0Btvld/experiments/work-controller/import-lab/controller-app",
+  "checks": [
+    {
+      "detail": "50,000 rows completed",
+      "evidence": {
+        "import_id": "7907cfeae17f",
+        "request_bytes": 2166695
+      },
+      "name": "large_valid_import",
+      "status": "pass"
+    },
+    {
+      "detail": "RemoteDisconnected: Remote end closed connection without response",
+      "evidence": {},
+      "name": "ten_mib_cap",
+      "status": "error"
+    },
+    {
+      "detail": "malformed CSV produced a useful terminal import with no records",
+      "evidence": {
+        "import_id": "f0c7187914c4",
+        "terminal_status": "completed"
+      },
+      "name": "malformed_csv",
+      "status": "pass"
+    },
+    {
+      "detail": "client request threads overlapped; both imports and health met thresholds",
+      "evidence": {
+        "health_ms": 1,
+        "large_records": 50000,
+        "small_elapsed_ms": 304
+      },
+      "name": "concurrent_service",
+      "status": "pass"
+    },
+    {
+      "detail": "completed import matched after same-data-dir restart",
+      "evidence": {
+        "import_id": "7907cfeae17f"
+      },
+      "name": "restart_persistence",
+      "status": "pass"
+    },
+    {
+      "detail": "same request ID and content created a different import",
+      "evidence": {},
+      "name": "request_id_idempotency",
+      "status": "fail"
+    }
+  ],
+  "counts": {
+    "error": 1,
+    "fail": 1,
+    "not_covered": 0,
+    "pass": 4
+  },
+  "data_dir": "data-0vqyx7nu",
+  "elapsed_ms": 1252,
+  "round": "pressure",
+  "schema": "import-lab-harness-v1"
+}

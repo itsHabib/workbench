@@ -80,3 +80,33 @@ accepted-result crash/retry check records both baseline idempotency failures.
 After the v3 runs, the full large bodies and data stores under
 `/tmp/import-lab-raw` total 151 MiB. Compact results, exchange hashes/sizes,
 small bodies, and process logs remain committed here.
+
+## V4 observable malformed-CSV result and controller final
+
+V4 was frozen at commit `e0117b8280022e713f5bb2653f633b522fa80c72`
+before rerunning the exported baselines or final candidates. Protocol SHA-256 is
+`45ced49012ffa7785e7326d1b0ac2c48663cab7a58e1858ff23eb42ca9e6b576`
+and harness SHA-256 is
+`de84f152f395d4682bedb448c3adce1037392ceebc81614b090ffd4157a19850`.
+V4 judges malformed CSV by the shared observable contract: HTTP rejection, or
+any terminal result with no records and useful row errors.
+
+The frozen controller baseline's malformed CSV already satisfied that contract
+with `completed`, zero records, and a useful error. Its earlier failure was an
+oracle false positive. The corrected baseline pressure result is 4 pass, 1 fail
+(request-ID idempotency), and 1 error (over-limit disconnect). Native remains 3
+pass and 3 fail.
+
+Controller final commit `fb7ad711d7a15a8ff4d01218aaaf3c97ecb2e2d8`
+was clean at execution:
+
+- build: 5/5 pass
+- pressure: 6/6 pass; the concurrency probe observed 1 ms health, 306 ms small
+  import end to end, and an independently verified exact 50,000-record large
+  result
+- recovery: `accepted_result_crash_retry` pass;
+  `mid_import_recovery` remains `not_covered` because the near-limit import
+  completed synchronously before kill
+
+The final controller recovery evidence establishes durable accepted-result
+idempotency across a process kill. It does not establish mid-task recovery.
