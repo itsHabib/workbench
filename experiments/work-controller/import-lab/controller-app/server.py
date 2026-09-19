@@ -84,8 +84,13 @@ class ImportStore:
             if request_id:
                 item["request_id"] = request_id
                 item["fingerprint"] = fingerprint
-            self.items.insert(0, item)
-            self._save()
+            prior_items = self.items
+            self.items = [item] + prior_items
+            try:
+                self._save()
+            except Exception:
+                self.items = prior_items
+                raise
         return item, False
 
     def create(self, source, request_id=None):
@@ -163,6 +168,9 @@ class Handler(BaseHTTPRequestHandler):
             item, replay = self.server.store.create_or_replay(source, request_id)
         except RequestConflict as exc:
             self._json(409, {"error": str(exc)})
+            return
+        except OSError:
+            self._json(503, {"error": "could not persist import; please retry"})
             return
         self._json(200 if replay else 201,
                    {"id": item["id"], "status": item["status"]})
