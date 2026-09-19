@@ -39,5 +39,17 @@ class ValidationTests(unittest.TestCase):
             self.assertFalse(replay)
             self.assertEqual(server.ImportStore(directory).get(item["id"])["records"][0]["id"], "1")
 
+    def test_empty_request_id_replays_and_conflicts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = server.ImportStore(directory)
+            source = "id,name,email\n1,A,a@b\n"
+            first = store.create(source, "")
+            second, replay = store.create_or_replay(source, "")
+            self.assertTrue(replay)
+            self.assertEqual(second["id"], first["id"])
+            with self.assertRaises(server.RequestConflict):
+                store.create(source.replace("1,A", "2,B"), "")
+            self.assertEqual(len(store.items), 1)
+
 if __name__ == "__main__":
     unittest.main()
