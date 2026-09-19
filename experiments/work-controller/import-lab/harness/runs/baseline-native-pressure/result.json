@@ -1,0 +1,58 @@
+{
+  "app_dir": "/Users/mh/dev/workbench/.claude/worktrees/codex/import-native/experiments/work-controller/import-lab/native-app",
+  "checks": [
+    {
+      "detail": "50,000 rows completed",
+      "evidence": {
+        "import_id": "cd67e10d5874",
+        "request_bytes": 2166695
+      },
+      "name": "large_valid_import",
+      "status": "pass"
+    },
+    {
+      "detail": "over-limit request returned HTTP 201",
+      "evidence": {},
+      "name": "ten_mib_cap",
+      "status": "fail"
+    },
+    {
+      "detail": "malformed CSV produced a useful failed import",
+      "evidence": {
+        "import_id": "92c667badbcb"
+      },
+      "name": "malformed_csv",
+      "status": "pass"
+    },
+    {
+      "detail": "health and small import completed during large request",
+      "evidence": {
+        "health_ms": 1
+      },
+      "name": "concurrent_service",
+      "status": "pass"
+    },
+    {
+      "detail": "persisted inspect returned HTTP 404",
+      "evidence": {},
+      "name": "restart_persistence",
+      "status": "fail"
+    },
+    {
+      "detail": "same request ID and content created a different import",
+      "evidence": {},
+      "name": "request_id_idempotency",
+      "status": "fail"
+    }
+  ],
+  "counts": {
+    "error": 0,
+    "fail": 3,
+    "not_covered": 0,
+    "pass": 3
+  },
+  "data_dir": "data-a1p6zfbg",
+  "elapsed_ms": 370,
+  "round": "pressure",
+  "schema": "import-lab-harness-v1"
+}

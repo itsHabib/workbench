@@ -1,0 +1,56 @@
+{
+  "app_dir": "/Users/mh/dev/workbench/.claude/worktrees/codex/import-controller/experiments/work-controller/import-lab/controller-app",
+  "checks": [
+    {
+      "detail": "health returned HTTP 200 JSON",
+      "evidence": {
+        "elapsed_ms": 0
+      },
+      "name": "startup_health",
+      "status": "pass"
+    },
+    {
+      "detail": "UI has no form",
+      "evidence": {},
+      "name": "browser_surface",
+      "status": "fail"
+    },
+    {
+      "detail": "two valid records and three row errors observed",
+      "evidence": {
+        "import_id": "cf922bf7a681"
+      },
+      "name": "mixed_csv_validation",
+      "status": "pass"
+    },
+    {
+      "detail": "corrected input completed without errors",
+      "evidence": {
+        "import_id": "4efb8a524a8b"
+      },
+      "name": "corrected_retry",
+      "status": "pass"
+    },
+    {
+      "detail": "inspection matched and listing included both imports",
+      "evidence": {
+        "ids": [
+          "4efb8a524a8b",
+          "cf922bf7a681"
+        ]
+      },
+      "name": "inspection_listing",
+      "status": "pass"
+    }
+  ],
+  "counts": {
+    "error": 0,
+    "fail": 1,
+    "not_covered": 0,
+    "pass": 4
+  },
+  "data_dir": "data-3nizs4jk",
+  "elapsed_ms": 71,
+  "round": "build",
+  "schema": "import-lab-harness-v1"
+}
