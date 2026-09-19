@@ -1,0 +1,67 @@
+{
+  "app_dir": "/Users/mh/dev/workbench/.claude/worktrees/codex/import-native/experiments/work-controller/import-lab/native-app",
+  "checks": [
+    {
+      "detail": "50,000 rows completed",
+      "evidence": {
+        "import_id": "57f1e2340025",
+        "request_bytes": 2166695
+      },
+      "name": "large_valid_import",
+      "status": "pass"
+    },
+    {
+      "detail": "over-10-MiB request rejected",
+      "evidence": {
+        "http_status": 413
+      },
+      "name": "ten_mib_cap",
+      "status": "pass"
+    },
+    {
+      "detail": "malformed CSV produced a useful terminal import with no records",
+      "evidence": {
+        "import_id": "edc68be88292",
+        "terminal_status": "failed"
+      },
+      "name": "malformed_csv",
+      "status": "pass"
+    },
+    {
+      "detail": "client request threads overlapped; both imports and health met thresholds",
+      "evidence": {
+        "health_ms": 1,
+        "large_records": 50000,
+        "small_elapsed_ms": 66
+      },
+      "name": "concurrent_service",
+      "status": "pass"
+    },
+    {
+      "detail": "completed import matched after same-data-dir restart",
+      "evidence": {
+        "import_id": "57f1e2340025"
+      },
+      "name": "restart_persistence",
+      "status": "pass"
+    },
+    {
+      "detail": "same content reused one import; changed content returned 409",
+      "evidence": {
+        "import_id": "5c38513305b8"
+      },
+      "name": "request_id_idempotency",
+      "status": "pass"
+    }
+  ],
+  "counts": {
+    "error": 0,
+    "fail": 0,
+    "not_covered": 0,
+    "pass": 6
+  },
+  "data_dir": "data-elzhl7jn",
+  "elapsed_ms": 674,
+  "round": "pressure",
+  "schema": "import-lab-harness-v1"
+}

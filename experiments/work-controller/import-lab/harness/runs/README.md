@@ -150,3 +150,38 @@ clean at execution after the storage-fault rollback repair:
   occurred before kill
 
 The review found no additional controller contract issue in the bounded pass.
+
+## Final unchanged-v4 run
+
+The last candidate heads were verified clean before execution:
+
+- controller `dfe60b29518f3bcca3dd9d46118f376a052acf38`
+- native `9724853493f9c1e941f3da1fd0ab0117a2d8b5fb`
+
+| Candidate | Build | Pressure | Accepted-result crash/retry | Mid-import recovery |
+| --- | --- | --- | --- | --- |
+| controller | 5/5 pass | 6/6 pass | pass | not covered: synchronous completion |
+| native | 5/5 pass | 6/6 pass | pass | not covered: synchronous completion |
+
+Controller's concurrent probe observed 0 ms health and 300 ms small-import
+completion; native's observed 1 ms and 66 ms. In both cases the large client
+request completed with a 50,000-record count, uniqueness, both sentinels, and
+zero errors. These are bounded observations from one local run, not performance
+comparisons.
+
+Material limits remain:
+
+- Neither synchronous implementation exposed an accepted-but-unfinished window,
+  so process kill during active import work is untested. The recovery evidence
+  covers accepted-result persistence and identical retry only.
+- Client-request-thread overlap does not prove simultaneous server processing.
+- The static UI check does not execute JavaScript or assess viewport layout;
+  separate real-browser receipts own those claims.
+- The 50,000-row checks assert count, uniqueness in the concurrent path,
+  first/last sentinels, and zero errors; they do not compare every returned row
+  with a full expected-record oracle.
+- Storage write-fault behavior and the final empty-request-ID/email-space probes
+  are separate adversarial checks owned by the coordinator, not harness results.
+
+Full large bodies and data stores were moved to `/tmp/import-lab-raw` on the
+runner host; compact hashes, sizes, results, small bodies, and logs are committed.
