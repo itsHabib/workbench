@@ -20,6 +20,12 @@ class ValidationTests(unittest.TestCase):
         _, errors = validate_csv("id,name,email\n1,Ada,a@@example.com\n")
         self.assertEqual(errors[0]["row"], 2)
 
+    def test_rejects_raw_email_spaces(self):
+        for email in (" ada@example.com", "ada@example.com ", "ada @example.com"):
+            records, errors = validate_csv("id,name,email\n1,Ada," + email + "\n")
+            self.assertEqual(records, [])
+            self.assertEqual(errors, [{"row": 2, "message": "email must not contain spaces"}])
+
 
 class EndpointTests(unittest.TestCase):
     @classmethod
