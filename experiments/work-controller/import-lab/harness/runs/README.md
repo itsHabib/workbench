@@ -81,7 +81,7 @@ After the v3 runs, the full large bodies and data stores under
 `/tmp/import-lab-raw` total 151 MiB. Compact results, exchange hashes/sizes,
 small bodies, and process logs remain committed here.
 
-## V4 observable malformed-CSV result and controller final
+## V4 observable malformed-CSV result and candidate runs
 
 V4 was frozen at commit `e0117b8280022e713f5bb2653f633b522fa80c72`
 before rerunning the exported baselines or final candidates. Protocol SHA-256 is
@@ -97,8 +97,8 @@ oracle false positive. The corrected baseline pressure result is 4 pass, 1 fail
 (request-ID idempotency), and 1 error (over-limit disconnect). Native remains 3
 pass and 3 fail.
 
-Controller final commit `fb7ad711d7a15a8ff4d01218aaaf3c97ecb2e2d8`
-was clean at execution:
+Controller intermediate commit `fb7ad711d7a15a8ff4d01218aaaf3c97ecb2e2d8`
+was clean at execution and passed the harness:
 
 - build: 5/5 pass
 - pressure: 6/6 pass; the concurrency probe observed 1 ms health, 306 ms small
@@ -108,5 +108,24 @@ was clean at execution:
   `mid_import_recovery` remains `not_covered` because the near-limit import
   completed synchronously before kill
 
-The final controller recovery evidence establishes durable accepted-result
+The intermediate controller recovery evidence establishes durable accepted-result
 idempotency across a process kill. It does not establish mid-task recovery.
+
+This controller run is retained as intermediate evidence. A separate injected
+storage-fault probe later found mutate-before-save behavior that this harness
+does not exercise, so the experiment coordinator requested another controller
+revision and final rerun.
+
+Native final commit `e30c99780e109acd3a797f0016abcf1e0d82d644` was
+clean at execution:
+
+- build: 5/5 pass
+- pressure: 6/6 pass; the concurrency probe observed 0 ms health, 50 ms small
+  import end to end, and an independently verified exact 50,000-record large
+  result
+- recovery: `accepted_result_crash_retry` pass;
+  `mid_import_recovery` remains `not_covered` because the near-limit import
+  completed synchronously before kill
+
+These are conformance counts and bounded latency observations, not a performance
+comparison or winner decision.

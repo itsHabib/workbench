@@ -1,0 +1,57 @@
+{
+  "app_dir": "/Users/mh/dev/workbench/.claude/worktrees/codex/import-native/experiments/work-controller/import-lab/native-app",
+  "checks": [
+    {
+      "detail": "health returned HTTP 200 JSON",
+      "evidence": {
+        "elapsed_ms": 0
+      },
+      "name": "startup_health",
+      "status": "pass"
+    },
+    {
+      "detail": "self-contained HTML has CSV input and submit control",
+      "evidence": {},
+      "name": "browser_surface",
+      "status": "pass"
+    },
+    {
+      "detail": "two valid records and three row errors observed",
+      "evidence": {
+        "import_id": "28c3cbc6e8da",
+        "terminal_status": "failed"
+      },
+      "name": "mixed_csv_validation",
+      "status": "pass"
+    },
+    {
+      "detail": "corrected input completed without errors",
+      "evidence": {
+        "import_id": "8fe0aedabbd5"
+      },
+      "name": "corrected_retry",
+      "status": "pass"
+    },
+    {
+      "detail": "inspection matched and listing included both imports",
+      "evidence": {
+        "ids": [
+          "28c3cbc6e8da",
+          "8fe0aedabbd5"
+        ]
+      },
+      "name": "inspection_listing",
+      "status": "pass"
+    }
+  ],
+  "counts": {
+    "error": 0,
+    "fail": 0,
+    "not_covered": 0,
+    "pass": 5
+  },
+  "data_dir": "data-8qsjx_al",
+  "elapsed_ms": 71,
+  "round": "build",
+  "schema": "import-lab-harness-v1"
+}
