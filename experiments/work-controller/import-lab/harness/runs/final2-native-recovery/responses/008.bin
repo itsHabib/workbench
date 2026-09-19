@@ -1,0 +1,1 @@
+{"id": "fc54fde26c51", "status": "completed", "records": [{"id": "crash", "name": "Crash Retry", "email": "crash@example.com"}], "errors": [], "csv": "id,name,email\ncrash,Crash Retry,crash@example.com\n"}
