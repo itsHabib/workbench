@@ -378,6 +378,9 @@ def run_steps(run, steps=None, complete_fn=None, check_fn=verify):
                 break
             if state["checks"] is None:
                 check_fn(run, state)
+            expected_source = state["checks"].get("source_sha256")
+            if expected_source and digest(source_files(run / "versions" / state["version"])) != expected_source:
+                raise RuntimeError("integrated candidate changed outside a recorded action; start a new trial")
             prompt = prompt_for(run, state, config)
             number = len(state["calls"]) + 1
             role = state["next"]
@@ -441,12 +444,15 @@ def mutate(run, command, message=""):
 def summary(run):
     state = load(run)
     config = json.loads((run / "config.json").read_text())
+    current_source = digest(source_files(run / "versions" / state["version"]))
     return {"mode": config["mode"], "status": state["status"], "phase": state["phase"],
             "model": config["model"], "calls": len(state["calls"]),
             "reserved_calls": len(state["calls"]) + int(state["pending"] is not None),
             "tokens_known": state["tokens_known"], "unknown_usage_calls": state["unknown_usage_calls"],
             "cost_usd": None, "charged_model_seconds": state["active_seconds"],
             "human_interventions": state["human_interventions"], "checks": state["checks"],
+            "candidate_sha256": current_source,
+            "checked_source_matches": bool(state["checks"] and state["checks"].get("source_sha256") == current_source),
             "stop_requested": (run / "STOP").exists(),
             "candidate": str(run / "versions" / state["version"]),
             "question": state.get("question") if state["status"] == "needs_input" else None}

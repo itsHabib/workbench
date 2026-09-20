@@ -42,7 +42,7 @@ def readouts(directory):
     result = []
     for entry in plan_data["trials"]:
         item = dict(entry, **lab.summary(directory / entry["name"]))
-        item["all_checks_pass"] = bool(item["checks"] and item["checks"]["passed"])
+        item["all_checks_pass"] = bool(item["checks"] and item["checks"]["passed"] and item["checked_source_matches"])
         # Mechanically correct code and the controller actually terminating are distinct outcomes.
         item["accepted"] = item["status"] == "complete" and item["all_checks_pass"]
         result.append(item)
