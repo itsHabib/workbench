@@ -1,0 +1,6 @@
+{
+  "evidence_kind": "post_hoc_not_scored",
+  "original_probe_sha256": "c3656aa220bbbe5e636009ff81391b6dbd477ceb1747842b14ea17a6cfad2559",
+  "portable_probe_sha256": "622e033f50bb24fcb083e97870c7a2f517467abde037af132472d5804db8d068",
+  "adaptation": "Source paths made relative to this directory and unused live-state footer removed; source path output normalized to relative paths. Original grades remain in phase1.json."
+}

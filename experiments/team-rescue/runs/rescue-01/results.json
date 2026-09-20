@@ -1,0 +1,311 @@
+{
+  "evidence_kind": "live_observed_failure_rescue",
+  "runtime_commit": "9e79875293d45a3c4036823ab6716c591cd39eb9",
+  "grade": "corrected_checker_frozen_before_rescue_calls",
+  "qualification": "one observed failure in a synthetic service; both policies changed from original pilot; no isolated model-effect or dollar-efficiency claim",
+  "protocol_sha256": "d1d89af5f3144cd906117fc3a90ea4092e4abdd1d78d7018fc162fa697ad7cab",
+  "implementation": {
+    "call_worker.py": "8d4a4471716a7c1c89a9910b0868be3fffb285fe562f97b64f7155ba6baeec39",
+    "lab.py": "abb2a57b6ec0a46455c8b6ea234bb451fb124724cf4a2c165b5d727d0db7cd91",
+    "matrix.py": "da437614f39553b6f01f98dd1f143deb8aef61ac6fdbbdded47befcc1a2f103b",
+    "service_worker.py": "98d56d39ecc570989d290c7374fdf0b47e2316f707e704f088aaaa6226b5b4fc",
+    "test_lab.py": "904ff740628898f1e4c30bc7e4a3f1077f0092e7539bf96ea641640975c36e34",
+    "test_transport.py": "427da360d834172d091b151ffc5b2fa285629e7210ff9a559f869780d778f770",
+    "test_verifier.py": "76c336cd50d2a190c169669361236e1984de7b71ed32ba53e427ed1f8d9195e4",
+    "transport.py": "daf75936333a240548c6a3fca8cc9709f796a8b58271979cbdffb493218b55c4",
+    "verifier.py": "5a3710c818cd44a6428b536e72354d9241dce2133a9533b3d7220422ee64b186",
+    "workload/service.py": "096e2cb2aa119c1b47641438744a7102721edd7b66e15f1f5dcdd1f2f97acae2"
+  },
+  "fleet_sha256": "aef41c2cd71b429988657897712b234685bdbffb90990acfb2a493299024a74c",
+  "rows": [
+    {
+      "arm": "improved-solo",
+      "repeat": 1,
+      "mode": "solo",
+      "status": "complete",
+      "phase": 1,
+      "model": "gpt-5.6-luna",
+      "calls": 4,
+      "tokens_known": 128320,
+      "unknown_usage_calls": 0,
+      "cost_usd": null,
+      "charged_model_seconds": 141.54385641613044,
+      "human_interventions": 0,
+      "candidate_sha256": "ce07c964fe50343149806fec21f7b457abfa827499af6d75765713a62fde24e2",
+      "checked_source_matches": true,
+      "all_checks_pass": true,
+      "accepted": true,
+      "checks": [
+        {
+          "name": "api_fanout_and_idempotency",
+          "passed": true,
+          "detail": "fanout, response bodies, original payload, idempotency, and success terminality hold"
+        },
+        {
+          "name": "payload_roundtrip",
+          "passed": true,
+          "detail": "null, boolean, number, string, list, and object payloads survive restart and delivery"
+        },
+        {
+          "name": "network_error_isolation",
+          "passed": true,
+          "detail": "connection refusal is isolated, recorded with null status, and retried on schedule"
+        },
+        {
+          "name": "retry_isolation_and_cap",
+          "passed": true,
+          "detail": "failure isolation, deterministic 10/20 backoff, cap, and no success redelivery hold"
+        },
+        {
+          "name": "metrics_consistency",
+          "passed": true,
+          "detail": "all required counters match mixed successful and retrying state"
+        },
+        {
+          "name": "restart_persistence",
+          "passed": true,
+          "detail": "subscription, event, schedule, terminal state, history, and metrics survive restarts"
+        },
+        {
+          "name": "invalid_input",
+          "passed": true,
+          "detail": "malformed JSON, bad field types, unknown routes, and unsupported methods return JSON 4xx"
+        },
+        {
+          "name": "source_integrity",
+          "passed": true,
+          "detail": "candidate source remained unchanged"
+        }
+      ],
+      "input_hashes": {
+        "service.py": "72d54a3659e5842accb5e09df0aa14e88f0a229201c75ff1b6a50953ef751f5f",
+        "README.md": "b58484edb7cf99813ebd6bd78e609689f51261e151786a1429e944ee95a9fef4"
+      },
+      "candidate": "candidates/improved-solo",
+      "initial_source_sha256": "99d31c23be7099bb9ac09911faac17e1ee0012da73ea7e3dc9030eb5c7741571",
+      "initial_context_sha256": "4f0be31883be3d8f0c53f2b86435c1f3e381e4c6f396b2412f398b449bbbabfd",
+      "calls_detail": [
+        {
+          "number": 1,
+          "role": "worker-1",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 30592,
+            "cached_input_tokens": 19200,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 2822,
+            "reasoning_output_tokens": 174
+          },
+          "error": null,
+          "elapsed_seconds": 56.25025691604242,
+          "cost_usd": null,
+          "action": "edit",
+          "message": "Added explicit JSON 405 handling for unsupported HTTP methods, including HEAD/PUT/PATCH/DELETE, so invalid requests no longer receive BaseHTTPRequestHandler's HTML 501 response.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "5558fd1acc28c879bac33a9cca56e0178441035e9ec53c03076697f1c33dd388"
+        },
+        {
+          "number": 2,
+          "role": "worker-1",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 30393,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 616,
+            "reasoning_output_tokens": 516
+          },
+          "error": null,
+          "elapsed_seconds": 18.271574791986495,
+          "cost_usd": null,
+          "action": "finish",
+          "message": "The remaining unsupported-method contract violation was repaired; the service now returns JSON 405 responses for unsupported methods while preserving the validated persistence, retry, isolation, and input-handling behavior.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "38add037c7a41841393c2ce372189e2213e6544d70129f1d474b092929516d17"
+        },
+        {
+          "number": 3,
+          "role": "worker-1",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 30435,
+            "cached_input_tokens": 19200,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 2788,
+            "reasoning_output_tokens": 130
+          },
+          "error": null,
+          "elapsed_seconds": 55.83599633304402,
+          "cost_usd": null,
+          "action": "edit",
+          "message": "Fix persisted-state validation so event payloads may be any JSON value, as required by the contract. The current validator incorrectly requires every persisted event value to be a dict, causing valid state to be discarded on restart and losing delivery payloads.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "02ef3926b9d28a26125e096909169cf99196f684fbc66de76aa73c0ebb20d6e9"
+        },
+        {
+          "number": 4,
+          "role": "worker-1",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 30502,
+            "cached_input_tokens": 9984,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 172,
+            "reasoning_output_tokens": 94
+          },
+          "error": null,
+          "elapsed_seconds": 11.186028375057504,
+          "cost_usd": null,
+          "action": "finish",
+          "message": "Phase 1 checks pass and the persisted-state validator accepts arbitrary JSON event payloads. No further concrete contract violation remains.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "31a16e5d7406b19601435b3d4016fc455b8ca2f35f07afb4baff9c22877e3b8f"
+        }
+      ],
+      "config": {
+        "mode": "solo",
+        "model": "gpt-5.6-luna",
+        "lead_model": "gpt-5.6-luna",
+        "critic_model": "gpt-5.6-luna",
+        "max_calls": 5,
+        "call_timeout": 120,
+        "wall_seconds": 600
+      }
+    },
+    {
+      "arm": "strong-lead",
+      "repeat": 1,
+      "mode": "lead",
+      "status": "complete",
+      "phase": 1,
+      "model": "gpt-5.6-luna",
+      "calls": 3,
+      "tokens_known": 100451,
+      "unknown_usage_calls": 0,
+      "cost_usd": null,
+      "charged_model_seconds": 81.87063483265229,
+      "human_interventions": 0,
+      "candidate_sha256": "d23344c477744b76ff882cbc32db6cd000e53b6b6fbff4918450fdc1586c765c",
+      "checked_source_matches": true,
+      "all_checks_pass": true,
+      "accepted": true,
+      "checks": [
+        {
+          "name": "api_fanout_and_idempotency",
+          "passed": true,
+          "detail": "fanout, response bodies, original payload, idempotency, and success terminality hold"
+        },
+        {
+          "name": "payload_roundtrip",
+          "passed": true,
+          "detail": "null, boolean, number, string, list, and object payloads survive restart and delivery"
+        },
+        {
+          "name": "network_error_isolation",
+          "passed": true,
+          "detail": "connection refusal is isolated, recorded with null status, and retried on schedule"
+        },
+        {
+          "name": "retry_isolation_and_cap",
+          "passed": true,
+          "detail": "failure isolation, deterministic 10/20 backoff, cap, and no success redelivery hold"
+        },
+        {
+          "name": "metrics_consistency",
+          "passed": true,
+          "detail": "all required counters match mixed successful and retrying state"
+        },
+        {
+          "name": "restart_persistence",
+          "passed": true,
+          "detail": "subscription, event, schedule, terminal state, history, and metrics survive restarts"
+        },
+        {
+          "name": "invalid_input",
+          "passed": true,
+          "detail": "malformed JSON, bad field types, unknown routes, and unsupported methods return JSON 4xx"
+        },
+        {
+          "name": "source_integrity",
+          "passed": true,
+          "detail": "candidate source remained unchanged"
+        }
+      ],
+      "input_hashes": {
+        "service.py": "af823d19eed3f05ddfbfaf7912cf498e3857a6f999870ef870698114be5267bc",
+        "README.md": "b58484edb7cf99813ebd6bd78e609689f51261e151786a1429e944ee95a9fef4"
+      },
+      "candidate": "candidates/strong-lead",
+      "initial_source_sha256": "99d31c23be7099bb9ac09911faac17e1ee0012da73ea7e3dc9030eb5c7741571",
+      "initial_context_sha256": "4f0be31883be3d8f0c53f2b86435c1f3e381e4c6f396b2412f398b449bbbabfd",
+      "calls_detail": [
+        {
+          "number": 1,
+          "role": "lead",
+          "model": "gpt-6-astra",
+          "usage": {
+            "input_tokens": 33054,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 203,
+            "reasoning_output_tokens": 0
+          },
+          "error": null,
+          "elapsed_seconds": 13.233810457866639,
+          "cost_usd": null,
+          "action": "dispatch",
+          "message": "Fix the two demonstrated Phase 1 failures in service.py. In _valid_state, stop requiring event payload values to be dictionaries: payload may be any JSON value, including null, arrays, strings, numbers, and booleans. Preserve event-key validation so valid persisted payloads and deliveries survive restart. Handle unsupported HTTP methods with a 4xx JSON response (such as 405) and application/json content type instead of BaseHTTPRequestHandler's default 501 HTML; cover its default unsupported-method path. Preserve passing behavior and run the full Phase 1 checker. These are concrete required repairs; do not add unrelated hardening.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "eadc25715e9a2d97c7ab22de1bbed60d8a9a2342bc5c55910f6003b8fcb8abef"
+        },
+        {
+          "number": 2,
+          "role": "worker-1",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 30862,
+            "cached_input_tokens": 19200,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 2938,
+            "reasoning_output_tokens": 144
+          },
+          "error": null,
+          "elapsed_seconds": 58.75644779182039,
+          "cost_usd": null,
+          "action": "edit",
+          "message": "Fix persisted arbitrary JSON payload validation and return JSON 4xx responses for unsupported HTTP methods.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "f215a1f7b8ac2b629545a301e41b43b0c1a24db582c09d018aca63de02b09ed2"
+        },
+        {
+          "number": 3,
+          "role": "lead",
+          "model": "gpt-6-astra",
+          "usage": {
+            "input_tokens": 33288,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 106,
+            "reasoning_output_tokens": 0
+          },
+          "error": null,
+          "elapsed_seconds": 9.880376582965255,
+          "cost_usd": null,
+          "action": "finish",
+          "message": "Both required repairs are complete. All eight Phase 1 checks pass, including arbitrary JSON payload persistence and delivery, unsupported-method JSON 4xx responses, and source integrity. No concrete required repair remains.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "86821c85fe20368dba488478d19800699f21adcf622294d0f438b90df7660a69"
+        }
+      ],
+      "config": {
+        "mode": "lead",
+        "model": "gpt-5.6-luna",
+        "lead_model": "gpt-6-astra",
+        "critic_model": "gpt-5.6-luna",
+        "max_calls": 5,
+        "call_timeout": 120,
+        "wall_seconds": 600
+      }
+    }
+  ]
+}

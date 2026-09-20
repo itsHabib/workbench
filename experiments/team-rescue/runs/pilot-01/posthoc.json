@@ -1,0 +1,234 @@
+[
+  {
+    "label": "pair-first-green",
+    "source": "candidates/pair-first-green/service.py",
+    "sha256": "d3fe292a82456c623937bec4cd50f9434fb32d4e6ca682477572cb3c631da884",
+    "evidence_kind": "POST-HOC NOT SCORED",
+    "probe1_invalid_types": {
+      "subscription_url_17": {
+        "status": 201,
+        "content_type": "application/json",
+        "body": {
+          "id": "e7bd7a693f174f52bd83e2d2bfa0b89b"
+        }
+      },
+      "event_id_17": {
+        "status": 201,
+        "content_type": "application/json",
+        "body": {
+          "id": 17,
+          "created": true
+        }
+      },
+      "delivery_rows": {
+        "deliveries": [
+          {
+            "id": "e2039ab0135a46ccbeabca180cdd8c28",
+            "event_id": 17,
+            "subscription_id": "e7bd7a693f174f52bd83e2d2bfa0b89b",
+            "url": 17,
+            "payload": {},
+            "status": "pending",
+            "attempts": 0,
+            "next_attempt_at": 0,
+            "history": []
+          }
+        ]
+      }
+    },
+    "probe2_unsupported_method": {
+      "status": 501,
+      "content_type": "text/html;charset=utf-8",
+      "body": "<!DOCTYPE HTML>\n<html lang=\"en\">\n    <head>\n        <meta charset=\"utf-8\">\n        <style type=\"text/css\">\n            :root {\n                color-scheme: light dark;\n           "
+    },
+    "probe3_scalar_restart": {
+      "event": {
+        "status": 201,
+        "content_type": "application/json",
+        "body": {
+          "id": "scalar-payload",
+          "created": true
+        }
+      },
+      "before": {
+        "subscriptions": 1,
+        "events": 1,
+        "deliveries": 1,
+        "pending": 1,
+        "retrying": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "attempts": 0
+      },
+      "after": {
+        "subscriptions": 1,
+        "events": 1,
+        "deliveries": 1,
+        "pending": 1,
+        "retrying": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "attempts": 0
+      },
+      "tick": {
+        "status": 200,
+        "content_type": "application/json",
+        "body": {
+          "attempted": 1
+        }
+      },
+      "recipient_receipts": [
+        {
+          "event_id": "scalar-payload",
+          "delivery_id": "5a4f5ae7f3a9433d84792172e5f194a8",
+          "payload": 17
+        }
+      ]
+    },
+    "live_source_unchanged": true
+  },
+  {
+    "label": "reference-solo",
+    "source": "candidates/reference-solo/service.py",
+    "sha256": "9499f5bafd85eaf6e534cd3c2e91a55f233fe7b46fc8cb0a4b15eefce8df9813",
+    "evidence_kind": "POST-HOC NOT SCORED",
+    "probe1_invalid_types": {
+      "subscription_url_17": {
+        "status": 400,
+        "content_type": "application/json",
+        "body": {
+          "error": "url must be a string"
+        }
+      },
+      "event_id_17": {
+        "status": 400,
+        "content_type": "application/json",
+        "body": {
+          "error": "id must be a non-empty string"
+        }
+      },
+      "delivery_rows": {
+        "deliveries": []
+      }
+    },
+    "probe2_unsupported_method": {
+      "status": 501,
+      "content_type": "text/html;charset=utf-8",
+      "body": "<!DOCTYPE HTML>\n<html lang=\"en\">\n    <head>\n        <meta charset=\"utf-8\">\n        <style type=\"text/css\">\n            :root {\n                color-scheme: light dark;\n           "
+    },
+    "probe3_scalar_restart": {
+      "event": {
+        "status": 201,
+        "content_type": "application/json",
+        "body": {
+          "id": "scalar-payload",
+          "created": true
+        }
+      },
+      "before": {
+        "subscriptions": 1,
+        "events": 1,
+        "deliveries": 1,
+        "pending": 1,
+        "retrying": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "attempts": 0
+      },
+      "after": {
+        "subscriptions": 1,
+        "events": 1,
+        "deliveries": 1,
+        "pending": 1,
+        "retrying": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "attempts": 0
+      },
+      "tick": {
+        "status": 200,
+        "content_type": "application/json",
+        "body": {
+          "attempted": 1
+        }
+      },
+      "recipient_receipts": [
+        {
+          "event_id": "scalar-payload",
+          "delivery_id": "399f85e21d294e5192916a25840f3ff2",
+          "payload": 17
+        }
+      ]
+    },
+    "live_source_unchanged": true
+  },
+  {
+    "label": "pair-latest",
+    "source": "candidates/pair/service.py",
+    "sha256": "a9080c26a92d1a0a6dc6161e870af8653bc1fa9aef48a53e05bb2fba2773ce38",
+    "evidence_kind": "POST-HOC NOT SCORED",
+    "probe1_invalid_types": {
+      "subscription_url_17": {
+        "status": 400,
+        "content_type": "application/json",
+        "body": {
+          "error": "url must be an HTTP loopback URL"
+        }
+      },
+      "event_id_17": {
+        "status": 400,
+        "content_type": "application/json",
+        "body": {
+          "error": "id must be a non-empty string"
+        }
+      },
+      "delivery_rows": {
+        "deliveries": []
+      }
+    },
+    "probe2_unsupported_method": {
+      "status": 501,
+      "content_type": "text/html;charset=utf-8",
+      "body": "<!DOCTYPE HTML>\n<html lang=\"en\">\n    <head>\n        <meta charset=\"utf-8\">\n        <style type=\"text/css\">\n            :root {\n                color-scheme: light dark;\n           "
+    },
+    "probe3_scalar_restart": {
+      "event": {
+        "status": 201,
+        "content_type": "application/json",
+        "body": {
+          "id": "scalar-payload",
+          "created": true
+        }
+      },
+      "before": {
+        "subscriptions": 1,
+        "events": 1,
+        "deliveries": 1,
+        "pending": 1,
+        "retrying": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "attempts": 0
+      },
+      "after": {
+        "subscriptions": 0,
+        "events": 0,
+        "deliveries": 0,
+        "pending": 0,
+        "retrying": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "attempts": 0
+      },
+      "tick": {
+        "status": 200,
+        "content_type": "application/json",
+        "body": {
+          "attempted": 0
+        }
+      },
+      "recipient_receipts": []
+    },
+    "live_source_unchanged": true
+  }
+]

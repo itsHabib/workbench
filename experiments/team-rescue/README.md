@@ -6,6 +6,11 @@ that with solo iteration and an independent challenger. [Protocol](PROTOCOL.md)
 sets the decisions before the runs. [Results](RESULTS.md) separates mechanics
 from model outcomes.
 
+First result: both improved Luna solo and an Astra lead with a Luna worker
+rescued an observed data-loss bug. The mandatory challenger loop introduced
+that bug. Start with the [lessons](RESULTS.md#lessons-worth-keeping) and
+[reproducible receipts](runs/README.md).
+
 This is an experiment driver, not a replacement Fleet watcher. Fleet's job
 store owns atomic claims and reported/accepted actions. The driver owns trial
 context, versioned candidate files and independent product checks. There is no
