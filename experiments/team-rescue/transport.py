@@ -191,6 +191,9 @@ def _process_group_exists(process_group: int) -> bool:
         os.killpg(process_group, 0)
     except ProcessLookupError:
         return False
+    except PermissionError:
+        # EPERM is not evidence that a process died. Keep the bounded cleanup path.
+        return True
     return True
 
 

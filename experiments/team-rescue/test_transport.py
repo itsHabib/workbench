@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import textwrap
 import threading
@@ -185,6 +187,41 @@ class TransportTest(unittest.TestCase):
         self.assertTrue(result["owner_lost"])
         self.assertEqual(result["error"], "owner_lost")
         self.assertIsNotNone(result["returncode"])
+
+    def test_permission_denied_probe_is_not_process_death(self) -> None:
+        with mock.patch.object(transport.os, "killpg", side_effect=PermissionError()):
+            self.assertTrue(transport._process_group_exists(123))
+
+    def test_real_driver_sigkill_stops_helper_owned_child(self) -> None:
+        output = self.root / "driver-kill-output"
+        output.mkdir()
+        environment = dict(os.environ, PATH=str(self.root) + os.pathsep + os.environ["PATH"])
+        code = (
+            "import sys; from pathlib import Path; "
+            "sys.path.insert(0, sys.argv[1]); from lab import supervised_complete; "
+            "supervised_complete('hang', model='test', schema={}, cwd=Path(sys.argv[2]), "
+            "output_dir=Path(sys.argv[3]), timeout=10, stop_file=Path(sys.argv[3])/'STOP')"
+        )
+        driver = subprocess.Popen([sys.executable, "-c", code, str(Path(__file__).parent),
+                                   str(self.root), str(output)], env=environment,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            deadline = time.monotonic() + 8
+            while not (output / "child-ready").exists() and time.monotonic() < deadline:
+                time.sleep(0.03)
+            self.assertTrue((output / "child-ready").exists())
+            driver.kill()
+            driver.wait(timeout=2)
+            while not (output / "result.json").exists() and time.monotonic() < deadline:
+                time.sleep(0.03)
+            result = json.loads((output / "result.json").read_text())
+            self.assertEqual(result["error"], "owner_lost")
+            self.assert_child_dead(output)
+        finally:
+            (output / "STOP").touch()
+            if driver.poll() is None:
+                driver.kill()
+                driver.wait(timeout=2)
 
     def test_invalid_json(self) -> None:
         result = self.complete("invalid", "invalid-output")

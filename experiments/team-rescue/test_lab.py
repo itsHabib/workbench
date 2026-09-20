@@ -138,6 +138,14 @@ class FleetIntegrationTests(unittest.TestCase):
         self.assertEqual(state["phase"], 2)
         self.assertEqual(state["changes"], ["Add replay"])
 
+    def test_worker_blocker_goes_to_lead_before_human(self):
+        self.step(self.dispatch())
+        state = self.step(action("ask"))
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["next"], "lead")
+        self.assertEqual(state["human_interventions"], 0)
+        self.assertIn("blocker", state["task"])
+
     def test_malformed_response_does_not_touch_files(self):
         self.step(self.dispatch())
         edit = self.edit()

@@ -97,6 +97,9 @@ def initialize(run, config, source=None, context=None):
     files = source_files(Path(source) if source else ROOT / "workload")
     if "service.py" not in files:
         raise ValueError("source must contain service.py")
+    history = json.loads(Path(context).read_text()) if context else []
+    if not isinstance(history, list) or any(not isinstance(row, dict) for row in history):
+        raise ValueError("team context must be a JSON array of handoff/message objects")
     config = dict(config, fleet=str(Path(config["fleet"]).resolve()))
     # Read-only feature probe, before creating a trial or calling any model.
     probe = subprocess.run([config["fleet"], "job", "metrics", "--state", str(run / "jobs")],
@@ -118,10 +121,6 @@ def initialize(run, config, source=None, context=None):
                 "implementation": implementation,
                 "fleet_sha256": hashlib.sha256(Path(config["fleet"]).read_bytes()).hexdigest(),
                 "evidence_kind": "live"}
-    atomic(run / "manifest.json", manifest)
-    history = json.loads(Path(context).read_text()) if context else []
-    if not isinstance(history, list) or any(not isinstance(row, dict) for row in history):
-        raise ValueError("team context must be a JSON array of handoff/message objects")
     manifest["initial_context_sha256"] = digest(history)
     atomic(run / "manifest.json", manifest)
     state = {"status": "ready", "phase": 1, "version": "0000", "calls": [], "pending": None,
@@ -173,6 +172,9 @@ def prompt_for(run, state, config):
                "spec": specification, "changes": state["changes"], "checks": state["checks"],
                "memory": state["memories"].get(role, ""), "team_history": state["history"][-12:],
                "files": source_files(run / "versions" / state["version"])}
+    if role == "challenger":
+        context["memory"] = ""
+        context["team_history"] = []
     return (duty + "\nReturn one JSON action matching the schema. Work only from the supplied context; "
             "do not use shell, filesystem, network or other tools. The experiment applies edits and "
             "runs the checker. Unused worker is an empty string; unused files is []. Memory is a short "
@@ -224,6 +226,9 @@ def apply_action(run, state, config, response, check_fn=verify):
         state["task"] = response["message"]
         state["next"] = "challenger"
     if action == "ask":
+        if role != "lead" and config["mode"] != "solo":
+            state["task"] = "Resolve the worker's blocker or ask the human only if their decision is needed: " + response["message"]
+            return action
         state["status"] = "needs_input"
         state["question"] = response["message"]
     if action == "edit":
