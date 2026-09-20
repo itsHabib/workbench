@@ -142,6 +142,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def send_error(self, code, message=None, explain=None):
+        self.reply(code, {"error": message or "request error"})
+
     def body(self):
         return json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
 
@@ -155,16 +158,25 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.reply(404, {"error": "not found"})
 
+    def do_PUT(self):
+        self.reply(405, {"error": "method not allowed"})
+
     def do_POST(self):
         try:
             body = self.body()
             with self.server.app.lock:
                 if self.path == "/subscriptions":
-                    self.reply(201, {"id": self.server.app.subscribe(body["url"])})
+                    url = body["url"]
+                    if not isinstance(url, str):
+                        raise ValueError("url must be a string")
+                    self.reply(201, {"id": self.server.app.subscribe(url)})
                     return
                 if self.path == "/events":
-                    made = self.server.app.event(body["id"], body["payload"])
-                    self.reply(201 if made else 200, {"id": body["id"], "created": made})
+                    event_id = body["id"]
+                    if not isinstance(event_id, str):
+                        raise ValueError("id must be a string")
+                    made = self.server.app.event(event_id, body["payload"])
+                    self.reply(201 if made else 200, {"id": event_id, "created": made})
                     return
                 if self.path == "/tick":
                     self.reply(200, {"attempted": self.server.app.tick(body["now"])})
@@ -242,6 +254,18 @@ class VerifierTests(unittest.TestCase):
         by_name = {row["name"]: row for row in result["checks"]}
         self.assertFalse(result["passed"])
         self.assertFalse(by_name["network_error_isolation"]["passed"])
+
+    def test_negative_control_cannot_drop_scalar_payloads_on_restart(self):
+        original = "self.state = json.loads(self.path.read_text()) if self.path.exists() else fresh()"
+        replacement = """self.state = json.loads(self.path.read_text()) if self.path.exists() else fresh()
+        if any(not isinstance(payload, dict) for payload in self.state["events"].values()):
+            self.state = fresh()"""
+        broken = GOOD_SERVICE.replace(original, replacement)
+        self.assertNotEqual(broken, GOOD_SERVICE)
+        result = verifier.check(self.fixture(broken), phase=1)
+        by_name = {row["name"]: row for row in result["checks"]}
+        self.assertFalse(result["passed"])
+        self.assertFalse(by_name["payload_roundtrip"]["passed"])
 
     def test_negative_control_replay_activation_must_stop_after_three_failures(self):
         broken = GOOD_SERVICE.replace(

@@ -308,6 +308,51 @@ def check_api_and_idempotency(workspace: Path) -> str:
     return "fanout, response bodies, original payload, idempotency, and success terminality hold"
 
 
+def canonical_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def check_payload_roundtrip(workspace: Path) -> str:
+    payloads = [
+        None,
+        True,
+        17,
+        "synthetic payload",
+        [1, "two", False, None],
+        {"nested": {"count": 3}, "items": ["a", "b"]},
+    ]
+    with tempfile.TemporaryDirectory(prefix="team-rescue-payload-") as raw_root, Recipient(204) as recipient:
+        root = Path(raw_root)
+        database = root / "state.sqlite"
+        first = Candidate(workspace, database).start()
+        try:
+            subscribe(first, recipient)
+            for index, payload in enumerate(payloads):
+                created = event(first, f"payload.kind:{index}", payload)
+                require(created.get("created") is True,
+                        f"payload event {index} was not created: {created!r}")
+        finally:
+            first.close()
+        second = Candidate(workspace, database).start()
+        try:
+            require(tick(second, 100) == len(payloads),
+                    "JSON payload deliveries were lost across restart")
+            require(len(recipient.receipts) == len(payloads),
+                    f"recipient got {len(recipient.receipts)} payloads, expected {len(payloads)}")
+            receipts = {item.get("event_id"): item.get("payload") for item in recipient.receipts}
+            rows = {item.get("event_id"): item.get("payload") for item in delivery_rows(second)}
+            for index, payload in enumerate(payloads):
+                event_id = f"payload.kind:{index}"
+                expected = canonical_json(payload)
+                require(event_id in receipts and canonical_json(receipts[event_id]) == expected,
+                        f"recipient payload changed type or value for {event_id}: {receipts.get(event_id)!r}")
+                require(event_id in rows and canonical_json(rows[event_id]) == expected,
+                        f"delivery payload changed type or value for {event_id}: {rows.get(event_id)!r}")
+        finally:
+            second.close()
+    return "null, boolean, number, string, list, and object payloads survive restart and delivery"
+
+
 def check_network_error_isolation(workspace: Path) -> str:
     with tempfile.TemporaryDirectory(prefix="team-rescue-network-") as raw_root, ExitStack() as stack:
         root = Path(raw_root)
@@ -468,19 +513,28 @@ def check_invalid_input(workspace: Path) -> str:
             status, value = candidate.request("POST", "/subscriptions", {})
             require(400 <= status < 500 and isinstance(value, dict),
                     f"missing subscription URL returned HTTP {status}: {value!r}")
+            status, value = candidate.request("POST", "/subscriptions", {"url": 17})
+            require(400 <= status < 500 and isinstance(value, dict),
+                    f"non-string subscription URL returned HTTP {status}: {value!r}")
             status, value = candidate.request("POST", "/events", {"payload": {}})
             require(400 <= status < 500 and isinstance(value, dict),
                     f"missing event id returned HTTP {status}: {value!r}")
+            status, value = candidate.request("POST", "/events", {"id": 17, "payload": {}})
+            require(400 <= status < 500 and isinstance(value, dict),
+                    f"non-string event id returned HTTP {status}: {value!r}")
             status, value = candidate.request("POST", "/tick", {"now": "100"})
             require(400 <= status < 500 and isinstance(value, dict),
                     f"non-integer tick time returned HTTP {status}: {value!r}")
             status, value = candidate.request("POST", "/not-an-endpoint", {})
             require(400 <= status < 500 and isinstance(value, dict),
                     f"unknown path returned HTTP {status}: {value!r}")
+            status, value = candidate.request("PUT", "/not-an-endpoint", {})
+            require(400 <= status < 500 and isinstance(value, dict),
+                    f"unsupported method returned HTTP {status}: {value!r}")
             candidate.ok("GET", "/metrics")
         finally:
             candidate.close()
-    return "malformed JSON, missing fields, bad time types, and unknown routes return JSON 4xx"
+    return "malformed JSON, bad field types, unknown routes, and unsupported methods return JSON 4xx"
 
 
 def check_replay(workspace: Path) -> str:
@@ -581,6 +635,7 @@ def check(workspace: Path, phase: int = 1) -> dict[str, Any]:
     workspace = Path(workspace).resolve()
     checks: list[Check] = [
         ("api_fanout_and_idempotency", check_api_and_idempotency),
+        ("payload_roundtrip", check_payload_roundtrip),
         ("network_error_isolation", check_network_error_isolation),
         ("retry_isolation_and_cap", check_retry_isolation_and_cap),
         ("metrics_consistency", check_metrics),
