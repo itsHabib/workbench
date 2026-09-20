@@ -146,6 +146,24 @@ class FleetIntegrationTests(unittest.TestCase):
         self.assertEqual(state["human_interventions"], 0)
         self.assertIn("blocker", state["task"])
 
+    def test_noop_edits_consume_call_without_creating_version(self):
+        self.step(self.dispatch())
+        edit = self.edit()
+        edit["files"][0]["content"] = "# unfinished\n"
+        state = self.step(edit)
+        self.assertEqual(state["version"], "0000")
+        self.assertEqual(len(state["calls"]), 2)
+        self.assertIn("no source changed", state["calls"][-1]["error"])
+        self.assertFalse((self.run / "versions" / "0002").exists())
+
+    def test_last_allowed_call_immediately_reports_budget(self):
+        state = lab.load(self.run)
+        state["calls"] = [{}] * 5
+        lab.save(self.run, state)
+        state = self.step(action())
+        self.assertEqual(len(state["calls"]), 6)
+        self.assertEqual(state["status"], "budget")
+
     def test_malformed_response_does_not_touch_files(self):
         self.step(self.dispatch())
         edit = self.edit()

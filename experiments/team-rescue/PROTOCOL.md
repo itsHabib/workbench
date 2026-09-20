@@ -52,3 +52,25 @@ call/time limits are enforced, an exact token/dollar ceiling is not.
 
 No Rooms, cloud resources, public deployment, private project fixtures or
 repository-wide agent authority are part of this round.
+
+## Follow-up fixed after pilot 01, before rescue calls
+
+Pilot 01 ran at `5bf1545`. Preserve its original scores and label all later
+oracle probes **post hoc**. The pair exhausted eight calls and its type-validation
+repair discarded valid scalar payloads on restart. Cheap solo also repeatedly
+returned unchanged code after a green check; its worker prompt overemphasized
+returning edits. These are observed failures, not planted rescue faults.
+
+For rescue 01, both arms receive the same final pair source, recorded team history,
+and corrected checker covering every JSON payload category, invalid field types,
+and JSON error responses. Both get explicit completion instructions and feedback
+when a proposed edit changes nothing. Compare **Luna solo with improved instructions**
+against **Astra lead with Luna workers**, without a mandatory challenger. Five
+calls and 120 seconds per call per arm; no human fixes or extra calls. Freeze
+inputs, code and protocol before either arm runs.
+
+Pass requires all corrected checks, unchanged tested source, explicit completion,
+and zero human rescues. If both pass, prefer the cheaper adequate approach; report
+tokens/calls rather than inventing invoice cost. This compares whole policies,
+not the isolated causal effect of a stronger model. It is one synthetic-service
+rescue, not evidence about large parallel teams or general intelligence.

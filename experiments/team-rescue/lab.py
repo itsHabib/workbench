@@ -154,14 +154,20 @@ def prompt_for(run, state, config):
         "lead": "You are the delivery lead. Diagnose failures, clarify assignments, reuse either worker, "
                 "and integrate results. Dispatch a concrete task, request a challenger (pair mode only), "
                 "ask a genuinely necessary human question, or finish. Do not edit files yourself. "
+                "Distinguish a concrete violation of the requested contract from optional hardening. "
+                "A critic's suggestion is a hypothesis, not a new requirement. Finish when the checks "
+                "pass and no concrete required repair remains; do not commission another review merely "
+                "to reconfirm passing evidence. "
                 "Procedural advice is not an extra approval requirement. Existing authorization covers "
                 "local implementation and tests; it does not authorize public deployment.",
         "challenger": "Independently challenge the current implementation and direction. Find concrete "
                       "counterexamples and omissions, avoid cosmetic churn. Return assess with actionable "
                       "findings and evidence. You cannot edit or authorize completion.",
     }
-    duty = instructions.get(role, "You own implementation and repair. Return edit with complete contents "
-                            "of changed files. Use the actual specification and observed failures. "
+    duty = instructions.get(role, "You own implementation and repair. If the current phase checks pass "
+                            "and no concrete contract violation remains, return finish with files=[]. "
+                            "Return edit only when changing code, with complete contents of changed files. "
+                            "Never re-emit unchanged code. Use the actual specification and observed failures. "
                             "Do not invent approval requirements. Ask only for a decision genuinely "
                             "missing from the task. You may finish when the goal is met.")
     specification = manifest["spec"]
@@ -233,7 +239,10 @@ def apply_action(run, state, config, response, check_fn=verify):
         state["question"] = response["message"]
     if action == "edit":
         files = source_files(run / "versions" / state["version"])
+        before = dict(files)
         files.update({item["path"]: item["content"] for item in response["files"]})
+        if files == before:
+            raise ValueError("no source changed; use finish if checks pass and no required repair remains")
         version = f'{state["pending"]["number"]:04d}'
         destination = run / "versions" / version
         # Replay after a crash rebuilds the same unpublished version, not another edit.
@@ -409,6 +418,9 @@ def run_steps(run, steps=None, complete_fn=None, check_fn=verify):
                                  timeout=timeout, stop_file=run / "STOP")
             atomic(output / "result.json", result)
             finish_pending(run, state, config, result, check_fn)
+        if state["status"] == "ready" and (len(state["calls"]) >= config["max_calls"] or state["active_seconds"] >= config["wall_seconds"]):
+            state["status"] = "budget"
+            save(run, state)
         return load(run)
 
 
