@@ -58,6 +58,8 @@ func main() {
 		os.Exit(code)
 	case "hook":
 		runHook(args[1:])
+	case "job":
+		os.Exit(runJobs(args[1:]))
 	case "mcp":
 		mcp.Serve(os.Stdin, os.Stdout)
 	case "status":

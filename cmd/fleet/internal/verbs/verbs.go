@@ -68,6 +68,8 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet done <sha|#n|branch> [--kind <k>] [--all] [--json]
                                                  exit 0 if a passing receipt (of <kind>, else of every configured expected kind) exists for that revision; 1 if not; 2 unresolvable
                                                  the verdict is always the latest receipt of a kind; --all shows what it replaced
+  fleet job <submit|list|get|claim|renew|complete|accept|retry|metrics|serve> [flags]
+                                                 durable local jobs; see cmd/fleet/docs/jobs/README.md
   fleet watch [--interval 10s] [--once]          Go scheduler and observer; runs until stopped
   fleet watch status [--json]                    inspect workers and watcher now, without a tick
   fleet watch cancel <address>                    interrupt the current attempt through the provider
