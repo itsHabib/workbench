@@ -80,6 +80,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if self.path == "/tick":
                 now = body["now"]
+                if type(now) is not int:
+                    raise ValueError("now must be an integer")
                 attempted = 0
                 for delivery in DELIVERIES.values():
                     due = delivery["next_attempt_at"]

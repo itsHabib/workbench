@@ -97,6 +97,7 @@ successful delivery may be sent again.
 The independent checker starts real service subprocesses and loopback HTTP
 recipients using fresh temporary database paths. It checks the public API,
 restart persistence, event idempotency, retry timing and cap, success
-non-redelivery, per-subscription isolation, metrics, and (in phase 2) replay
-history. Keep the implementation small and direct; a complete solution should
-fit comfortably in roughly 200 lines.
+non-redelivery, refused-connection isolation, metrics, and (in phase 2) replay
+history and its fresh attempt cap. It runs a private source snapshot and rejects
+self-modifying candidates. Keep the implementation small and direct; a complete
+solution should fit comfortably in roughly 200 lines.

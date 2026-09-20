@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack
+import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import signal
 import socket
 import subprocess
 import sys
@@ -22,6 +24,8 @@ import urllib.request
 
 HTTP_TIMEOUT = 3
 START_TIMEOUT = 4
+STOP_TIMEOUT = 4
+HERE = Path(__file__).resolve().parent
 
 
 class VerificationError(AssertionError):
@@ -82,6 +86,24 @@ class Recipient:
         self.thread.join(timeout=2)
 
 
+class DisconnectedRecipient:
+    """Reserve a loopback port without listening so connects fail deterministically."""
+
+    def __init__(self):
+        self.socket = socket.socket()
+        self.socket.bind(("127.0.0.1", 0))
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.socket.getsockname()[1]}/hook"
+
+    def __enter__(self) -> "DisconnectedRecipient":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.socket.close()
+
+
 class Candidate:
     def __init__(self, workspace: Path, database: Path):
         self.workspace = workspace
@@ -89,16 +111,31 @@ class Candidate:
         self.port = unused_port()
         self.process: subprocess.Popen[bytes] | None = None
         self.log = tempfile.TemporaryFile()
+        self.pid_file = database.with_name(f"{database.name}.service-{self.port}.pid")
 
     @property
     def base_url(self) -> str:
         return f"http://127.0.0.1:{self.port}"
+
+    @property
+    def service_pid(self) -> int | None:
+        try:
+            return int(self.pid_file.read_text())
+        except (FileNotFoundError, ValueError):
+            return None
 
     def start(self) -> "Candidate":
         environment = dict(os.environ)
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
         self.process = subprocess.Popen(
             [
+                sys.executable,
+                str(HERE / "service_worker.py"),
+                "--parent-pid",
+                str(os.getpid()),
+                "--pid-file",
+                str(self.pid_file),
+                "--",
                 sys.executable,
                 str(self.workspace / "service.py"),
                 "--port",
@@ -134,8 +171,14 @@ class Candidate:
         if self.process.poll() is None:
             self.process.terminate()
             try:
-                self.process.wait(timeout=2)
+                self.process.wait(timeout=STOP_TIMEOUT)
             except subprocess.TimeoutExpired:
+                service_pid = self.service_pid
+                if service_pid is not None:
+                    try:
+                        os.killpg(service_pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
                 self.process.kill()
                 self.process.wait(timeout=2)
         self.process = None
@@ -143,6 +186,10 @@ class Candidate:
     def close(self) -> None:
         self.stop()
         self.log.close()
+        try:
+            self.pid_file.unlink()
+        except FileNotFoundError:
+            pass
 
     def request(self, method: str, path: str, body: Any = None) -> tuple[int, Any]:
         data = None
@@ -150,6 +197,11 @@ class Candidate:
         if body is not None:
             data = json.dumps(body, separators=(",", ":")).encode()
             headers["Content-Type"] = "application/json"
+        return self.request_bytes(method, path, data, headers)
+
+    def request_bytes(
+        self, method: str, path: str, data: bytes | None, headers: dict[str, str]
+    ) -> tuple[int, Any]:
         request = urllib.request.Request(self.base_url + path, data, headers, method=method)
         try:
             with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as response:
@@ -254,6 +306,46 @@ def check_api_and_idempotency(workspace: Path) -> str:
         require(len(first.receipts) == 1 and len(second.receipts) == 1,
                 "successful recipients received a redelivery")
     return "fanout, response bodies, original payload, idempotency, and success terminality hold"
+
+
+def check_network_error_isolation(workspace: Path) -> str:
+    with tempfile.TemporaryDirectory(prefix="team-rescue-network-") as raw_root, ExitStack() as stack:
+        root = Path(raw_root)
+        disconnected = stack.enter_context(DisconnectedRecipient())
+        healthy = stack.enter_context(Recipient(204))
+        candidate = new_candidate(workspace, root, "state")
+        stack.callback(candidate.close)
+        subscribe(candidate, disconnected)
+        subscribe(candidate, healthy)
+        event(candidate, "export.ready:1501", {"export": 1501})
+        require(tick(candidate, 100) == 2,
+                "disconnected first recipient prevented complete fanout")
+        require(len(healthy.receipts) == 1,
+                "healthy recipient was not reached after disconnected recipient")
+        rows = delivery_rows(candidate)
+        require(len(rows) == 2, f"expected two isolated deliveries, got {len(rows)}")
+        broken = next((row for row in rows if row["url"] == disconnected.url), None)
+        good = next((row for row in rows if row["url"] == healthy.url), None)
+        require(broken is not None and good is not None, "network failure lost a destination")
+        require(good["status"] == "succeeded" and good["attempts"] == 1,
+                f"healthy delivery state was {good!r}")
+        require(broken["status"] == "retrying" and broken["attempts"] == 1,
+                f"network failure was not recorded as retrying: {broken!r}")
+        require(broken["next_attempt_at"] == 110,
+                f"network failure retry was due at {broken['next_attempt_at']!r}, expected 110")
+        require(broken["history"] == [{"attempt": 1, "at": 100, "status_code": None}],
+                f"network failure history was {broken['history']!r}")
+        require(tick(candidate, 109) == 0, "network failure retried before its due time")
+        require(tick(candidate, 110) == 1, "network failure did not retry when due")
+        require(len(healthy.receipts) == 1, "healthy delivery was repeated during network retry")
+        broken = next(row for row in delivery_rows(candidate) if row["url"] == disconnected.url)
+        require(broken["status"] == "retrying" and broken["attempts"] == 2,
+                f"second network failure state was {broken!r}")
+        require(broken["next_attempt_at"] == 130,
+                "second network failure did not use the 20-second delay")
+        require([item.get("status_code") for item in broken["history"]] == [None, None],
+                f"network history did not retain null status codes: {broken['history']!r}")
+    return "connection refusal is isolated, recorded with null status, and retried on schedule"
 
 
 def check_retry_isolation_and_cap(workspace: Path) -> str:
@@ -368,16 +460,27 @@ def check_invalid_input(workspace: Path) -> str:
     with tempfile.TemporaryDirectory(prefix="team-rescue-input-") as raw_root:
         candidate = new_candidate(workspace, Path(raw_root), "state")
         try:
+            status, value = candidate.request_bytes(
+                "POST", "/events", b'{"id":', {"Content-Type": "application/json"}
+            )
+            require(400 <= status < 500 and isinstance(value, dict),
+                    f"malformed JSON returned HTTP {status}: {value!r}")
+            status, value = candidate.request("POST", "/subscriptions", {})
+            require(400 <= status < 500 and isinstance(value, dict),
+                    f"missing subscription URL returned HTTP {status}: {value!r}")
             status, value = candidate.request("POST", "/events", {"payload": {}})
             require(400 <= status < 500 and isinstance(value, dict),
                     f"missing event id returned HTTP {status}: {value!r}")
+            status, value = candidate.request("POST", "/tick", {"now": "100"})
+            require(400 <= status < 500 and isinstance(value, dict),
+                    f"non-integer tick time returned HTTP {status}: {value!r}")
             status, value = candidate.request("POST", "/not-an-endpoint", {})
             require(400 <= status < 500 and isinstance(value, dict),
                     f"unknown path returned HTTP {status}: {value!r}")
             candidate.ok("GET", "/metrics")
         finally:
             candidate.close()
-    return "bad input and unknown routes return JSON 4xx without killing the service"
+    return "malformed JSON, missing fields, bad time types, and unknown routes return JSON 4xx"
 
 
 def check_replay(workspace: Path) -> str:
@@ -416,17 +519,21 @@ def check_replay(workspace: Path) -> str:
             require(tick(second, 509) == 0, "replayed delivery ignored first retry delay")
             require(tick(second, 510) == 1, "replayed delivery did not get a second activation attempt")
             require(tick(second, 529) == 0, "replayed delivery ignored second retry delay")
-            recipient.status = 204
             require(tick(second, 530) == 1, "replayed delivery did not get a third activation attempt")
             after = delivery_rows(second)[0]
-            require(after["status"] == "succeeded" and after["attempts"] == 6,
-                    f"replayed delivery did not succeed: {after!r}")
+            require(after["status"] == "failed" and after["attempts"] == 6,
+                    f"replayed delivery exceeded its fresh three-attempt cap: {after!r}")
+            require(after["next_attempt_at"] is None,
+                    "failed replay activation remained scheduled after three attempts")
             require(after["history"][:3] == old_history and len(after["history"]) == 6,
                     "replay did not append to retained history")
             require(after["history"][3].get("attempt") == 4 and after["history"][3].get("at") == 500,
                     f"replay history entry was {after['history'][3]!r}")
             require([item.get("at") for item in after["history"][3:]] == [500, 510, 530],
                     "fresh replay activation did not use the documented retry schedule")
+            require(tick(second, 599) == 0,
+                    "fresh replay activation was attempted beyond its three-attempt cap")
+            recipient.status = 204
             replayed_again = second.ok("POST", f"/deliveries/{delivery_id}/replay", {"now": 600})
             require(replayed_again.get("replayed") is True, "successful delivery could not be explicitly replayed")
             require(tick(second, 600) == 1, "explicit replay of successful delivery was not attempted")
@@ -444,11 +551,30 @@ def check_replay(workspace: Path) -> str:
 Check = tuple[str, Callable[[Path], str]]
 
 
+def sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def snapshot_candidate(workspace: Path, destination: Path) -> dict[str, str]:
+    destination.mkdir()
+    hashes: dict[str, str] = {}
+    for name in ("service.py", "README.md"):
+        source = workspace / name
+        if name == "README.md" and not source.exists():
+            continue
+        require(source.is_file() and not source.is_symlink(), f"{name} must be a regular file")
+        content = source.read_bytes()
+        hashes[name] = sha256_bytes(content)
+        (destination / name).write_bytes(content)
+    return hashes
+
+
 def check(workspace: Path, phase: int = 1) -> dict[str, Any]:
     """Check a candidate workspace and return a stable JSON-serializable receipt."""
     workspace = Path(workspace).resolve()
     checks: list[Check] = [
         ("api_fanout_and_idempotency", check_api_and_idempotency),
+        ("network_error_isolation", check_network_error_isolation),
         ("retry_isolation_and_cap", check_retry_isolation_and_cap),
         ("metrics_consistency", check_metrics),
         ("restart_persistence", check_restart_persistence),
@@ -467,17 +593,35 @@ def check(workspace: Path, phase: int = 1) -> dict[str, Any]:
             {"name": "candidate", "passed": False, "detail": "workspace must contain a regular service.py"}
         ]}
     started = time.monotonic()
-    for name, operation in checks:
-        try:
-            detail = operation(workspace)
-            results.append({"name": name, "passed": True, "detail": detail})
-        except Exception as error:
-            results.append({"name": name, "passed": False,
-                            "detail": f"{type(error).__name__}: {error}"})
+    with tempfile.TemporaryDirectory(prefix="team-rescue-candidate-") as raw_root:
+        candidate_workspace = Path(raw_root) / "workspace"
+        input_hashes = snapshot_candidate(workspace, candidate_workspace)
+        for name, operation in checks:
+            try:
+                detail = operation(candidate_workspace)
+                results.append({"name": name, "passed": True, "detail": detail})
+            except Exception as error:
+                results.append({"name": name, "passed": False,
+                                "detail": f"{type(error).__name__}: {error}"})
+        changed: list[str] = []
+        for name, before in input_hashes.items():
+            try:
+                after = sha256_bytes((candidate_workspace / name).read_bytes())
+            except OSError:
+                after = "missing"
+            if after != before:
+                changed.append(name)
+        results.append({
+            "name": "source_integrity",
+            "passed": not changed,
+            "detail": "candidate source remained unchanged" if not changed
+            else f"candidate modified its source snapshot: {', '.join(changed)}",
+        })
     return {
         "passed": all(item["passed"] for item in results),
         "phase": phase,
         "workspace": str(workspace),
+        "input_hashes": input_hashes,
         "checks": results,
         "elapsed_ms": round((time.monotonic() - started) * 1000),
     }

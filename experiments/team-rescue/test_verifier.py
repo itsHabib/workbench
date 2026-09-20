@@ -1,10 +1,15 @@
 import json
+import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
+import urllib.error
+import urllib.request
 
 
 HERE = Path(__file__).resolve().parent
@@ -76,6 +81,8 @@ class App:
             return None
 
     def tick(self, now):
+        if type(now) is not int:
+            raise ValueError("now must be an integer")
         attempted = 0
         for delivery in self.state["deliveries"].values():
             due = delivery["next_attempt_at"]
@@ -102,6 +109,8 @@ class App:
         return attempted
 
     def replay(self, delivery_id, now):
+        if type(now) is not int:
+            raise ValueError("now must be an integer")
         delivery = self.state["deliveries"].get(delivery_id)
         if delivery is None or delivery["status"] not in ("failed", "succeeded"):
             return False
@@ -200,7 +209,8 @@ class VerifierTests(unittest.TestCase):
     def test_independent_good_fixture_passes_both_phases(self):
         result = verifier.check(self.fixture(), phase=2)
         self.assertTrue(result["passed"], json.dumps(result, indent=2))
-        self.assertEqual([row["name"] for row in result["checks"]][-1], "replay")
+        self.assertEqual([row["name"] for row in result["checks"]][-2:],
+                         ["replay", "source_integrity"])
 
     def test_seed_fails_restart_persistence(self):
         result = verifier.check(HERE / "workload", phase=1)
@@ -224,6 +234,133 @@ class VerifierTests(unittest.TestCase):
         self.assertFalse(result["passed"])
         self.assertFalse(by_name["api_fanout_and_idempotency"]["passed"])
         self.assertIn("fanout receipts", by_name["api_fanout_and_idempotency"]["detail"])
+
+    def test_negative_control_without_network_error_handling_is_rejected(self):
+        broken = GOOD_SERVICE.replace("        except OSError:\n            return None\n", "")
+        self.assertNotEqual(broken, GOOD_SERVICE)
+        result = verifier.check(self.fixture(broken), phase=1)
+        by_name = {row["name"]: row for row in result["checks"]}
+        self.assertFalse(result["passed"])
+        self.assertFalse(by_name["network_error_isolation"]["passed"])
+
+    def test_negative_control_replay_activation_must_stop_after_three_failures(self):
+        broken = GOOD_SERVICE.replace(
+            "if active >= 3:", 'if active >= 3 and delivery["attempts"] <= 3:'
+        )
+        self.assertNotEqual(broken, GOOD_SERVICE)
+        result = verifier.check(self.fixture(broken), phase=2)
+        by_name = {row["name"]: row for row in result["checks"]}
+        self.assertFalse(result["passed"])
+        self.assertFalse(by_name["replay"]["passed"])
+
+    def test_candidate_cannot_pass_after_overwriting_its_source(self):
+        needle = """        self.save()
+        return True
+
+    def metrics(self):
+"""
+        replacement = """        self.save()
+        if now == 600:
+            Path(__file__).write_text("broken after checks")
+        return True
+
+    def metrics(self):
+"""
+        malicious = GOOD_SERVICE.replace(needle, replacement)
+        self.assertNotEqual(malicious, GOOD_SERVICE)
+        workspace = self.fixture(malicious)
+        original = (workspace / "service.py").read_bytes()
+        result = verifier.check(workspace, phase=2)
+        by_name = {row["name"]: row for row in result["checks"]}
+        self.assertFalse(result["passed"])
+        self.assertTrue(by_name["replay"]["passed"], json.dumps(result, indent=2))
+        self.assertFalse(by_name["source_integrity"]["passed"])
+        self.assertEqual((workspace / "service.py").read_bytes(), original)
+
+    def test_killed_checker_parent_does_not_orphan_candidate(self):
+        workspace = self.fixture()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        marker = root / "started.json"
+        driver = root / "driver.py"
+        driver.write_text(textwrap.dedent(f"""
+            import json
+            from pathlib import Path
+            import sys
+            import time
+            sys.path.insert(0, {str(HERE)!r})
+            from verifier import Candidate
+
+            candidate = Candidate(Path(sys.argv[1]), Path(sys.argv[2])).start()
+            Path(sys.argv[3]).write_text(json.dumps({{
+                "port": candidate.port,
+                "service_pid": candidate.service_pid,
+                "supervisor_pid": candidate.process.pid,
+            }}))
+            while True:
+                time.sleep(60)
+        """))
+        environment = dict(os.environ)
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        process = subprocess.Popen(
+            [sys.executable, str(driver), str(workspace), str(root / "state.sqlite"), str(marker)],
+            env=environment, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        service_pid = None
+        supervisor_pid = None
+        try:
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline and not marker.exists():
+                self.assertIsNone(process.poll(), "checker driver exited before starting candidate")
+                time.sleep(0.05)
+            self.assertTrue(marker.exists(), "checker driver did not report candidate startup")
+            started = json.loads(marker.read_text())
+            service_pid = started["service_pid"]
+            supervisor_pid = started["supervisor_pid"]
+            self.assertIsInstance(service_pid, int)
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{started['port']}/metrics", timeout=1
+            ) as response:
+                self.assertEqual(response.status, 200)
+            os.kill(process.pid, signal.SIGKILL)
+            process.wait(timeout=3)
+            deadline = time.monotonic() + 6
+            accepting = True
+            alive = True
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(service_pid, 0)
+                    alive = True
+                except ProcessLookupError:
+                    alive = False
+                try:
+                    urllib.request.urlopen(
+                        f"http://127.0.0.1:{started['port']}/metrics", timeout=0.2
+                    ).close()
+                    accepting = True
+                except OSError:
+                    accepting = False
+                if not alive and not accepting:
+                    break
+                time.sleep(0.05)
+            self.assertFalse(accepting, "orphan candidate kept accepting after checker SIGKILL")
+            self.assertFalse(alive, "orphan candidate process remained after checker SIGKILL")
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=2)
+            if service_pid is not None:
+                try:
+                    os.killpg(service_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if supervisor_pid is not None:
+                try:
+                    os.kill(supervisor_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
     def test_cli_prints_json_and_uses_failure_exit(self):
         workspace = self.fixture("print('not a server')\n")
