@@ -543,6 +543,13 @@ def check_replay(workspace: Path) -> str:
             require(len(final["history"]) == 7 and final["history"][:6] == after["history"],
                     "successful replay did not retain history")
             require(len(recipient.receipts) == 7, "replay attempt count did not match real network effects")
+            second.ok("POST", f"/deliveries/{delivery_id}/replay", {"now": 700})
+            require(tick(second, 700) == 1, "a successful delivery could not be explicitly replayed")
+            successful_replay = delivery_rows(second)[0]
+            require(successful_replay["attempts"] == 8 and successful_replay["history"][:7] == final["history"],
+                    "successful replay did not retain prior history")
+            require(len(recipient.receipts) == 8 and tick(second, 800) == 0,
+                    "successful replay did not become terminal again")
         finally:
             second.close()
     return "terminal replay survives restart, retains history, and opens a fresh activation"
