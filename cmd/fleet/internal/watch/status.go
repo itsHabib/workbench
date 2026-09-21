@@ -42,9 +42,7 @@ func runtimeRow(t deliverTarget, sessions []fleet.Rec) fleet.Rec {
 			row["output"] = output
 		}
 		row["state"], row["error"] = processState(last)
-		if job := fleet.M(last, "job"); job != nil {
-			row["job"] = job
-		}
+		addJobStatus(row, last)
 		if exit := fleet.ReadJSON(fleet.S(last, "exit_file")); exit != nil {
 			row["exit_code"], row["exited_at"] = exit["exit_code"], exit["at"]
 		}
@@ -70,6 +68,14 @@ func runtimeRow(t deliverTarget, sessions []fleet.Rec) fleet.Rec {
 	}
 	row["starts_paused"] = addressStopped(t.address) || (slot != "" && fleet.StopFlag("slot:"+slot) != nil) || (branch != "" && fleet.StopFlag(fleet.Scope(t.cwd, branch)) != nil)
 	return row
+}
+
+func addJobStatus(row, last fleet.Rec) {
+	job := fleet.M(last, "job")
+	if job == nil {
+		return
+	}
+	row["job"] = fleet.Rec{"id": job["id"], "state": job["state"], "worker": job["worker"], "ttl_seconds": job["ttl_seconds"]}
 }
 
 func processState(last fleet.Rec) (string, string) {
@@ -206,7 +212,7 @@ func providerActivity(row, last fleet.Rec) {
 		row["provider_error"] = "provider state missing or belongs to another attempt"
 		return
 	}
-	for _, key := range []string{"sandbox_policy", "approval_policy", "trace", "provider", "attempt", "provider_session", "provider_turn", "provider_state", "provider_started", "provider_terminal", "provider_quiescent", "turn_may_have_been_sent", "pre_turn_rejection", "process_proof", "provider_executable", "provider_exit_code", "provider_exit_signal", "last_provider_event", "last_provider_event_at", "reason", "error", "earlier_error"} {
+	for _, key := range []string{"sandbox_policy", "approval_policy", "trace", "provider", "attempt", "provider_session", "provider_turn", "provider_state", "provider_started", "provider_terminal", "provider_quiescent", "turn_may_have_been_sent", "pre_turn_rejection", "process_proof", "provider_executable", "provider_exit_code", "provider_exit_signal", "last_provider_event", "last_provider_event_at", "job_status", "job_error", "reason", "error", "earlier_error"} {
 		if value, ok := state[key]; ok {
 			row[key] = value
 		}

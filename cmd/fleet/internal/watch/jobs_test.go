@@ -2,6 +2,7 @@ package watch
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,19 @@ func TestMaxBudgetValidation(t *testing.T) {
 				t.Fatalf("config error=%q", targets[0].configError)
 			}
 		})
+	}
+}
+
+func TestJobTTLRequiresExactPositiveInteger(t *testing.T) {
+	for _, value := range []any{0.0, 1.5, "90"} {
+		binding, message := parseJobBinding(fleet.Rec{"state": "/tmp/jobs", "ttl_seconds": value})
+		if binding != nil || message == "" {
+			t.Fatalf("accepted ttl %#v: %#v %q", value, binding, message)
+		}
+	}
+	binding, message := parseJobBinding(fleet.Rec{"state": "/tmp/jobs"})
+	if message != "" || binding.ttlSeconds != 300 {
+		t.Fatalf("default ttl: %#v %q", binding, message)
 	}
 }
 
@@ -60,11 +74,22 @@ func TestJobBindingEmptyQueueDoesNotStartProvider(t *testing.T) {
 		return nil, errors.New("unexpected provider start")
 	}
 	t.Cleanup(func() { providerCommand = original })
-	if observed := deliver(fleet.Now()); len(observedWhat(observed, "mail-delivery-started")) != 0 {
-		t.Fatalf("unexpected launch: %v", observed)
+	for range 3 {
+		if observed := deliver(fleet.Now()); len(observedWhat(observed, "mail-delivery-started")) != 0 {
+			t.Fatalf("unexpected launch: %v", observed)
+		}
 	}
 	if called {
 		t.Fatal("empty queue prepared a provider command")
+	}
+	for _, pattern := range []string{"*.log", "*.meta.json", "*.request.json"} {
+		matches, err := filepath.Glob(filepath.Join(fleet.Path("watch", "delivery"), pattern))
+		if err != nil || len(matches) != 0 {
+			t.Fatalf("empty polls left %s artifacts: %v %v", pattern, matches, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(state, "jobs.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("empty polls mutated job state: %v", err)
 	}
 }
 
@@ -125,7 +150,7 @@ func TestClaimingRecordReplaysDurableClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	claimed := result.(jobs.Job)
-	if err := fleet.WriteJSON(launchPath(target), fleet.Rec{"at": fleet.Now(), "status": "claiming", "job_retry_key": key, "address": target.address, "cwd": home, "provider": "codex"}); err != nil {
+	if err := fleet.WriteJSON(launchPath(target), fleet.Rec{"at": fleet.Now(), "status": "claiming", "job_retry_key": key, "address": target.address, "cwd": home, "provider": "codex", "job": fleet.Rec{"state": state, "id": "", "worker": target.address, "ttl_seconds": 300}}); err != nil {
 		t.Fatal(err)
 	}
 	launch := fleet.Rec{"at": fleet.Now(), "status": "claiming", "address": target.address, "cwd": home, "provider": "codex"}
@@ -135,10 +160,19 @@ func TestClaimingRecordReplaysDurableClaim(t *testing.T) {
 	}
 }
 
+func TestClaimingRecordRejectsChangedJobBinding(t *testing.T) {
+	target := deliverTarget{address: "hub:lead", cwd: t.TempDir(), provider: "codex", job: &jobBinding{state: filepath.Join(t.TempDir(), "new"), ttlSeconds: 300}}
+	last := fleet.Rec{"at": fleet.Now(), "status": "claiming", "job_retry_key": "key", "job": fleet.Rec{"state": filepath.Join(t.TempDir(), "old"), "worker": target.address, "ttl_seconds": 300}}
+	_, err := claimJob(target, last, fleet.Rec{"at": fleet.Now(), "status": "claiming"}, launchPath(target))
+	if err == nil || !strings.Contains(err.Error(), "binding changed") {
+		t.Fatalf("changed binding accepted: %v", err)
+	}
+}
+
 func TestDifferentJobDoesNotReuseProviderSession(t *testing.T) {
-	target := deliverTarget{provider: "codex"}
+	target := deliverTarget{provider: "codex", job: &jobBinding{state: "/tmp/jobs"}}
 	stateFile := filepath.Join(t.TempDir(), "state.json")
-	last := fleet.Rec{"status": "running", "provider": "codex", "resume": "old-session", "work_identity": workIdentity(target), "job": fleet.Rec{"id": "old"}, "attempt": "attempt-1", "state_file": stateFile}
+	last := fleet.Rec{"status": "running", "provider": "codex", "resume": "old-session", "work_identity": workIdentity(target), "job": fleet.Rec{"id": "old", "state": "/tmp/jobs"}, "attempt": "attempt-1", "state_file": stateFile}
 	if err := fleet.WriteJSON(stateFile, fleet.Rec{"attempt": "attempt-1", "provider": "codex", "provider_session": "old-session", "provider_terminal": true}); err != nil {
 		t.Fatal(err)
 	}
@@ -149,5 +183,49 @@ func TestDifferentJobDoesNotReuseProviderSession(t *testing.T) {
 	job.ID = "old"
 	if got, err := resumeSessionForJob(target, last, job); err != nil || got != "old-session" {
 		t.Fatalf("same job did not resume %q: %v", got, err)
+	}
+	target.job = &jobBinding{state: "/other/jobs"}
+	if got, err := resumeSessionForJob(target, last, job); err != nil || got != "" {
+		t.Fatalf("different queue resumed %q: %v", got, err)
+	}
+}
+
+func TestSuccessiveAttemptResumesLatestSameJobSession(t *testing.T) {
+	target := deliverTarget{provider: "codex"}
+	old := fleet.Rec{"status": "running", "provider": "codex", "job": fleet.Rec{"id": "older"}}
+	for attempt := 1; attempt <= 3; attempt++ {
+		stateFile := filepath.Join(t.TempDir(), "state.json")
+		session := "session-" + string(rune('0'+attempt))
+		target.job = &jobBinding{state: "/tmp/jobs"}
+		last := fleet.Rec{"status": "running", "provider": "codex", "resume": session, "work_identity": workIdentity(target), "job": fleet.Rec{"id": "same", "state": "/tmp/jobs"}, "attempt": session, "state_file": stateFile, "previous_launch": old}
+		if err := fleet.WriteJSON(stateFile, fleet.Rec{"attempt": session, "provider": "codex", "provider_session": session, "provider_terminal": true}); err != nil {
+			t.Fatal(err)
+		}
+		job := &jobs.Job{ID: "same"}
+		got, err := resumeSessionForJob(target, last, job)
+		if err != nil || got != session {
+			t.Fatalf("attempt %d resumed %q: %v", attempt, got, err)
+		}
+		old = last
+	}
+}
+
+func TestRuntimeStatusSurfacesJobOutcomeWithoutToken(t *testing.T) {
+	home, _ := deliverEnv(t)
+	target := deliverTarget{address: "hub:lead", cwd: home, provider: "codex"}
+	stateFile := filepath.Join(t.TempDir(), "state.json")
+	last := fleet.Rec{"at": fleet.Now(), "status": "failed", "address": target.address, "cwd": home, "provider": "codex", "attempt": "attempt", "state_file": stateFile, "job": fleet.Rec{"id": "job-1", "state": "/tmp/jobs", "worker": target.address, "token": "secret", "ttl_seconds": 300}}
+	if err := fleet.WriteJSON(launchPath(target), last); err != nil {
+		t.Fatal(err)
+	}
+	if err := fleet.WriteJSON(stateFile, fleet.Rec{"attempt": "attempt", "provider": "codex", "job_status": "interrupted", "job_error": "lease lost"}); err != nil {
+		t.Fatal(err)
+	}
+	row := runtimeRow(target, nil)
+	if fleet.S(row, "job_status") != "interrupted" || fleet.S(row, "job_error") != "lease lost" {
+		t.Fatalf("job outcome missing: %v", row)
+	}
+	if fleet.Has(fleet.M(row, "job"), "token") {
+		t.Fatalf("status exposed token: %v", row)
 	}
 }

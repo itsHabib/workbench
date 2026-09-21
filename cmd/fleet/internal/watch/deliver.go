@@ -127,52 +127,81 @@ func parseDeliverTargets(cfg fleet.Rec) []deliverTarget {
 	var out []deliverTarget
 	for address := range cfg {
 		entry := fleet.M(cfg, address)
-		if entry == nil || fleet.S(entry, "cwd") == "" {
+		t, ok := parseDeliverTarget(address, entry)
+		if !ok {
 			continue
-		}
-		provider := fleet.S(entry, "provider")
-		if err := fleet.MailAddress(address, "address"); err != nil {
-			continue
-		}
-		t := deliverTarget{address: address, cwd: fleet.S(entry, "cwd"), provider: provider, model: fleet.S(entry, "model"), permissionMode: fleet.S(entry, "permission_mode"), fresh: fleet.B(entry, "fresh"), lateTo: fleet.S(entry, "LATE_TO"), instruction: fleet.S(entry, "prompt"), maxBudgetUSD: fleet.F(entry, "max_budget_usd")}
-		if raw, exists := entry["jobs"]; exists {
-			jobsEntry, ok := raw.(map[string]any)
-			if !ok {
-				t.configError = "jobs must be an object"
-			} else {
-				ttl := int(fleet.F(jobsEntry, "ttl_seconds"))
-				if ttl == 0 {
-					ttl = 300
-				}
-				t.job = &jobBinding{state: fleet.S(jobsEntry, "state"), id: fleet.S(jobsEntry, "id"), ttlSeconds: ttl}
-				if !filepath.IsAbs(t.job.state) || ttl < 1 || ttl > 3600 {
-					t.configError = "jobs.state must be absolute and jobs.ttl_seconds must be 1..3600"
-				}
-			}
-		}
-		if raw := fleet.S(entry, "every"); raw != "" {
-			var err error
-			t.every, err = time.ParseDuration(raw)
-			if err != nil || t.every <= 0 || strings.TrimSpace(t.instruction) == "" {
-				t.configError = "every requires a positive duration and a nonempty prompt"
-			}
-		}
-		if provider != "claude" && provider != "codex" {
-			t.configError = "provider must be claude or codex; command launchers have been removed"
-		}
-		if fleet.Has(entry, "max_budget_usd") && (provider != "claude" || t.maxBudgetUSD <= 0 || math.IsNaN(t.maxBudgetUSD) || math.IsInf(t.maxBudgetUSD, 0)) {
-			t.configError = "max_budget_usd must be positive and finite and is supported only by claude"
-		}
-		if fleet.Has(entry, "cmd") {
-			t.configError = "cmd is unsupported; configure provider instead"
-		}
-		if mode := t.permissionMode; mode != "" && (provider != "claude" || (mode != "default" && mode != "acceptEdits" && mode != "auto" && mode != "plan" && mode != "dontAsk")) {
-			t.configError = "unsupported permission_mode"
 		}
 		out = append(out, t)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].address < out[j].address })
 	return out
+}
+
+func parseDeliverTarget(address string, entry fleet.Rec) (deliverTarget, bool) {
+	if entry == nil || fleet.S(entry, "cwd") == "" {
+		return deliverTarget{}, false
+	}
+	if err := fleet.MailAddress(address, "address"); err != nil {
+		return deliverTarget{}, false
+	}
+	t := deliverTarget{address: address, cwd: fleet.S(entry, "cwd"), provider: fleet.S(entry, "provider"), model: fleet.S(entry, "model"), permissionMode: fleet.S(entry, "permission_mode"), fresh: fleet.B(entry, "fresh"), lateTo: fleet.S(entry, "LATE_TO"), instruction: fleet.S(entry, "prompt"), maxBudgetUSD: fleet.F(entry, "max_budget_usd")}
+	if raw, exists := entry["jobs"]; exists {
+		t.job, t.configError = parseJobBinding(raw)
+	}
+	if raw := fleet.S(entry, "every"); raw != "" {
+		t.every, _ = time.ParseDuration(raw)
+		if t.every <= 0 || strings.TrimSpace(t.instruction) == "" {
+			t.configError = "every requires a positive duration and a nonempty prompt"
+		}
+	}
+	validateDeliverTarget(&t, entry)
+	return t, true
+}
+
+func validateDeliverTarget(t *deliverTarget, entry fleet.Rec) {
+	if t.provider != "claude" && t.provider != "codex" {
+		t.configError = "provider must be claude or codex; command launchers have been removed"
+	}
+	if fleet.Has(entry, "max_budget_usd") && (t.provider != "claude" || t.maxBudgetUSD <= 0 || math.IsNaN(t.maxBudgetUSD) || math.IsInf(t.maxBudgetUSD, 0)) {
+		t.configError = "max_budget_usd must be positive and finite and is supported only by claude"
+	}
+	if fleet.Has(entry, "cmd") {
+		t.configError = "cmd is unsupported; configure provider instead"
+	}
+	if mode := t.permissionMode; mode != "" && (t.provider != "claude" || (mode != "default" && mode != "acceptEdits" && mode != "auto" && mode != "plan" && mode != "dontAsk")) {
+		t.configError = "unsupported permission_mode"
+	}
+}
+
+func parseJobBinding(raw any) (*jobBinding, string) {
+	entry, ok := raw.(map[string]any)
+	if !ok {
+		return nil, "jobs must be an object"
+	}
+	state := fleet.S(entry, "state")
+	if !filepath.IsAbs(state) {
+		return nil, "jobs.state must be absolute"
+	}
+	ttl := 300
+	if rawTTL, exists := entry["ttl_seconds"]; exists {
+		value, ok := integerTTL(rawTTL)
+		if !ok || value < 1 || value > 3600 {
+			return nil, "jobs.ttl_seconds must be an integer from 1 to 3600"
+		}
+		ttl = value
+	}
+	return &jobBinding{state: state, id: fleet.S(entry, "id"), ttlSeconds: ttl}, ""
+}
+
+func integerTTL(raw any) (int, bool) {
+	switch value := raw.(type) {
+	case int:
+		return value, true
+	case float64:
+		return int(value), math.Trunc(value) == value
+	default:
+		return 0, false
+	}
 }
 
 // deliverLockKey is the one serialisation point for delivery, taken by every fold in

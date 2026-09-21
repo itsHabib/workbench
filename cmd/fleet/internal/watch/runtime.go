@@ -142,11 +142,6 @@ func run(t deliverTarget, text, assignment string, now float64) (int, error) {
 	}
 	attempt := strings.TrimSuffix(path, ".json") + fmt.Sprintf("-%d-%d", os.Getpid(), time.Now().UnixNano())
 	logPath := attempt + ".log"
-	log, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = log.Close() }()
 	exitFile := attempt + ".exit.json"
 	if assignment == "" {
 		assignment = fleet.S(last, "assignment")
@@ -185,6 +180,11 @@ func run(t deliverTarget, text, assignment string, now float64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	log, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = log.Close() }()
 	// Preparation cannot start a process. Publish uncertainty only after it
 	// succeeds, immediately before Start; a preparation error remains retryable.
 	r["status"] = "starting"
@@ -201,6 +201,7 @@ func run(t deliverTarget, text, assignment string, now float64) (int, error) {
 		return 0, err
 	}
 	r["status"], r["pid"] = "running", cmd.Process.Pid
+	delete(r, "previous_launch")
 	r["process_identity"], _ = processIdentity(cmd.Process.Pid)
 	observed := filepath.Join(dir(), "observed.jsonl")
 	if err := fleet.WriteJSON(path, r); err != nil {
@@ -216,36 +217,35 @@ func claimJob(t deliverTarget, last, launch fleet.Rec, path string) (*jobs.Job, 
 	if t.job == nil {
 		return nil, nil
 	}
+	binding := fleet.Rec{"id": t.job.id, "state": t.job.state, "worker": t.address, "ttl_seconds": t.job.ttlSeconds}
+	if fleet.S(last, "status") == "claiming" && !sameJobBinding(fleet.M(last, "job"), binding) {
+		return nil, fmt.Errorf("job binding changed while claim result is unresolved")
+	}
 	key := fleet.S(last, "job_retry_key")
 	if fleet.S(last, "status") != "claiming" || key == "" {
 		key = fmt.Sprintf("watch-%d-%d", os.Getpid(), time.Now().UnixNano())
 	}
 	previous := last
-	if saved := fleet.M(last, "previous_launch"); saved != nil {
-		previous = saved
+	if prelaunch(last) {
+		saved := fleet.M(last, "previous_launch")
+		if saved != nil {
+			previous = saved
+		}
 	}
 	if previous != nil {
 		launch["previous_launch"] = previous
 	}
 	launch["job_retry_key"] = key
+	launch["job"] = binding
 	if err := fleet.WriteJSON(path, launch); err != nil {
 		return nil, err
 	}
 	result, err := (&jobs.Store{Dir: t.job.state}).Execute(jobs.Request{Op: "claim", ID: t.job.id, Key: key, Worker: t.address, TTLSeconds: t.job.ttlSeconds})
-	if err != nil {
-		if errors.Is(err, jobs.ErrNotFound) || errors.Is(err, jobs.ErrConflict) {
-			record := launch
-			if previous != nil {
-				record = previous
-			} else {
-				record["status"], record["error"] = "failed", err.Error()
-			}
-			if writeErr := fleet.WriteJSON(path, record); writeErr != nil {
-				return nil, fmt.Errorf("claim: %v; record failure: %w", err, writeErr)
-			}
-			return nil, errNoEligibleJob
-		}
+	if err != nil && !errors.Is(err, jobs.ErrNotFound) && !errors.Is(err, jobs.ErrConflict) {
 		return nil, err
+	}
+	if err != nil {
+		return nil, finishEmptyClaim(path, launch, previous, err)
 	}
 	job, ok := result.(jobs.Job)
 	if !ok || len(job.Attempts) == 0 {
@@ -258,6 +258,25 @@ func claimJob(t deliverTarget, last, launch fleet.Rec, path string) (*jobs.Job, 
 		return nil, err
 	}
 	return &job, nil
+}
+
+func finishEmptyClaim(path string, launch, previous fleet.Rec, claimErr error) error {
+	record := launch
+	if previous != nil {
+		record = previous
+	} else {
+		record["status"], record["error"] = "failed", claimErr.Error()
+	}
+	if err := fleet.WriteJSON(path, record); err != nil {
+		return fmt.Errorf("claim: %v; record failure: %w", claimErr, err)
+	}
+	return errNoEligibleJob
+}
+
+func sameJobBinding(a, b fleet.Rec) bool {
+	return a != nil && fleet.S(a, "id") == fleet.S(b, "id") &&
+		fleet.CanonPath(fleet.S(a, "state")) == fleet.CanonPath(fleet.S(b, "state")) &&
+		fleet.S(a, "worker") == fleet.S(b, "worker") && fleet.F(a, "ttl_seconds") == fleet.F(b, "ttl_seconds")
 }
 
 func jobPrompt(text string, job *jobs.Job) string {
@@ -277,16 +296,24 @@ func jobPrompt(text string, job *jobs.Job) string {
 }
 
 func resumeSessionForJob(t deliverTarget, last fleet.Rec, job *jobs.Job) (string, error) {
-	if previous := fleet.M(last, "previous_launch"); previous != nil {
+	if previous := fleet.M(last, "previous_launch"); prelaunch(last) && previous != nil {
 		last = previous
 	}
 	if job != nil && fleet.S(fleet.M(last, "job"), "id") != job.ID {
+		return "", nil
+	}
+	if job != nil && fleet.CanonPath(fleet.S(fleet.M(last, "job"), "state")) != fleet.CanonPath(t.job.state) {
 		return "", nil
 	}
 	if job != nil && !providerTerminal(last) {
 		return "", nil
 	}
 	return resumeSession(t, last)
+}
+
+func prelaunch(last fleet.Rec) bool {
+	status := fleet.S(last, "status")
+	return status == "claiming" || status == "claimed"
 }
 
 func recordExit(cmd *exec.Cmd, path, observed, address string) {
