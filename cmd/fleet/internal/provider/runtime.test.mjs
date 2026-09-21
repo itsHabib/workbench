@@ -60,11 +60,13 @@ const fakeClaude = `export function query({options}) {
   yield {type:'system',subtype:'init',session_id};
   if(process.env.CASE==='early-exit')return;
   if(process.env.CASE==='approval-then-ok')await options.canUseTool('Bash',{command:'echo x'},{});
+  if(process.env.CASE==='lease-lost')while(!interrupted)await new Promise(r=>setTimeout(r,10));
+  if(process.env.CASE==='slow')await new Promise(r=>setTimeout(r,2400));
   if(process.env.CASE==='cancel')while(!interrupted)await new Promise(r=>setTimeout(r,10));
-  yield {type:'result',subtype:'success',is_error:false,session_id,total_cost_usd:0.125,num_turns:2};
+  yield {type:'result',subtype:'success',is_error:false,session_id,total_cost_usd:0.125,num_turns:2,result:'Changed the artifact; run independent checks.'};
  }};
 }`;
-async function run(provider, scenario, resume) {
+async function run(provider, scenario, resume, jobCase) {
  const home=fs.mkdtempSync(path.join(os.tmpdir(),'fleet-provider-test-'));
  const req={provider,check:scenario.startsWith('check'),cwd:home,prompt:'fixture',attempt:'attempt-1',state_file:path.join(home,'state.json'),cancel_file:path.join(home,'cancel'),output:path.join(home,'out.log'),resume,process_observer:process.env.FLEET_TEST_OBSERVER};
  const bin=path.join(home,'bin');fs.mkdirSync(bin);
@@ -76,6 +78,21 @@ async function run(provider, scenario, resume) {
  const mod=path.join(home,'node_modules/@anthropic-ai/claude-agent-sdk');fs.mkdirSync(mod,{recursive:true});
  fs.writeFileSync(path.join(mod,'package.json'),JSON.stringify({type:'module',exports:'./index.mjs'}));
  fs.writeFileSync(path.join(mod,'index.mjs'),fakeClaude);
+ if(jobCase) {
+  const executable=path.join(home,'fleet-job');
+  fs.writeFileSync(executable, `#!/usr/bin/env node
+const fs=require('node:fs'),path=require('node:path');
+const a=process.argv.slice(2),op=a[1],root=a[a.indexOf('--state')+1];
+const f=path.join(root,'operations.json');
+const history=fs.existsSync(f)?JSON.parse(fs.readFileSync(f)):[];
+history.push({op,result:a.includes('--result')?JSON.parse(a[a.indexOf('--result')+1]):null});
+fs.writeFileSync(f,JSON.stringify(history));
+if(${JSON.stringify(jobCase)}==='expired' || (${JSON.stringify(jobCase)}==='lost' && history.length>1) || (${JSON.stringify(jobCase)}==='report-fail' && op==='complete')){console.error('conflict: expired');process.exit(1)}
+console.log(JSON.stringify({id:'job-1',state:op==='complete'?'reported':'running'}));
+`,{mode:0o700});
+  req.job={executable,state:home,id:'job-1',worker:'worker-1',token:'private-token',ttl_seconds:3};
+  req.max_budget_usd=0.75;
+ }
  const requestFile=path.join(home,'request.json');fs.writeFileSync(requestFile,JSON.stringify(req),{mode:0o600});
  const proc=spawn(process.execPath,['--input-type=module','-e',bridge,requestFile],{stdio:['ignore','pipe','pipe'],env:{...process.env,PATH:scenario==='spawn-fail'?bin:bin+path.delimiter+process.env.PATH,FLEET_RUNTIME_HOME:home,FLEET_TEST_CODEX_SCRIPT:script,FLEET_TEST_NODE:process.execPath,CASE:scenario==='wrapped-init-fail'?'init-fail':scenario}});
  let out='',err='';proc.stdout.on('data',b=>out+=b);proc.stderr.on('data',b=>err+=b);
@@ -85,8 +102,10 @@ async function run(provider, scenario, resume) {
  const code=await new Promise(resolve=>proc.on('close',resolve));
  clearTimeout(deadline);clearInterval(control);
  const state=JSON.parse(fs.readFileSync(req.state_file));
+ const operations=fs.existsSync(path.join(home,'operations.json'))?JSON.parse(fs.readFileSync(path.join(home,'operations.json'))):[];
+ const artifact=state.job_result?JSON.parse(fs.readFileSync(state.job_result)):null;
  fs.rmSync(home,{recursive:true,force:true});
- return {code,state,out,err};
+ return {code,state,out,err,operations,artifact};
 }
 test('a refused approval does not outlive a completed Claude turn',async()=>{
  const r=await run('claude','approval-then-ok');assert.equal(r.code,0,r.err);
@@ -185,4 +204,41 @@ test('Codex setup times out an unanswered discovery RPC and reaps the provider',
  const r=await run('codex','check-timeout');assert.equal(r.code,1,r.err);
  assert.match(r.state.error,/config\/read timed out/);
  assert.equal(r.state.provider_exit_signal,'SIGKILL');assert.equal(r.state.provider_turn,undefined);
+});
+
+
+test('job renews before start, while working, and reports evidence without accepting', async () => {
+ const r=await run('claude','slow',undefined,'ok');
+ assert.equal(r.code,0,r.err+JSON.stringify(r.state));assert.equal(r.state.job_status,'reported');
+ assert.ok(r.operations.filter(x=>x.op==='renew').length>=3);
+ assert.equal(r.operations.at(-1).op,'complete');
+ assert.equal(r.operations.filter(x=>x.op==='complete').length,1);
+ assert.equal(r.artifact.session,'real-session');
+ assert.equal(r.artifact.usage.reported_cost_usd,0.125);
+ assert.match(r.artifact.summary,/independent checks/);
+ assert.equal(r.artifact.head,null);assert.equal(r.artifact.working_tree,null);
+ assert.doesNotMatch(JSON.stringify(r.artifact),/private-token/);
+ assert.equal(r.operations.some(x=>x.op==='accept'),false);
+});
+test('expired job fails before a provider starts',async()=>{
+ const r=await run('claude','ok',undefined,'expired');
+ assert.equal(r.code,1);assert.equal(r.state.provider_started,false);
+ assert.equal(r.artifact,null);assert.deepEqual(r.operations.map(x=>x.op),['renew']);
+});
+test('lost lease interrupts the provider and cannot report a result',async()=>{
+ const r=await run('claude','lease-lost',undefined,'lost');
+ assert.equal(r.code,130);assert.equal(r.state.job_status,'lease_lost');
+ assert.equal(r.state.provider_terminal,true);assert.match(r.state.job_error,/expired/);
+ assert.equal(r.operations.some(x=>x.op==='complete'),false);
+});
+test('interrupted job retains workspace and remains unreported',async()=>{
+ const r=await run('claude','cancel',undefined,'ok');
+ assert.equal(r.code,130);assert.equal(r.state.job_status,'unfinished');
+ assert.equal(r.operations.some(x=>x.op==='complete'),false);
+});
+test('failed report preserves its artifact without acceptance',async()=>{
+ const r=await run('claude','ok',undefined,'report-fail');
+ assert.equal(r.code,1);assert.equal(r.state.provider_terminal,true);
+ assert.ok(r.artifact);assert.equal(r.artifact.job_id,'job-1');
+ assert.equal(r.operations.some(x=>x.op==='accept'),false);
 });

@@ -1,5 +1,11 @@
 # Job worker
 
+For a watcher `jobs` binding, the bridge claims, renews and reports automatically.
+Implement the supplied brief, preserve work, and return the artifact, revision, checks
+and limitations. Do not issue a second claim or complete/accept it yourself.
+
+The manual CLI/HTTP workflow below applies when no automatic binding is configured.
+
 On a wake, inspect your current job before claiming more. Use a stable worker identity
 and save each claim retry key before issuing it; replay that key after an uncertain response.
 A claim returns the job brief and attempt token. Follow the brief in your isolated workspace.

@@ -93,6 +93,8 @@ def concurrent_retry(base, text):
     if sum(status == 201 for status, _ in results) != 1:
         raise AssertionError(f"expected exactly one concurrent create: {[status for status, _ in results]}")
     ids = {str(result_id(value)) for status, value in results if status in (200, 201)}
+    if any(status not in (200, 201) for status, _ in results):
+        raise AssertionError(f"retry returned errors: {[status for status, _ in results]}")
     if len(ids) != 1:
         raise AssertionError(f"concurrent retry returned duplicate or missing ids: {ids}")
 
@@ -110,9 +112,9 @@ def persistence_fault(base, state_dir, seed):
     text = csv_text(rows)
     try:
         try:
-            status, _ = request(base, "/imports", {"request_id": request_id, "csv": text}, timeout=1)
-        except (urllib.error.URLError, TimeoutError):
-            status = 599
+            status, _ = request(base, "/imports", {"request_id": request_id, "csv": text}, timeout=7)
+        except (urllib.error.URLError, TimeoutError) as error:
+            raise AssertionError("locked-write response was lost; write failure is unproven") from error
         if 200 <= status < 300:
             raise AssertionError(f"exclusive SQLite lock produced false success HTTP {status}")
     finally:
@@ -136,7 +138,7 @@ def checks(base, state_dir, seed, full):
     expect(base, "/imports", {"request_id": "ragged", "csv": "title,body\nA\n"}, status=400)
     expect(base, "/imports", {"request_id": "unterminated", "csv": 'title,body\n"A,B\n'}, status=400)
     concurrent_retry(base, text)
-    docs = [{"title": "Quartz Gate", "body": "synthetic JSON body"}, {"title": "Cedar Loop", "body": "second JSON body"}]
+    docs = [{"title": "Quartz Gate", "body": 'synthetic, "quoted" JSON body\nnext line'}, {"title": "Cedar Loop", "body": "second JSON body"}]
     _, json_result = expect(base, "/imports", {"request_id": "docs-1", "documents": docs}, status=201)
     export_id = result_id(json_result)
     _, exported = expect(base, f"/imports/{export_id}/export", status=200)
@@ -189,6 +191,10 @@ def main():
             _, record = expect(base, f"/imports/{import_id}", status=200)
             if record.get("documents", record.get("rows")) != rows:
                 raise AssertionError("restart persistence data mismatch")
+            _, replay = expect(base, "/imports", {"request_id": f"csv-{args.seed}", "csv": csv_text(rows)}, status=200)
+            if str(result_id(replay)) != str(import_id):
+                raise AssertionError("retry after restart created a duplicate")
+            expect(base, "/imports", {"request_id": f"csv-{args.seed}", "csv": "title,body\nchanged,payload\n"}, status=409)
     except Exception as error:
         print(json.dumps({"ok": False, "error": str(error), "url": base, "seed": args.seed}, sort_keys=True))
         return 1
