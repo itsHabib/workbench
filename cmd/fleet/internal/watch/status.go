@@ -202,7 +202,7 @@ func providerActivity(row, last fleet.Rec) {
 	if last == nil || fleet.S(last, "state_file") == "" {
 		return
 	}
-	if last != nil && fleet.S(last, "provider") != "" && (fleet.S(row, "state") == "exited" || fleet.S(row, "state") == "failed") && !providerTerminal(last) {
+	if last != nil && fleet.S(last, "provider") != "" && bridgeAbsent(fleet.S(row, "state")) && !providerTerminal(last) {
 		row["provider_cleanup_pending"] = true
 		row["error"] = "bridge exited without safe provider cleanup evidence; directory remains reserved"
 	}
@@ -217,4 +217,8 @@ func providerActivity(row, last fleet.Rec) {
 			row[key] = value
 		}
 	}
+}
+
+func bridgeAbsent(state string) bool {
+	return state == "exited" || state == "failed" || state == "gone_exit_unknown"
 }

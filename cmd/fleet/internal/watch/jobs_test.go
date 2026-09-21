@@ -1,12 +1,14 @@
 package watch
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
 	"github.com/itsHabib/workbench/cmd/fleet/internal/jobs"
@@ -169,6 +171,62 @@ func TestClaimingRecordRejectsChangedJobBinding(t *testing.T) {
 	}
 }
 
+func TestExpiredFirstClaimGetsNewKeyAndToken(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "jobs")
+	submitJob(t, state, "job-1", "recover first claim")
+	target := deliverTarget{address: "hub:lead", cwd: t.TempDir(), provider: "codex", job: &jobBinding{state: state, id: "job-1", ttlSeconds: 300}}
+	store := &jobs.Store{Dir: state}
+	result, err := store.Execute(jobs.Request{Op: "claim", ID: "job-1", Worker: target.address, Key: "crashed-first-key", TTLSeconds: 300})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := result.(jobs.Job).Attempts[0]
+	expireStoredClaim(t, state)
+	last := fleet.Rec{"at": fleet.Now(), "status": "claiming", "job_retry_key": first.Key, "job": fleet.Rec{"state": state, "id": "job-1", "worker": target.address, "ttl_seconds": 300}}
+	path := launchPath(target)
+	if err := fleet.WriteJSON(path, last); err != nil {
+		t.Fatal(err)
+	}
+	launch := fleet.Rec{"at": fleet.Now(), "status": "claiming", "address": target.address, "cwd": target.cwd, "provider": target.provider}
+	if _, err := claimJob(target, last, launch, path); !errors.Is(err, errNoEligibleJob) {
+		t.Fatalf("expired replay: %v", err)
+	}
+	failed := fleet.ReadJSON(path)
+	if fleet.S(failed, "status") != "failed" {
+		t.Fatalf("expired first claim stayed unresolved: %v", failed)
+	}
+	second, err := claimJob(target, failed, launch, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest := second.Attempts[len(second.Attempts)-1]
+	if latest.Key == first.Key || latest.Token == first.Token {
+		t.Fatalf("claim identity reused: first=%v latest=%v", first, latest)
+	}
+}
+
+func expireStoredClaim(t *testing.T, state string) {
+	t.Helper()
+	path := filepath.Join(state, "jobs.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := struct {
+		Version int        `json:"version"`
+		Jobs    []jobs.Job `json:"jobs"`
+	}{}
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	snapshot.Jobs[0].Attempts[0].StartedAt = started
+	snapshot.Jobs[0].Attempts[0].ExpiresAt = started.Add(5 * time.Minute)
+	if err := fleet.WriteJSON(path, snapshot); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDifferentJobDoesNotReuseProviderSession(t *testing.T) {
 	target := deliverTarget{provider: "codex", job: &jobBinding{state: "/tmp/jobs"}}
 	stateFile := filepath.Join(t.TempDir(), "state.json")
@@ -227,5 +285,22 @@ func TestRuntimeStatusSurfacesJobOutcomeWithoutToken(t *testing.T) {
 	}
 	if fleet.Has(fleet.M(row, "job"), "token") {
 		t.Fatalf("status exposed token: %v", row)
+	}
+}
+
+func TestGoneBridgeSurfacesPendingProviderCleanup(t *testing.T) {
+	stateFile := filepath.Join(t.TempDir(), "state.json")
+	last := fleet.Rec{"status": "running", "provider": "codex", "attempt": "attempt", "state_file": stateFile, "exit_file": filepath.Join(t.TempDir(), "missing-exit.json"), "pid": 999999999}
+	if err := fleet.WriteJSON(stateFile, fleet.Rec{"attempt": "attempt", "provider": "codex", "provider_started": true, "provider_terminal": false}); err != nil {
+		t.Fatal(err)
+	}
+	state, _ := processState(last)
+	if state != "gone_exit_unknown" {
+		t.Fatalf("fixture state: %s", state)
+	}
+	row := fleet.Rec{"state": state}
+	providerActivity(row, last)
+	if !fleet.B(row, "provider_cleanup_pending") {
+		t.Fatalf("missing cleanup warning: %v", row)
 	}
 }

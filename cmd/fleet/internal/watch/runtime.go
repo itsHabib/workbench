@@ -227,6 +227,7 @@ func claimJob(t deliverTarget, last, launch fleet.Rec, path string) (*jobs.Job, 
 	}
 	previous := last
 	if prelaunch(last) {
+		previous = nil
 		saved := fleet.M(last, "previous_launch")
 		if saved != nil {
 			previous = saved
