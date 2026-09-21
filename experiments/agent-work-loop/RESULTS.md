@@ -6,6 +6,17 @@ was interrupted and the coordinator was replaced. The first completion failed an
 independent check. Repair feedback produced a better application. This was a
 supervised integration pilot, not evidence that a team beats one capable session.
 
+| Result | Observed |
+|---|---|
+| Model | Haiku 4.5 for coordinator and workers |
+| Work | Four accepted jobs; interrupted backend job took two attempts |
+| First completion | $2.16 reported usage; independent API check failed |
+| Final artifact | API and browser checks passed; $3.67 across 20 provider turns |
+| Supervision | Seven recorded steering/harness interventions, besides planned faults |
+
+The [receipt and replay](runs/haiku-01/README.md) preserve costs, failed checks,
+the final app and a patch that reproduces the first broken completion.
+
 **What the machinery earned**
 
 - **An interrupted worker kept its work.** The bridge renewed its job independently
@@ -30,7 +41,8 @@ supervised integration pilot, not evidence that a team beats one capable session
   The first response added backend tests. A later pass located the browser parser.
   The check now names the failing browser operation explicitly.
 - After repairing, the coordinator sometimes said "ready for acceptance" without
-  writing the completion artifact. The feedback now names that next action directly.
+  writing the completion artifact. A clearer reminder was still unnecessary overhead.
+  With an explicit check, settled accepted jobs now go directly to verification.
 
 **What changed in Fleet because of this run**
 
@@ -48,6 +60,8 @@ no matched native-session baseline, no general intelligence uplift measurement, 
 Rooms deployment and no proof of arbitrary escaped-child or external-side-effect
 recovery. File-backed claims here require a shared local store. The dollar figure in
 the receipt is provider-reported usage, excluding engineering, evaluation and local compute.
+The run changed while we learned; it is not a fixed-protocol benchmark. Subsequent
+checks validate the resulting implementation, not a claim of unattended success.
 
 **The next useful comparison**
 
@@ -58,5 +72,4 @@ separate arm. Keep the queue only where restart/retry evidence pays for its comp
 Rooms comes after that: replace the local storage assumption and test real process
 death and isolation, rather than treating a local pass as cloud readiness.
 
-See the [launcher and replay guide](README.md) for commands. Run receipts and the
-produced application are kept alongside this document.
+See the [launcher guide](README.md) for commands.

@@ -4,6 +4,8 @@ One coordinator, two available workers, existing Fleet jobs and the existing wat
 Agents decide what to do. The bridge renews claims and records their results. This is
 an experimental local launcher, not a cloud scheduler or an intelligence benchmark.
 
+[Read the pilot's lessons](RESULTS.md) and [replay its application](runs/haiku-01/README.md).
+
 ```sh
 go build -o /tmp/fleet ./cmd/fleet
 # Install/authenticate the provider as described in cmd/fleet/docs/headless.md.
@@ -37,13 +39,15 @@ overshoot by active turns (up to three); provider cost limits are not prepaid re
 Missing costs remain unknown. Engineering, evaluation and local compute are excluded.
 
 Pass `--check /absolute/path/to/executable` to close the feedback loop. It runs from the
-integration checkout after agents have stopped. Exit 0 verifies the result; exit 1
-archives the failed completion, saves the output and puts that failure directly into
-a fresh coordinator wake. Further repairs use the same run budget. Other exit codes
+integration checkout after a completion claim, or once all jobs are accepted and
+workers are quiescent. No extra completion marker is required in the latter case.
+Exit 0 verifies the result; exit 1 saves the failed check and any completion claim,
+then puts that failure directly into fresh coordinator wakes. Further repairs use
+the same run budget. Other exit codes
 stop the run as a check failure. The executable is fingerprinted at preparation; its
 dependencies and the agents still run as trusted local code. This is not a security
 boundary. A check only proves the behavior it actually tests.
-Receipts identify the checked source hash and whether the checkout was dirty; a pass
+Receipts identify the Git-visible source hash and whether the checkout was dirty; a pass
 on dirty files is never attributed to the base commit. Source changes during a check
 stop verification. Keep test state outside the source checkout.
 
