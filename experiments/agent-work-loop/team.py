@@ -108,6 +108,9 @@ Read {root}/GOAL.md, REQUESTS.md, PLAN.md and the job queue at every wake.
 Use {binary} job list --state {root}/jobs and {binary} watch status --json.
 Two isolated workers exist: worker-1 and worker-2; their paths are {root}/worker-1 and worker-2.
 Your integration checkout is {root}/coordinator. You own the plan and integration.
+Inspect sibling worktrees with git -C PATH, never cd into another seat. Read artifact
+paths directly with Read/Glob; Python can parse JSON. Avoid jq/head/cat/find pipelines
+when those helpers are unavailable. A refused helper is not missing task authority.
 
 Turn the goal into eligible jobs with observable acceptance criteria. Submit only work
 that can proceed now: {binary} job submit --state {root}/jobs --id STABLE_ID --brief TEXT.
@@ -156,7 +159,9 @@ Use only local development commands. No push, deployment, cloud or additional ag
 
 def write_report(root, phase):
     jobs = json.loads(fleet(root, 'job', 'list', '--state', root / 'jobs'))
-    usage = json.loads(fleet(root, 'run-report', '--since', '720h', '--json'))
+    created = json.loads((root / 'run.json').read_text())['created_at']
+    window = f'{max(1, int(time.time() - created) + 60)}s'
+    usage = json.loads(fleet(root, 'run-report', '--since', window, '--json'))
     states = {}
     for job in jobs:
         states[job['state']] = states.get(job['state'], 0) + 1
@@ -192,26 +197,33 @@ def run(root):
             print('Coordinator already finished; inspect DONE.md and independently verify its result.')
             return 0
         status = json.loads(fleet(root, 'watch', 'status', '--json'))
-        if status['watcher'] == 'running':
+        if status['watcher'] not in ('never_seen', 'stopped'):
             raise RuntimeError('this run already has a live watcher; inspect it before replacing its launcher')
         return monitor(root)
 
 
 def cleanup_pending(status):
     return any(r.get('provider_cleanup_pending') or r['state'] in ('running', 'unknown')
-               for r in status['workers'])
+               or (r['state'] == 'gone_exit_unknown' and not r.get('provider_terminal')
+                   and not r.get('provider_quiescent')) for r in status['workers'])
 
 
 def monitor(root):
     config = json.loads((root / 'run.json').read_text())
     env = environment(root)
     log = (root / 'watcher.log').open('a')
+    started_at = time.time()
     watcher = subprocess.Popen([config['fleet'], 'watch', '--interval', '2s'], env=env, stdout=log, stderr=log)
+    owned = False
     deadline = time.monotonic() + config['minutes'] * 60
     phase = 'running'
     try:
         while True:
             time.sleep(2)
+            status = json.loads(fleet(root, 'watch', 'status', '--json'))
+            heartbeat = status.get('heartbeat') or {}
+            if heartbeat.get('pid') == watcher.pid and heartbeat.get('at', 0) >= started_at:
+                owned = True
             if watcher.poll() is not None:
                 raise RuntimeError(f'watcher stopped ({watcher.returncode}); inspect watcher.log')
             report = write_report(root, phase)
@@ -230,20 +242,24 @@ def monitor(root):
         phase = 'runner_failed'
         (root / 'ERROR.txt').write_text(str(error) + '\n')
     finally:
-        stop(root, phase)
-        # Cancel requests are asynchronous; preserve unknown cleanup rather than force release.
-        for _ in range(20):
-            status = json.loads(fleet(root, 'watch', 'status', '--json'))
-            if not cleanup_pending(status):
-                break
-            time.sleep(1)
-        watcher.terminate()
         try:
-            watcher.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            watcher.kill()
-            watcher.wait()
-        log.close()
+            if owned:
+                stop(root, phase)
+                # Only a watcher observed under our child PID authorizes cleanup.
+                for _ in range(20):
+                    status = json.loads(fleet(root, 'watch', 'status', '--json'))
+                    if not cleanup_pending(status):
+                        break
+                    time.sleep(1)
+        finally:
+            # A failed status read must not strand the watcher we started.
+            watcher.terminate()
+            try:
+                watcher.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                watcher.kill()
+                watcher.wait()
+            log.close()
         final_status = json.loads(fleet(root, 'watch', 'status', '--json'))
         if cleanup_pending(final_status):
             phase += '_cleanup_pending'

@@ -122,6 +122,14 @@ def reported_job(binary, state, env, job_id):
     return wait_for(check, timeout=12)
 
 
+def observed_provider(fleet_state, job_id, predicate):
+    for path in (fleet_state / "watch/delivery").glob("*.state.json"):
+        state = json.loads(path.read_text())
+        if state.get("job_id") == job_id and predicate(state):
+            return state
+    return None
+
+
 def independent_accept(binary, state, env, job_id, token, artifact):
     expected = b"complete synthetic artifact\n"
     actual = artifact.read_bytes()
@@ -154,6 +162,8 @@ def run_drill(binary):
         try:
             first = running_job(binary, jobs_state, env, restart_job)
             old_attempt = first["attempts"][-1]
+            wait_for(lambda: observed_provider(fleet_state, restart_job, lambda s: s.get("provider_started") and s.get("provider_state") == "running"))
+            wait_for(lambda: artifact.exists() and artifact.read_bytes() == b"partial synthetic artifact\n")
             watcher.kill()
             watcher.wait(timeout=5)
             time.sleep(2.2)
@@ -184,8 +194,11 @@ def run_drill(binary):
         try:
             cancelled = running_job(binary, jobs_state, env, cancel_job)
             old_token = cancelled["attempts"][-1]["token"]
+            wait_for(lambda: observed_provider(fleet_state, cancel_job, lambda s: s.get("provider_started") and s.get("provider_state") == "running"))
             run(binary, "watch", "cancel", "hub:lead", env=env)
-            wait_for(lambda: get_job(binary, jobs_state, env, cancel_job).get("state") == "running")
+            wait_for(lambda: observed_provider(fleet_state, cancel_job, lambda s: s.get("provider_terminal") and s.get("job_status") == "unfinished"))
+            if get_job(binary, jobs_state, env, cancel_job)["state"] != "running":
+                raise RuntimeError("interruption must not report or accept work")
             if artifact.read_bytes() != b"partial synthetic artifact\n":
                 raise RuntimeError("cancelled worker did not preserve partial artifact")
             watcher.kill()
@@ -201,7 +214,7 @@ def run_drill(binary):
         if len(second["attempts"]) != 2:
             raise RuntimeError("expired cancellation did not auto-reclaim exactly once")
         late = job(binary, jobs_state, "complete", env, check=False, id=cancel_job,
-                   worker="fixture", token=old_token, result="old-token")
+                   worker="hub:lead", token=old_token, result="old-token")
         if late is not None:
             raise RuntimeError("old cancellation token completed after reclaim")
         checks.append("cancelled job stayed unaccepted, preserved partial output, and auto-reclaimed")

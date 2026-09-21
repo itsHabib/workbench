@@ -192,7 +192,7 @@ async function claude() {
     ...(request.permission_mode ? { permissionMode: request.permission_mode } : {}),
     canUseTool: async () => {
       activity('approval_required', { provider_state: 'blocked', error: 'tool requires approval; headless runtime cannot approve it' });
-      return { behavior: 'deny', message: 'Requires operator approval; report the blocker and end this turn.' };
+      return { behavior: 'deny', message: 'This request was not executed: it needs interactive approval, unavailable in this headless turn. Continue authorized independent work with already allowed tools. Report the exact blocked operation if it remains necessary; do not evade a denial.' };
     } };
   // Streaming input enables the SDK control channel; no token streaming needed.
   async function* input() {
