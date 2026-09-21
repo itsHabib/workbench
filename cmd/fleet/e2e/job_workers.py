@@ -84,8 +84,8 @@ def fake_runtime(home):
 
 
 def configure(env, fleet_state, org_state, workspace, jobs_state, job_id):
-    fleet_state.mkdir(parents=True)
-    org_state.mkdir(parents=True)
+    fleet_state.mkdir(parents=True, exist_ok=True)
+    org_state.mkdir(parents=True, exist_ok=True)
     (org_state / "roles.map").write_text(f"{workspace} t1 hub:lead\n")
     entry = {"cwd": str(workspace), "provider": "claude",
              "prompt": "Run the synthetic worker.",
@@ -160,7 +160,8 @@ def run_drill(binary):
             during = get_job(binary, jobs_state, env, restart_job)
             if during.get("state") != "running" or len(during["attempts"]) != 1:
                 raise RuntimeError("killed watcher lost the single running job attempt")
-            expiry = datetime.fromisoformat(old_attempt["expires_at"].replace("Z", "+00:00")).timestamp()
+            renewed_attempt = during["attempts"][-1]
+            expiry = datetime.fromisoformat(renewed_attempt["expires_at"].replace("Z", "+00:00")).timestamp()
             if expiry <= time.time():
                 raise RuntimeError("bridge did not renew its lease while watcher was down")
             watcher = launch(binary, env)
@@ -187,8 +188,11 @@ def run_drill(binary):
             wait_for(lambda: get_job(binary, jobs_state, env, cancel_job).get("state") == "running")
             if artifact.read_bytes() != b"partial synthetic artifact\n":
                 raise RuntimeError("cancelled worker did not preserve partial artifact")
+            watcher.kill()
+            watcher.wait(timeout=5)
             time.sleep(2.2)
             env["FLEET_FAKE_MODE"] = "success"
+            watcher = launch(binary, env)
             second = reported_job(binary, jobs_state, env, cancel_job)
         finally:
             if watcher.poll() is None:
