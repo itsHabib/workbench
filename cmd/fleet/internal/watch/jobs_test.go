@@ -35,13 +35,14 @@ func TestMaxBudgetValidation(t *testing.T) {
 }
 
 func TestJobTTLRequiresExactPositiveInteger(t *testing.T) {
+	state := t.TempDir()
 	for _, value := range []any{0.0, 1.5, "90"} {
-		binding, message := parseJobBinding(fleet.Rec{"state": "/tmp/jobs", "ttl_seconds": value})
+		binding, message := parseJobBinding(fleet.Rec{"state": state, "ttl_seconds": value})
 		if binding != nil || message == "" {
 			t.Fatalf("accepted ttl %#v: %#v %q", value, binding, message)
 		}
 	}
-	binding, message := parseJobBinding(fleet.Rec{"state": "/tmp/jobs"})
+	binding, message := parseJobBinding(fleet.Rec{"state": state})
 	if message != "" || binding.ttlSeconds != 300 {
 		t.Fatalf("default ttl: %#v %q", binding, message)
 	}
