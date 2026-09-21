@@ -42,6 +42,9 @@ func runtimeRow(t deliverTarget, sessions []fleet.Rec) fleet.Rec {
 			row["output"] = output
 		}
 		row["state"], row["error"] = processState(last)
+		if job := fleet.M(last, "job"); job != nil {
+			row["job"] = job
+		}
 		if exit := fleet.ReadJSON(fleet.S(last, "exit_file")); exit != nil {
 			row["exit_code"], row["exited_at"] = exit["exit_code"], exit["at"]
 		}

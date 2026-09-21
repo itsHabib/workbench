@@ -35,7 +35,9 @@ package watch
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -63,6 +65,14 @@ type deliverTarget struct {
 	every          time.Duration
 	instruction    string
 	configError    string
+	maxBudgetUSD   float64
+	job            *jobBinding
+}
+
+type jobBinding struct {
+	state      string
+	id         string
+	ttlSeconds int
 }
 
 // grace reads a duration from the environment, falling back to the default. An
@@ -124,7 +134,22 @@ func parseDeliverTargets(cfg fleet.Rec) []deliverTarget {
 		if err := fleet.MailAddress(address, "address"); err != nil {
 			continue
 		}
-		t := deliverTarget{address: address, cwd: fleet.S(entry, "cwd"), provider: provider, model: fleet.S(entry, "model"), permissionMode: fleet.S(entry, "permission_mode"), fresh: fleet.B(entry, "fresh"), lateTo: fleet.S(entry, "LATE_TO"), instruction: fleet.S(entry, "prompt")}
+		t := deliverTarget{address: address, cwd: fleet.S(entry, "cwd"), provider: provider, model: fleet.S(entry, "model"), permissionMode: fleet.S(entry, "permission_mode"), fresh: fleet.B(entry, "fresh"), lateTo: fleet.S(entry, "LATE_TO"), instruction: fleet.S(entry, "prompt"), maxBudgetUSD: fleet.F(entry, "max_budget_usd")}
+		if raw, exists := entry["jobs"]; exists {
+			jobsEntry, ok := raw.(map[string]any)
+			if !ok {
+				t.configError = "jobs must be an object"
+			} else {
+				ttl := int(fleet.F(jobsEntry, "ttl_seconds"))
+				if ttl == 0 {
+					ttl = 300
+				}
+				t.job = &jobBinding{state: fleet.S(jobsEntry, "state"), id: fleet.S(jobsEntry, "id"), ttlSeconds: ttl}
+				if !filepath.IsAbs(t.job.state) || ttl < 1 || ttl > 3600 {
+					t.configError = "jobs.state must be absolute and jobs.ttl_seconds must be 1..3600"
+				}
+			}
+		}
 		if raw := fleet.S(entry, "every"); raw != "" {
 			var err error
 			t.every, err = time.ParseDuration(raw)
@@ -134,6 +159,9 @@ func parseDeliverTargets(cfg fleet.Rec) []deliverTarget {
 		}
 		if provider != "claude" && provider != "codex" {
 			t.configError = "provider must be claude or codex; command launchers have been removed"
+		}
+		if fleet.Has(entry, "max_budget_usd") && (provider != "claude" || t.maxBudgetUSD <= 0 || math.IsNaN(t.maxBudgetUSD) || math.IsInf(t.maxBudgetUSD, 0)) {
+			t.configError = "max_budget_usd must be positive and finite and is supported only by claude"
 		}
 		if fleet.Has(entry, "cmd") {
 			t.configError = "cmd is unsupported; configure provider instead"
@@ -241,7 +269,7 @@ func deliverLocked(t deliverTarget, now, mailGrace float64) ([]fleet.Rec, bool, 
 	}
 	assignment := pendingAssignment(t, last)
 	periodic := t.every > 0 && now-fleet.F(last, "at") >= t.every.Seconds()
-	if len(rows) == 0 && assignment == "" && !periodic {
+	if len(rows) == 0 && assignment == "" && !periodic && t.job == nil {
 		return observed, launched, nil
 	}
 	launched = true
@@ -314,6 +342,9 @@ func launch(t deliverTarget, rows []fleet.Rec, now float64, assignment string) [
 		return append(observed, release(t.address, reserved)...)
 	}
 	pid, err := run(t, wakePrompt(t, rows, assignment), assignment, now)
+	if errors.Is(err, errNoEligibleJob) {
+		return append(observed, release(t.address, reserved)...)
+	}
 	if err != nil {
 		observed = append(observed, fleet.Rec{"at": fleet.Now(), "what": "mail-delivery-failed", "address": t.address, "cwd": t.cwd, "ids": ids, "error": err.Error()})
 		return append(observed, release(t.address, reserved)...)

@@ -3,6 +3,7 @@ package watch
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/fleet/internal/fleet"
+	"github.com/itsHabib/workbench/cmd/fleet/internal/jobs"
 	"github.com/itsHabib/workbench/cmd/fleet/internal/provider"
 )
 
@@ -53,10 +55,39 @@ func launchPresent(r fleet.Rec) bool {
 	if state == "running" || state == "unknown" {
 		return true
 	}
+	if fleet.S(r, "status") == "claiming" {
+		return false
+	}
+	if fleet.S(r, "status") == "claimed" {
+		return jobReservationActive(r)
+	}
 	if fleet.S(r, "provider") == "" || fleet.S(r, "status") == "failed" || fleet.S(r, "status") == "released" {
 		return false
 	}
 	return !providerTerminal(r)
+}
+
+func jobReservationActive(r fleet.Rec) bool {
+	binding := fleet.M(r, "job")
+	if binding == nil {
+		return true
+	}
+	result, err := (&jobs.Store{Dir: fleet.S(binding, "state")}).Execute(jobs.Request{Op: "get", ID: fleet.S(binding, "id")})
+	if err != nil {
+		return true
+	}
+	job, ok := result.(jobs.Job)
+	if !ok || len(job.Attempts) == 0 {
+		return true
+	}
+	if job.State != "running" {
+		return false
+	}
+	attempt := job.Attempts[len(job.Attempts)-1]
+	if attempt.Token != fleet.S(binding, "token") {
+		return false
+	}
+	return time.Now().Before(attempt.ExpiresAt)
 }
 
 // Placement already carries the work. Waking its worker does not require a second
@@ -102,10 +133,6 @@ func run(t deliverTarget, text, assignment string, now float64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	resume, err := resumeSession(t, last)
-	if err != nil {
-		return 0, err
-	}
 	path := launchPath(t)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return 0, err
@@ -121,19 +148,46 @@ func run(t deliverTarget, text, assignment string, now float64) (int, error) {
 	}
 	defer func() { _ = log.Close() }()
 	exitFile := attempt + ".exit.json"
-	if err := fleet.WriteJSON(attempt+".meta.json", fleet.Rec{"at": now, "address": t.address, "cwd": t.cwd, "output": logPath, "provider": t.provider, "attempt": attempt, "state_file": attempt + ".state.json"}); err != nil {
-		return 0, err
-	}
 	if assignment == "" {
 		assignment = fleet.S(last, "assignment")
 	}
-	r := fleet.Rec{"at": now, "address": t.address, "cwd": t.cwd, "status": "starting", "assignment": assignment, "exit_file": exitFile, "output": logPath, "provider": t.provider, "attempt": attempt, "state_file": attempt + ".state.json", "cancel_file": attempt + ".cancel", "work_identity": workIdentity(t), "resume": resume}
-	cmd, err := providerCommand(attempt+".request.json", map[string]any{"provider": t.provider, "cwd": t.cwd, "model": t.model, "permission_mode": t.permissionMode, "resume": resume, "prompt": text, "attempt": attempt, "state_file": attempt + ".state.json", "cancel_file": attempt + ".cancel", "output": logPath, "trace": attempt + ".trace.jsonl"})
+	r := fleet.Rec{"at": now, "address": t.address, "cwd": t.cwd, "status": "claiming", "assignment": assignment, "exit_file": exitFile, "output": logPath, "provider": t.provider, "attempt": attempt, "state_file": attempt + ".state.json", "cancel_file": attempt + ".cancel", "work_identity": workIdentity(t)}
+	job, err := claimJob(t, last, r, path)
+	if err != nil {
+		return 0, err
+	}
+	resume, err := resumeSessionForJob(t, last, job)
+	if err != nil {
+		return 0, err
+	}
+	r["resume"] = resume
+	request := map[string]any{"provider": t.provider, "cwd": t.cwd, "model": t.model, "permission_mode": t.permissionMode, "resume": resume, "prompt": jobPrompt(text, job), "attempt": attempt, "state_file": attempt + ".state.json", "cancel_file": attempt + ".cancel", "output": logPath, "trace": attempt + ".trace.jsonl"}
+	if t.maxBudgetUSD > 0 {
+		request["max_budget_usd"] = t.maxBudgetUSD
+	}
+	if job != nil {
+		executable, executableErr := os.Executable()
+		if executableErr != nil {
+			return 0, executableErr
+		}
+		attemptRecord := job.Attempts[len(job.Attempts)-1]
+		request["job"] = map[string]any{"executable": executable, "state": t.job.state, "id": job.ID, "worker": t.address, "token": attemptRecord.Token, "ttl_seconds": t.job.ttlSeconds}
+	}
+	meta := fleet.Rec{"at": now, "address": t.address, "cwd": t.cwd, "output": logPath, "provider": t.provider, "attempt": attempt, "state_file": attempt + ".state.json"}
+	if binding := fleet.M(r, "job"); binding != nil {
+		meta["job_id"], meta["job_state"], meta["job_worker"] = binding["id"], binding["state"], binding["worker"]
+		meta["job_token"], meta["job_ttl_seconds"] = binding["token"], binding["ttl_seconds"]
+	}
+	if err := fleet.WriteJSON(attempt+".meta.json", meta); err != nil {
+		return 0, err
+	}
+	cmd, err := providerCommand(attempt+".request.json", request)
 	if err != nil {
 		return 0, err
 	}
 	// Preparation cannot start a process. Publish uncertainty only after it
 	// succeeds, immediately before Start; a preparation error remains retryable.
+	r["status"] = "starting"
 	if err := fleet.WriteJSON(path, r); err != nil {
 		return 0, err
 	}
@@ -154,6 +208,85 @@ func run(t deliverTarget, text, assignment string, now float64) (int, error) {
 	}
 	go recordExit(cmd, exitFile, observed, t.address)
 	return cmd.Process.Pid, nil
+}
+
+var errNoEligibleJob = errors.New("no eligible job")
+
+func claimJob(t deliverTarget, last, launch fleet.Rec, path string) (*jobs.Job, error) {
+	if t.job == nil {
+		return nil, nil
+	}
+	key := fleet.S(last, "job_retry_key")
+	if fleet.S(last, "status") != "claiming" || key == "" {
+		key = fmt.Sprintf("watch-%d-%d", os.Getpid(), time.Now().UnixNano())
+	}
+	previous := last
+	if saved := fleet.M(last, "previous_launch"); saved != nil {
+		previous = saved
+	}
+	if previous != nil {
+		launch["previous_launch"] = previous
+	}
+	launch["job_retry_key"] = key
+	if err := fleet.WriteJSON(path, launch); err != nil {
+		return nil, err
+	}
+	result, err := (&jobs.Store{Dir: t.job.state}).Execute(jobs.Request{Op: "claim", ID: t.job.id, Key: key, Worker: t.address, TTLSeconds: t.job.ttlSeconds})
+	if err != nil {
+		if errors.Is(err, jobs.ErrNotFound) || errors.Is(err, jobs.ErrConflict) {
+			record := launch
+			if previous != nil {
+				record = previous
+			} else {
+				record["status"], record["error"] = "failed", err.Error()
+			}
+			if writeErr := fleet.WriteJSON(path, record); writeErr != nil {
+				return nil, fmt.Errorf("claim: %v; record failure: %w", err, writeErr)
+			}
+			return nil, errNoEligibleJob
+		}
+		return nil, err
+	}
+	job, ok := result.(jobs.Job)
+	if !ok || len(job.Attempts) == 0 {
+		return nil, fmt.Errorf("job claim returned an invalid result")
+	}
+	attempt := job.Attempts[len(job.Attempts)-1]
+	launch["job"] = fleet.Rec{"id": job.ID, "state": t.job.state, "worker": t.address, "token": attempt.Token, "ttl_seconds": t.job.ttlSeconds}
+	launch["status"] = "claimed"
+	if err := fleet.WriteJSON(path, launch); err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
+func jobPrompt(text string, job *jobs.Job) string {
+	if job == nil {
+		return text
+	}
+	lines := []string{text, fmt.Sprintf("[fleet] durable job %s: %s", job.ID, job.Brief)}
+	for _, attempt := range job.Attempts[:len(job.Attempts)-1] {
+		if attempt.Result != "" {
+			lines = append(lines, "[fleet] prior result: "+attempt.Result)
+		}
+		if attempt.Evidence != "" {
+			lines = append(lines, "[fleet] retry evidence: "+attempt.Evidence)
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func resumeSessionForJob(t deliverTarget, last fleet.Rec, job *jobs.Job) (string, error) {
+	if previous := fleet.M(last, "previous_launch"); previous != nil {
+		last = previous
+	}
+	if job != nil && fleet.S(fleet.M(last, "job"), "id") != job.ID {
+		return "", nil
+	}
+	if job != nil && !providerTerminal(last) {
+		return "", nil
+	}
+	return resumeSession(t, last)
 }
 
 func recordExit(cmd *exec.Cmd, path, observed, address string) {
