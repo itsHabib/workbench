@@ -7,8 +7,8 @@ run with only Python's standard library:
 python fixture/server.py --port 8765 --state /tmp/import-state
 ```
 
-The browser form at `/` should let a human upload a CSV with exactly the
-`title,body` header. The API accepts `POST /imports` with JSON
+Serve a useful browser landing page at `/`; the API is the acceptance surface
+and does not require a particular HTML form element. It accepts `POST /imports` with JSON
 `{"request_id":"r1","csv":"title,body\\n..."}` and returns a stable
 import identifier. `GET /imports/ID` returns the normalized imported documents.
 Malformed JSON, missing fields, a wrong CSV header, or malformed CSV are 400.
@@ -28,8 +28,10 @@ scope and preserve earlier behavior:
   not leave a false successful import, and retrying the same request after a
   transient failure must either commit once or return a clear error.
 
-Acceptance is frozen in `../oracle.py`. Run it against the completed app before
-claiming success. The synthetic names and text in `sample.csv` are public test
+Acceptance is an external black-box check. It uses more than 200 deterministic
+synthetic CSV rows, exact data equality, malformed inputs, concurrent retries,
+restart persistence, and a locked SQLite database write. The synthetic names
+and text in `sample.csv` are public test
 data; no credentials, network services, or third-party dependencies are
 needed. Keep the implementation small enough for a cheap model team to finish
 in roughly 5–10 minutes.

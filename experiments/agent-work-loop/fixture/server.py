@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS imports (
 
 def initialize_database(state_dir: Path) -> Path:
     state_dir.mkdir(parents=True, exist_ok=True)
-    database = state_dir / "imports.sqlite3"
+    database = state_dir / "imports.sqlite"
     with sqlite3.connect(database) as connection:
         connection.execute(SCHEMA)
     return database
