@@ -39,4 +39,4 @@ async function main() {
   }
 }
 
-main().catch(error => { console.error(error.message); process.exitCode = 1; });
+main().catch(error => { console.error(`Browser upload/render check failed: ${error.message}`); process.exitCode = 1; });

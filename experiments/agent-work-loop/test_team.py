@@ -2,6 +2,7 @@
 import fcntl
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 import tempfile
 import time
@@ -105,8 +106,10 @@ class LifecycleTests(unittest.TestCase):
             check = root / 'acceptance'
             check.write_text('#!/usr/bin/env python3\nfrom pathlib import Path\nprint("missing documents array")\nraise SystemExit(0 if Path("passes").exists() else 1)\n')
             check.chmod(0o700)
-            config = {'check': str(check), 'check_sha256': hashlib.sha256(check.read_bytes()).hexdigest()}
-            with patch.object(team, 'fleet') as fleet, patch.object(team, 'command', return_value='exact-head'):
+            config = {'check': str(check), 'check_sha256': hashlib.sha256(check.read_bytes()).hexdigest(), 'budget_usd': 10}
+            source = {'base_head': 'exact-head', 'verified_commit': 'exact-head', 'source_sha256': 'checked-source'}
+            with patch.object(team, 'fleet') as fleet, patch.object(team, 'checkout_evidence', return_value=source), \
+                    patch.object(team, 'write_report', return_value={'usage': {}}):
                 self.assertEqual(team.check_completion(root, config, time.monotonic() + 10), 'running')
                 self.assertEqual(fleet.call_count, 3)
                 self.assertFalse((root / 'DONE.md').exists())
@@ -120,6 +123,57 @@ class LifecycleTests(unittest.TestCase):
                 self.assertEqual(team.check_completion(root, config, time.monotonic() + 10), 'verified')
                 self.assertIn('exact-head', (root / 'VERIFIED.md').read_text())
                 self.assertEqual(json.loads((root / 'checks/2.json').read_text())['exit_code'], 0)
+
+    def test_reported_budget_blocks_reopening_after_rejection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'coordinator').mkdir()
+            (root / 'DONE.md').write_text('wrong completion')
+            check = root / 'acceptance'
+            check.write_text('#!/usr/bin/env python3\nraise SystemExit(1)\n')
+            check.chmod(0o700)
+            config = {'check': str(check), 'check_sha256': hashlib.sha256(check.read_bytes()).hexdigest(), 'budget_usd': 2}
+            with patch.object(team, 'fleet') as fleet, \
+                    patch.object(team, 'checkout_evidence', return_value={'base_head': 'head'}), \
+                    patch.object(team, 'write_report', return_value={'usage': {'reported_cost_usd': 2}}):
+                self.assertEqual(team.check_completion(root, config, time.monotonic() + 10), 'reported_budget_reached')
+                fleet.assert_not_called()
+                self.assertTrue((root / 'checks/1-DONE.md').exists())
+
+    def test_done_cannot_pause_an_incumbent_before_ownership(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'run.json').write_text(json.dumps({'fleet': '/tmp/fleet', 'minutes': 1}))
+            (root / 'DONE.md').write_text('claim')
+            status = {'heartbeat': {'pid': 123, 'at': 101}, 'workers': [{'state': 'running'}]}
+            process = Mock(pid=456, returncode=1)
+            process.poll.side_effect = [None, 1]
+            with patch.object(team.subprocess, 'Popen', return_value=process), \
+                    patch.object(team.time, 'sleep'), \
+                    patch.object(team, 'fleet', return_value=json.dumps(status)), \
+                    patch.object(team, 'write_report', return_value={'usage': {}}), \
+                    patch.object(team, 'pause_starts') as pause, patch.object(team, 'stop') as stop:
+                self.assertEqual(team.monitor(root), 1)
+                pause.assert_not_called()
+                stop.assert_not_called()
+
+    def test_dirty_content_is_not_attributed_to_the_committed_revision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                subprocess.run(['git', '-C', str(root), *args], check=True, capture_output=True)
+            git('init')
+            (root / 'answer').write_text('fail')
+            git('add', 'answer')
+            git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'failing answer')
+            committed = team.checkout_evidence(root)
+            (root / 'answer').write_text('pass')
+            dirty = team.checkout_evidence(root)
+            self.assertIsNone(dirty['verified_commit'])
+            self.assertEqual(dirty['base_head'], committed['verified_commit'])
+            self.assertNotEqual(dirty['source_sha256'], committed['source_sha256'])
+            (root / 'extra').write_text('new source')
+            self.assertNotEqual(team.checkout_evidence(root)['source_sha256'], dirty['source_sha256'])
 
     def test_changed_external_check_is_not_a_model_repair_request(self):
         with tempfile.TemporaryDirectory() as directory:
