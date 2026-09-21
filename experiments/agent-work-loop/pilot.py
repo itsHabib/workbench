@@ -7,8 +7,8 @@ coordinator session is observed. It does not score model output or modify the
 acceptance oracle.
 
 Usage: ``python3 pilot.py --run-dir /path/to/prepared-run``. The directory must
-contain ``run.json`` and a sibling ``team.py``; a sibling ``oracle.py`` is
-hashed into the private manifest when present. All raw manifest and event data
+contain ``run.json``; the fixture-local ``team.py`` and ``oracle.py`` beside this
+runner are used. All raw manifest and event data
 stays under the run directory.
 """
 
@@ -18,8 +18,10 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import signal
 import time
 
+HERE = Path(__file__).resolve().parent
 
 REQUESTS = {
     45: "Add JSON document input to POST /imports: {request_id, documents:[{title,body}]}. Preserve exact strings and existing CSV/retry behavior.",
@@ -32,14 +34,11 @@ def read_json(path):
     return json.loads(path.read_text())
 
 
-def sibling(run_dir, name, source=None):
-    candidates = [run_dir / name, run_dir.parent / name]
-    if source:
-        candidates.append(source / "experiments" / "agent-work-loop" / name)
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate.resolve()
-    raise FileNotFoundError(f"prepared run is missing sibling {name}")
+def fixture_file(name):
+    candidate = HERE / name
+    if not candidate.is_file():
+        raise FileNotFoundError(f"fixture is missing {name}")
+    return candidate.resolve()
 
 
 def git_revision(source):
@@ -86,8 +85,17 @@ def source_edit(path):
         name = line[3:].strip().strip('"')
         if name == ".claude/temp" or name.startswith(".claude/temp/"):
             continue
+        parts = Path(name).parts
+        if "__pycache__" in parts or name.endswith(".pyc"):
+            continue
         changed.append(line)
     return "\n".join(changed)
+
+
+def pilot_environment(state, org_state):
+    env = os.environ.copy()
+    env.update({"FLEET_STATE": str(state), "ORG_STATE": str(org_state), "FLEET_WATCH": "off"})
+    return env
 
 
 def edit_fresh(config, address, value):
@@ -114,12 +122,11 @@ def run(run_dir):
     config = read_json(run_config)
     source = Path(config["source"]).resolve()
     fleet = Path(config["fleet"]).resolve()
-    team = sibling(run_dir, "team.py", source)
-    oracle = sibling(run_dir, "oracle.py", source)
+    team = fixture_file("team.py")
+    oracle = fixture_file("oracle.py")
     coordinator = run_dir / "coordinator"
     state = (run_dir / "fleet").resolve()
     org_state = run_dir / "org"
-    runtime = run_dir / "runtime"
     events = run_dir / "pilot-events.jsonl"
     manifest = {
         "mode": "jobs-integration-pilot",
@@ -132,9 +139,7 @@ def run(run_dir):
         "started_at": time.time(),
     }
     (run_dir / "pilot-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    env = os.environ.copy()
-    env.update({"FLEET_RUNTIME_HOME": str(runtime), "FLEET_STATE": str(state),
-                "ORG_STATE": str(org_state), "FLEET_WATCH": "off"})
+    env = pilot_environment(state, org_state)
     requests_dir = run_dir / "REQUESTS.md"
     log_path = run_dir / "pilot-launcher.log"
     log = log_path.open("w")
@@ -147,6 +152,7 @@ def run(run_dir):
     fresh_pending = False
     fresh_previous = None
     fresh_reset = False
+    interrupted = False
     try:
         while process.poll() is None:
             elapsed = time.monotonic() - started
@@ -163,6 +169,8 @@ def run(run_dir):
                     for row in rows:
                         address = row.get("address", "")
                         if not address.startswith("worker-"):
+                            continue
+                        if row.get("provider_state") != "running":
                             continue
                         cwd = row.get("cwd")
                         if not cwd or not source_edit(Path(cwd)):
@@ -192,12 +200,12 @@ def run(run_dir):
             time.sleep(0.25)
     except KeyboardInterrupt:
         event(events, "pilot_interrupted")
-        raise
+        interrupted = True
     finally:
         if process.poll() is None:
-            process.terminate()
+            process.send_signal(signal.SIGINT if interrupted else signal.SIGTERM)
             try:
-                process.wait(timeout=5)
+                process.wait(timeout=40 if interrupted else 5)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=5)
@@ -205,6 +213,7 @@ def run(run_dir):
     event(events, "launcher_exited", code=process.returncode,
           elapsed_seconds=round(time.monotonic() - started, 2),
           fresh_reset=fresh_reset, oracle_sha256=manifest["oracle_sha256"])
+    return process.returncode
 
 
 def main():
@@ -212,8 +221,8 @@ def main():
     parser.add_argument("--run-dir", required=True, type=Path,
                         help="prepared run directory containing run.json and team.py")
     args = parser.parse_args()
-    run(args.run_dir)
+    return run(args.run_dir)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
