@@ -27,6 +27,7 @@ its choice in `PLAN.md`. There is no mandatory helper team or automatic success 
 - `REPORT.md`: queue states and known provider costs.
 - `PLAN.md`: the coordinator's decisions and next steps.
 - `DONE.md`: the coordinator's completion claim, revision and checks; independently verify it.
+- `VERIFIED.md` and `checks/`: an optional caller-owned acceptance check and retained failures.
 - `fleet/watch/delivery/`: raw prompts, provider traces, lease-bound results and exits. Private.
 
 The launcher defaults to Haiku, a $1 **per-turn** SDK limit, a $10 reported-cost stop
@@ -34,6 +35,14 @@ threshold and 30 minutes. Set `--model`, `--turn-budget-usd`, `--budget-usd` or 
 for the actual work. Reported cost arrives at turn completion, so the run threshold can
 overshoot by active turns (up to three); provider cost limits are not prepaid reservations.
 Missing costs remain unknown. Engineering, evaluation and local compute are excluded.
+
+Pass `--check /absolute/path/to/executable` to close the feedback loop. It runs from the
+integration checkout after agents have stopped. Exit 0 verifies the result; exit 1
+archives the failed completion, saves the output and puts that failure directly into
+a fresh coordinator wake. Further repairs use the same run budget. Other exit codes
+stop the run as a check failure. The executable is fingerprinted at preparation; its
+dependencies and the agents still run as trusted local code. This is not a security
+boundary. A check only proves the behavior it actually tests.
 
 Ctrl-C stops future starts, asks current turns to stop and preserves work. A killed
 launcher leaves its watcher running; inspect the private state before resuming:
@@ -67,6 +76,22 @@ The oracle checks exact data, malformed input, concurrent retries, a locked SQLi
 and persistence across a service restart. Browser QA is a separate real user-path check.
 A green oracle alone does not establish a good UI or production readiness. The seed is
 expected to fail. Raw provider records must be scrubbed before public publication.
+
+`check-importer.py` composes the API oracle with a real browser upload check: quoted
+multiline values, visible invalid-input errors and a 390px layout. Install Playwright
+outside worker checkouts, set `NODE_PATH` to that installation and install its Chromium
+browser (or set `PLAYWRIGHT_CHANNEL=chrome` for an installed Chrome). Pass this executable
+as `--check` when preparing the workload. The oracle stays outside the source clone.
+
+For timed requests and the two recovery faults, prepare with `--prepare-only`, then run:
+
+```sh
+python3 experiments/agent-work-loop/pilot.py --run-dir /absolute/path/to/prepared/run
+```
+
+This preserves the original request/fault schedule and records source/check hashes.
+The historical first pilot kept subsequent coordinator wakes fresh; this runner resets
+that flag after the first replacement session starts. Do not treat the two as identical.
 
 The larger [comparison protocol](https://github.com/itsHabib/specialist-workshop/blob/docs/agent-lessons-next-trial/docs/experiments/agent-work-loop.md)
 compares native messages plus a task file against jobs, then evaluates targeted boost
