@@ -210,10 +210,11 @@ def run(root):
         status = json.loads(fleet(root, 'watch', 'status', '--json'))
         if status['watcher'] not in ('never_seen', 'stopped'):
             raise RuntimeError('this run already has a live watcher; inspect it before replacing its launcher')
-        if (root / 'DONE.md').exists():
+        config = json.loads((root / 'run.json').read_text())
+        jobs = json.loads(fleet(root, 'job', 'list', '--state', root / 'jobs')) if config.get('check') else []
+        if completion_ready(root, config, status, jobs):
             if cleanup_pending(status):
                 raise RuntimeError('completion claim has unresolved provider cleanup')
-            config = json.loads((root / 'run.json').read_text())
             phase = check_completion(root, config, time.monotonic() + config['minutes'] * 60)
             if phase != 'running':
                 write_report(root, phase)
@@ -243,6 +244,15 @@ def checkout_evidence(checkout):
         digest.update(json.dumps([name, mode, hashlib.sha256(content).hexdigest()]).encode() + b'\n')
     return dict(base_head=head, verified_commit=head if not status else None,
                 working_tree=status, source_sha256=digest.hexdigest())
+
+
+def completion_ready(root, config, status, jobs):
+    if (root / 'DONE.md').exists():
+        return True
+    # An explicit acceptance check can decide a settled result without requiring
+    # the model to remember another completion marker. Unfinished jobs still wait.
+    return bool(config.get('check') and jobs and not cleanup_pending(status)
+                and all(job['state'] == 'accepted' for job in jobs))
 
 
 def check_completion(root, config, deadline):
@@ -275,7 +285,8 @@ def check_completion(root, config, deadline):
         return 'verified'
     if result.returncode != 1:
         raise RuntimeError(f'acceptance check failed to run (exit {result.returncode}); inspect {output}')
-    (root / 'DONE.md').rename(checks / f'{number}-DONE.md')
+    if (root / 'DONE.md').exists():
+        (root / 'DONE.md').rename(checks / f'{number}-DONE.md')
     feedback = (f'External acceptance REJECTED completion based on {source["base_head"]}. The old PLAN/DONE is not proof. '
                 f'Repair the failure, preserve the requirements and add a regression. '
                 f'When repaired and checked, write {root}/DONE.md and end this turn; the launcher will rerun acceptance. '
@@ -326,7 +337,7 @@ def monitor(root):
             if time.monotonic() >= deadline:
                 phase = 'time_limit'
                 break
-            if (root / 'DONE.md').exists():
+            if completion_ready(root, config, status, report['jobs']):
                 if phase != 'coordinator_finishing':
                     pause_starts(root, 'coordinator finishing')
                     phase = 'coordinator_finishing'

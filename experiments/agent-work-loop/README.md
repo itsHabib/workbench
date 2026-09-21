@@ -43,6 +43,9 @@ a fresh coordinator wake. Further repairs use the same run budget. Other exit co
 stop the run as a check failure. The executable is fingerprinted at preparation; its
 dependencies and the agents still run as trusted local code. This is not a security
 boundary. A check only proves the behavior it actually tests.
+Receipts identify the checked source hash and whether the checkout was dirty; a pass
+on dirty files is never attributed to the base commit. Source changes during a check
+stop verification. Keep test state outside the source checkout.
 
 Ctrl-C stops future starts, asks current turns to stop and preserves work. A killed
 launcher leaves its watcher running; inspect the private state before resuming:

@@ -128,9 +128,16 @@ def run(run_dir):
     state = (run_dir / "fleet").resolve()
     org_state = run_dir / "org"
     events = run_dir / "pilot-events.jsonl"
+    if events.exists() or (run_dir / "pilot-manifest.json").exists():
+        raise ValueError('pilot already recorded here; preserve it and prepare a new run directory')
     manifest = {
         "mode": "jobs-integration-pilot",
-        "source_revision": git_revision(source),
+        "workload_revision": git_revision(source),
+        "harness_revision": git_revision(HERE),
+        "model": config['model'],
+        "turn_budget_usd": config['turn_budget_usd'],
+        "reported_budget_stop_usd": config['budget_usd'],
+        "deadline_minutes": config['minutes'],
         "oracle_sha256": sha256(oracle),
         "team_sha256": sha256(team),
         "request_schedule_seconds": list(REQUESTS),

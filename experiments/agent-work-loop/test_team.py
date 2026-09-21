@@ -12,6 +12,15 @@ import team
 
 
 class LifecycleTests(unittest.TestCase):
+    def test_explicit_check_can_finish_settled_jobs_without_a_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settled = {'workers': [{'state': 'exited', 'provider_terminal': True}]}
+            self.assertTrue(team.completion_ready(root, {'check': 'external'}, settled, [{'state': 'accepted'}]))
+            self.assertFalse(team.completion_ready(root, {'check': 'external'}, settled, [{'state': 'reported'}]))
+            self.assertFalse(team.completion_ready(root, {}, settled, [{'state': 'accepted'}]))
+            self.assertFalse(team.completion_ready(root, {'check': 'external'}, settled, []))
+            self.assertFalse(team.completion_ready(root, {'check': 'external'}, {'workers': [{'state': 'running'}]}, [{'state': 'accepted'}]))
     def test_existing_permissions_and_hooks_survive_preparation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -69,7 +78,7 @@ class LifecycleTests(unittest.TestCase):
             with patch.object(team.subprocess, 'Popen', return_value=replacement), \
                     patch.object(team.time, 'sleep'), \
                     patch.object(team, 'fleet', return_value=json.dumps(incumbent)), \
-                    patch.object(team, 'write_report', return_value={'usage': {}}), \
+                    patch.object(team, 'write_report', return_value={'usage': {}, 'jobs': []}), \
                     patch.object(team, 'stop') as stop:
                 self.assertEqual(team.monitor(root), 1)
                 stop.assert_not_called()
@@ -89,7 +98,7 @@ class LifecycleTests(unittest.TestCase):
             with patch.object(team.subprocess, 'Popen', return_value=process), \
                     patch.object(team.time, 'sleep'), patch.object(team.time, 'time', return_value=100), \
                     patch.object(team, 'fleet', side_effect=[json.dumps(x) for x in observations]) as fleet, \
-                    patch.object(team, 'write_report', return_value={'usage': {}}), \
+                    patch.object(team, 'write_report', return_value={'usage': {}, 'jobs': []}), \
                     patch.object(team, 'pause_starts') as pause, patch.object(team, 'stop'):
                 self.assertEqual(team.monitor(root), 0)
                 pause.assert_called_once()
@@ -109,7 +118,7 @@ class LifecycleTests(unittest.TestCase):
             config = {'check': str(check), 'check_sha256': hashlib.sha256(check.read_bytes()).hexdigest(), 'budget_usd': 10}
             source = {'base_head': 'exact-head', 'verified_commit': 'exact-head', 'source_sha256': 'checked-source'}
             with patch.object(team, 'fleet') as fleet, patch.object(team, 'checkout_evidence', return_value=source), \
-                    patch.object(team, 'write_report', return_value={'usage': {}}):
+                    patch.object(team, 'write_report', return_value={'usage': {}, 'jobs': []}):
                 self.assertEqual(team.check_completion(root, config, time.monotonic() + 10), 'running')
                 self.assertEqual(fleet.call_count, 3)
                 self.assertFalse((root / 'DONE.md').exists())
@@ -151,7 +160,7 @@ class LifecycleTests(unittest.TestCase):
             with patch.object(team.subprocess, 'Popen', return_value=process), \
                     patch.object(team.time, 'sleep'), \
                     patch.object(team, 'fleet', return_value=json.dumps(status)), \
-                    patch.object(team, 'write_report', return_value={'usage': {}}), \
+                    patch.object(team, 'write_report', return_value={'usage': {}, 'jobs': []}), \
                     patch.object(team, 'pause_starts') as pause, patch.object(team, 'stop') as stop:
                 self.assertEqual(team.monitor(root), 1)
                 pause.assert_not_called()
