@@ -12,8 +12,8 @@ with working <-> paused on the side. Three switches describe the store:
     stale_read   the "is it pending?" check is not atomic with the grant, so a
                  peer may acquire on the strength of an observation made earlier
 
-    python3 model.py      # prints each configuration and any counterexample;
-                          # exits 1 if a verdict is not the expected one
+    python3 rooms-model.py   # prints each configuration and any counterexample;
+                             # exits 1 if a verdict is not the expected one
 """
 
 import sys
