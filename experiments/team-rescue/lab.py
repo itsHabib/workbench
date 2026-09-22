@@ -428,11 +428,14 @@ def mutate(run, command, message=""):
     with locked(run):
         state = load(run)
         if command == "abandon":
+            # The status guard leads: account() mutates the in-memory state, and a
+            # guard that fires after it leaves the caller reasoning about a state
+            # that was edited and then thrown away.
+            if state["status"] not in ("interrupted", "ready"):
+                raise ValueError("only an interrupted trial can be abandoned/resumed")
             if state["pending"]:
                 account(state, state["pending"], {"error": "interrupted outcome unknown", "usage": None})
                 state["pending"] = None
-            if state["status"] not in ("interrupted", "ready"):
-                raise ValueError("only an interrupted trial can be abandoned/resumed")
             state["status"] = "ready"
             state["human_interventions"] += 1
             state["history"].append({"role": "human", "message": "Explicitly continue after interruption: " + message})
