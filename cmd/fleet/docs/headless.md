@@ -96,6 +96,9 @@ provider default. Claude's optional `permission_mode` accepts `default`, `accept
 approval: an unhandled approval/input request is recorded and refused. Provider sandbox,
 permissions, repository hooks, review and Gate still apply.
 
+Optional `jobs` binds a worker to the durable queue; see [jobs/README.md](jobs/README.md).
+Claude targets may set a positive `max_budget_usd` for the SDK per-turn limit.
+
 `every` requires a positive Go duration and a nonempty `prompt`. It schedules from the previous
 launch time. Mail and assignments can wake sooner; a running attempt still excludes another
 launch in the same directory. No default turn cap, lifetime or guessed budget is added. Keep

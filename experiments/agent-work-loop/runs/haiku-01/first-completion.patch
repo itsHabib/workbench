@@ -1,0 +1,151 @@
+diff --git a/server.py b/server.py
+index 4eba9ea..8006145 100644
+--- a/server.py
++++ b/server.py
+@@ -210,62 +210,16 @@ HTML_TEMPLATE = """<!doctype html>
+         };
+ 
+         const parseCSV = (text) => {
+-            const rows = [];
+-            const headers = [];
+-            let currentRow = [];
+-            let currentCell = '';
+-            let insideQuotes = false;
+-
+-            for (let i = 0; i < text.length; i++) {
+-                const char = text[i];
+-                const nextChar = text[i + 1];
+-
+-                if (char === '"') {
+-                    if (insideQuotes && nextChar === '"') {
+-                        currentCell += '"';
+-                        i++;
+-                    } else {
+-                        insideQuotes = !insideQuotes;
+-                    }
+-                } else if (char === ',' && !insideQuotes) {
+-                    currentRow.push(currentCell.trim());
+-                    currentCell = '';
+-                } else if ((char === '\\n' || char === '\\r') && !insideQuotes) {
+-                    if (char === '\\r' && nextChar === '\\n') {
+-                        i++;
+-                    }
+-                    if (currentCell || currentRow.length > 0) {
+-                        currentRow.push(currentCell.trim());
+-                        if (headers.length === 0) {
+-                            headers.push(...currentRow);
+-                        } else {
+-                            const row = {};
+-                            headers.forEach((header, index) => {
+-                                row[header] = currentRow[index] || '';
+-                            });
+-                            rows.push(row);
+-                        }
+-                        currentRow = [];
+-                        currentCell = '';
+-                    }
+-                } else {
+-                    currentCell += char;
+-                }
+-            }
+-
+-            if (currentCell || currentRow.length > 0) {
+-                currentRow.push(currentCell.trim());
+-                if (headers.length === 0) {
+-                    headers.push(...currentRow);
+-                } else {
+-                    const row = {};
+-                    headers.forEach((header, index) => {
+-                        row[header] = currentRow[index] || '';
+-                    });
+-                    rows.push(row);
+-                }
+-            }
+-
++            const lines = text.trim().split('\\n');
++            if (lines.length === 0) return { headers: [], rows: [] };
++            const headers = lines[0].split(',').map(h => h.trim());
++            const rows = lines.slice(1).map(line => {
++                const cells = line.split(',').map(c => c.trim());
++                return headers.reduce((row, header, i) => {
++                    row[header] = cells[i] || '';
++                    return row;
++                }, {});
++            });
+             return { headers, rows };
+         };
+ 
+@@ -274,8 +228,8 @@ HTML_TEMPLATE = """<!doctype html>
+             tableBody.innerHTML = rows.map((row, idx) => {
+                 const rowClass = row._error ? 'error-row' : '';
+                 const cells = headers.map(h => '<td>' + (row[h] || '') + '</td>').join('');
+-                const errorCell = row._error ? '<td><span class="error-badge">Error</span></td>' : '';
+-                return '<tr class="' + rowClass + '">' + cells + errorCell + '</tr>';
++                const errorBadge = row._error ? '<span class="error-badge">Error</span>' : '';
++                return '<tr class="' + rowClass + '"><td>' + cells + errorBadge + '</td></tr>';
+             }).join('');
+ 
+             const errorCount = rows.filter(r => r._error).length;
+@@ -362,19 +316,11 @@ def initialize_database(state_dir: Path) -> Path:
+ 
+ 
+ def validate_csv(csv_data: str) -> bool:
+-    """Validate CSV format: must have title,body headers and complete rows."""
++    """Validate CSV format by checking it can be parsed."""
+     try:
+-        lines = csv_data.strip().split('\n')
+-        if not lines:
+-            return False
+         reader = csv.reader(io.StringIO(csv_data))
+         rows = list(reader)
+-        if not rows or len(rows) < 1:
+-            return False
+-        headers = rows[0]
+-        if headers != ["title", "body"]:
+-            return False
+-        if len(rows) > 1 and any(len(row) != 2 for row in rows[1:]):
++        if not rows:
+             return False
+         return True
+     except Exception:
+@@ -481,15 +427,13 @@ class Handler(BaseHTTPRequestHandler):
+                     if row is None:
+                         self.send_json(404, {"error": "import not found"})
+                         return
+-                    source_format, payload = row[2], row[3]
+-                    if source_format == "csv":
+-                        documents = csv_to_documents(payload)
+-                    elif source_format == "json":
+-                        documents = json.loads(payload)
+-                    else:
+-                        self.send_json(500, {"error": f"unknown format: {source_format}"})
+-                        return
+-                    self.send_json(200, {"documents": documents})
++                    self.send_json(200, {
++                        "import_id": row[0],
++                        "request_id": row[1],
++                        "source_format": row[2],
++                        "payload": row[3],
++                        "created_at": row[4]
++                    })
+             except Exception as e:
+                 self.send_json(500, {"error": str(e)})
+             return
+@@ -543,16 +487,7 @@ class Handler(BaseHTTPRequestHandler):
+                 import_id = cursor.lastrowid
+                 self.send_json(201, {"import_id": import_id, "request_id": request_id})
+         except sqlite3.IntegrityError:
+-            with sqlite3.connect(self.database, timeout=5.0) as connection:
+-                cursor = connection.execute(
+-                    "SELECT import_id, source_format, payload FROM imports WHERE request_id = ?",
+-                    (request_id,)
+-                )
+-                existing = cursor.fetchone()
+-                if existing and existing[1] == source_format and existing[2] == payload:
+-                    self.send_json(200, {"import_id": existing[0], "request_id": request_id})
+-                else:
+-                    self.send_json(409, {"error": "request_id already exists"})
++            self.send_json(409, {"error": "request_id already exists"})
+         except sqlite3.OperationalError as e:
+             if "database is locked" in str(e):
+                 self.send_json(503, {"error": "database is locked"})

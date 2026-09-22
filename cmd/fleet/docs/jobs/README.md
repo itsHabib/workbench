@@ -54,20 +54,45 @@ Numeric loopback binding and Host checks prevent accidentally exposing this trus
 API. There is no tenant authentication: local processes can act as any worker/coordinator.
 Do not expose this listener through a public tunnel.
 
-## Use existing Fleet workers
+## Connect jobs to actual agents
 
-Give an existing `fleet watch` worker the [worker card](worker.md) and a coordinator the
-[coordinator card](coordinator.md). Configure their normal Fleet addresses/recurring wakes
-as in [headless.md](../headless.md). Workers pull claims on their next wake. Submitting a
-job does not itself send Fleet mail or spawn a session; the coordinator can use existing
-`fleet send` for a prompt wake. A crash between submit and send leaves durable queued work
-for the next scheduled poll. Do not maintain a second assignment in `fleet request` for
-the same job. Fleet runtime occupancy and job claims are different records, not competing
-sources of job ownership.
+Add `jobs` to an existing `deliver.json` worker. The watcher claims before launch;
+the provider bridge renews while working and reports the final result. Empty queues
+start no model. The coordinator still decides acceptance.
 
-Start with one coordinator and two workers. Prefer cheaper workers for bounded tasks;
-use the coordinator's judgment to escalate difficult work. Use `fleet run-report` for
-provider usage and job `metrics` for queue state. Usage is not yet attributed to job IDs.
+```json
+{
+  "worker-1": {
+    "cwd": "/absolute/path/to/worker",
+    "provider": "claude",
+    "model": "haiku",
+    "max_budget_usd": 1,
+    "prompt": "Implement the supplied job; commit changes and report checks and limitations.",
+    "jobs": {"state": "/absolute/path/to/jobs", "id": "eligible-job", "ttl_seconds": 300}
+  }
+}
+```
+
+Use the existing address binding described in [headless.md](../headless.md). Omit `id`
+to pull the oldest eligible job. Bind only work that can safely run in that worker's
+checkout. A different job starts a fresh conversation; a same-job retry can resume
+its observed terminal session. Prior results and retry feedback travel in the prompt.
+Do not tell an automatically bound worker to claim or complete the job itself.
+
+The bridge records the returned summary, Git revision and dirty status, actual provider
+session, raw trace reference and reported usage. It does not commit files or run acceptance
+checks for the coordinator. A failed report retains the artifact for reconciliation.
+Lease renewal failure requests provider interruption and prevents reporting success.
+Claims survive watcher replacement because renewal runs with the provider bridge.
+
+`max_budget_usd` is optional, positive, and Claude-only; it passes the SDK's per-turn
+limit. It is not a fleet-wide spending account. `fleet run-report --json` includes job IDs
+for bound worker attempts; missing provider usage remains unknown.
+
+For a complete local setup, use the [goal launcher](../../../../experiments/agent-work-loop/README.md).
+It provisions one coordinator and two available workers using these same primitives.
+The [coordinator card](coordinator.md) remains editable prose. Manual CLI/HTTP workers
+may still use [worker.md](worker.md); automatic binding is optional.
 
 ## Failure semantics
 

@@ -1,0 +1,332 @@
+{
+  "kind": "supervised-local-integration",
+  "provider_models": [
+    "claude-haiku-4-5-20251001"
+  ],
+  "initial_runtime_revision": "a217493500d65cc3044f13f059f980b14c287309",
+  "frozen_api_oracle_sha256": "aacf8357c074a9767ed0e4506ddc1619a99a1393163d56ffc6e8fbd3392d5fad",
+  "first_completion": {
+    "revision": "e23849dd4eaf08a2846b19ae8ba954debf49486a",
+    "reported_cost_usd": 2.1626589000000003,
+    "oracle": {
+      "error": "valid rows mismatch: expected 240 exact rows, got None",
+      "ok": false,
+      "seed": 730251,
+      "url": "http://127.0.0.1:8765"
+    }
+  },
+  "final": {
+    "revision": "bafe6546d595a32157d64cb1712e36f3e0c37233",
+    "phase": "verified",
+    "reported_cost_usd": 3.6660443000000003,
+    "cost_known": 20,
+    "attempt_count": 20,
+    "states": {
+      "accepted": 4
+    },
+    "files_sha256": {
+      "server.py": "2f6d85172a5e4dd45a6fe975463dc4dc48f669ed40b10642ea8e2647d2f9d908",
+      "test_app.py": "d3e9d361f53f0b4962e54465b4149000ff2f2cddb882df6cdbc604219ee5ac67",
+      "sample.csv": "932a68bcbc65d5ab0a94e9c929fec3874bbe424304aa2beb5ae11a0e0d782293"
+    },
+    "api_repair_check": {
+      "ok": true,
+      "seed": 730251,
+      "url": "http://127.0.0.1:8765"
+    }
+  },
+  "jobs": [
+    {
+      "id": "core-server-job",
+      "state": "accepted",
+      "attempts": 2
+    },
+    {
+      "id": "browser-ui-job",
+      "state": "accepted",
+      "attempts": 1
+    },
+    {
+      "id": "json-and-export-job",
+      "state": "accepted",
+      "attempts": 1
+    },
+    {
+      "id": "sqlite-lock-handling-job",
+      "state": "accepted",
+      "attempts": 1
+    }
+  ],
+  "attempts": [
+    {
+      "address": "coordinator:team",
+      "cost_usd": 0.1124074,
+      "turns": 17.0,
+      "exit_code": 0.0,
+      "reason": "success",
+      "state": "exited"
+    },
+    {
+      "address": "worker-1",
+      "job_id": "core-server-job",
+      "cost_usd": 0.0455034,
+      "turns": 10.0,
+      "exit_code": 130.0,
+      "reason": "error_during_execution",
+      "state": "exited"
+    },
+    {
+      "address": "worker-2",
+      "job_id": "browser-ui-job",
+      "cost_usd": 0.12319440000000001,
+      "turns": 15.0,
+      "exit_code": 0.0,
+      "reason": "success",
+      "state": "exited"
+    },
+    {
+      "address": "coordinator:team",
+      "cost_usd": 0.1117599,
+      "turns": 11.0,
+      "exit_code": 130.0,
+      "reason": "error_during_execution",
+      "state": "exited"
+    },
+    {
+      "address": "worker-1",
+      "job_id": "core-server-job",
+      "cost_usd": 0.10062310000000002,
+      "turns": 13.0,
+      "exit_code": 0.0,
+      "reason": "success",
+      "state": "exited"
+    },
+    {
+      "address": "coordinator:team",
+      "cost_usd": 0.0429352,
+      "turns": 7.0,
+      "exit_code": 0.0,
+      "reason": "success",
+      "state": "exited"
+    },
+    {
+      "address": "coordinator:team",
+      "cost_usd": 0.13772790000000001,
+      "turns": 20.0,
+      "exit_code": 0.0,
+      "reason": "success",
+      "state": "exited"
+    },
+    {
+      "address": "coordinator:team",
+      "cost_usd": 0.3041787,
+      "turns": 40.0,
+      "exit_code": 0.0,
+      "reason": "success",
+      "state": "exited"
+    },
+    {
+      "address": "worker-1",
+      "job_id": "json-and-export-job",
+      "cost_usd": 0.16083200000000003,
+      "turns": 18.0,
+      "exit_code": 0.0,
+      "reason": "success",
+      "state": "exited"
+    },
+    {
+      "address": "coordinator:team",
+      "cost_usd": 0.3180044000000001,
+      "turns": 24.0,
+      "exit_code": 0.0,
+      "reason": "success",
+      "state": "exited"
+    },
+    {
+      "address": "coordinator:team",
+      "cost_usd": 0.2194663,
+      "turns": 29.0,
+      "exit_code": 0.0,
+      "reason": "success",
+      "state": "exited"
+    },
+    {
+      "address": "worker-1",
+      "job_id": "sqlite-lock-handling-job",
+      "cost_usd": 0.19475530000000002,
+      "turns": 23.0,
+      "exit_code": 0.0,
+      "reason": "success",
+      "state": "exited"
+    },
+    {
+      "address": "coordinator:team",
+      "cost_usd": 0.0980679,
+      "turns": 15.0,
+      "exit_code": 0.0,
+      "reason": "success",
+      "state": "exited"
+    },
+    {
+      "address": "coordinator:team",
+      "cost_usd": 0.193203,
+      "turns": 28.0,
+      "exit_code": 130.0,
+      "reason": "error_during_execution",
+      "state": "exited"
+    },
+    {
+      "address": "coordinator:team",
+      "cost_usd": 0.0718479,
+      "turns": 10.0,
+      "exit_code": 0.0,
+      "reason": "success",
+      "state": "exited"
+    },
+    {
+      "address": "coordinator:team",
+      "cost_usd": 0.2782308,
+      "turns": 30.0,
+      "exit_code": 0.0,
+      "reason": "success",
+      "state": "exited"
+    },
+    {
+      "address": "coordinator:team",
+      "cost_usd": 0.2456782,
+      "turns": 24.0,
+      "exit_code": 0.0,
+      "reason": "success",
+      "state": "exited"
+    },
+    {
+      "address": "coordinator:team",
+      "cost_usd": 0.2725892000000001,
+      "turns": 26.0,
+      "exit_code": 0.0,
+      "reason": "success",
+      "state": "exited"
+    },
+    {
+      "address": "coordinator:team",
+      "cost_usd": 0.48835969999999995,
+      "turns": 54.0,
+      "exit_code": 0.0,
+      "reason": "success",
+      "state": "exited"
+    },
+    {
+      "address": "coordinator:team",
+      "cost_usd": 0.1466796,
+      "turns": 17.0,
+      "exit_code": 130.0,
+      "reason": "error_during_execution",
+      "state": "exited"
+    }
+  ],
+  "events": [
+    {
+      "kind": "request_arrived",
+      "scheduled_seconds": 45,
+      "elapsed_seconds": 45.11
+    },
+    {
+      "kind": "worker_interrupted",
+      "address": "worker-1",
+      "job_id": "core-server-job",
+      "code": 0
+    },
+    {
+      "kind": "request_arrived",
+      "scheduled_seconds": 90,
+      "elapsed_seconds": 90.19
+    },
+    {
+      "kind": "coordinator_fresh_requested",
+      "code": 0
+    },
+    {
+      "kind": "request_arrived",
+      "scheduled_seconds": 150,
+      "elapsed_seconds": 150.06
+    },
+    {
+      "kind": "targeted_execution_help",
+      "operator_intervention": true,
+      "reason": "coordinator parked on unavailable shell helper commands despite allowed Read/Glob/Python/git -C"
+    },
+    {
+      "kind": "launcher_exited",
+      "code": 0,
+      "elapsed_seconds": 853.59
+    },
+    {
+      "kind": "external_verification_rejected",
+      "operator_intervention": true
+    },
+    {
+      "kind": "direct_rejection_wake",
+      "operator_intervention": true,
+      "reason": "resumed coordinator skipped REQUESTS and reasserted stale completion; rejection now included directly in fresh wake prompt"
+    },
+    {
+      "kind": "browser_check_added",
+      "operator_intervention": true,
+      "reason": "manual browser QA found quoted multiline CSV display corruption; added executable UI check without changing frozen API oracle. Automatic rejection loop tested next."
+    },
+    {
+      "kind": "check_diagnostic_clarified",
+      "operator_intervention": true,
+      "reason": "Same browser assertions; prefixed rejection with browser upload/render so coordinator can distinguish UI failure from passing API. Initial response added backend tests without fixing UI."
+    },
+    {
+      "kind": "completion_handoff_clarified",
+      "operator_intervention": true,
+      "reason": "Repair wake omitted direct completion marker reminder; coordinator repaired UI but ended repeatedly without DONE. Clarified handoff in next wake and reusable feedback template."
+    },
+    {
+      "kind": "remove_completion_marker_dependency",
+      "operator_intervention": true,
+      "reason": "Stop for launcher update: optional external check now evaluates quiescent accepted jobs even if coordinator omits DONE. Existing API and browser assertions unchanged."
+    }
+  ],
+  "external_checks": [
+    {
+      "number": 1,
+      "exit_code": 0,
+      "source": {
+        "base_head": "e1abd151233810c100def006e17fa2350477aef1",
+        "limitation": "early receipt recorded HEAD only; clean checkout verified separately"
+      },
+      "output": "{\"ok\": true, \"seed\": 910733, \"url\": \"http://127.0.0.1:8765\"}\n"
+    },
+    {
+      "number": 2,
+      "exit_code": 1,
+      "source": {
+        "base_head": "e1abd151233810c100def006e17fa2350477aef1",
+        "limitation": "early receipt recorded HEAD only; clean checkout verified separately"
+      },
+      "output": "one quoted multiline document must display as one row\n\n2 !== 1\n\n"
+    },
+    {
+      "number": 3,
+      "exit_code": 0,
+      "source": {
+        "base_head": "bafe6546d595a32157d64cb1712e36f3e0c37233",
+        "verified_commit": "bafe6546d595a32157d64cb1712e36f3e0c37233",
+        "working_tree": "",
+        "source_sha256": "fc885404eb3d7612c355a0a97be8bf7aab91fb365dd7f810bbe2a1686310bde3"
+      },
+      "output": "{\"ok\":true,\"checks\":[\"quoted multiline upload\",\"exact displayed values\",\"390px layout\",\"visible invalid-upload error\"]}\n{\"ok\": true, \"seed\": 119337, \"url\": \"http://127.0.0.1:8765\"}\n"
+    }
+  ],
+  "limits": [
+    "No matched native-session baseline",
+    "Supervised with recorded human-agent steering and harness changes",
+    "Provider cost excludes engineering, evaluation, smoke setup and local compute",
+    "No Rooms or cloud run",
+    "Public receipts are scrubbed summaries, not raw provider transcripts"
+  ],
+  "elapsed_seconds_including_engineering_pauses": 2264.9
+}

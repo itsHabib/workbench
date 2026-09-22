@@ -4,7 +4,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
 
 // The request file is complete before this process exists; argv holds only its path.
@@ -17,6 +18,79 @@ let interrupt = async () => {};
 let close = async () => {};
 let timer;
 let interruptTimeout;
+let jobTimer;
+let jobPending = Promise.resolve();
+let jobError;
+let finalText = '';
+let modelUsage;
+const execFileAsync = promisify(execFile);
+
+// The provider bridge owns renewal so replacing the watcher cannot abandon a
+// live worker's lease. Queue claims still happen atomically in the Go watcher.
+async function jobOperation(op, extra = {}) {
+  const j = request.job;
+  const args = ['job', op, '--state', j.state, '--id', j.id, '--worker', j.worker,
+    '--token', j.token, '--ttl', String(j.ttl_seconds)];
+  for (const [key, value] of Object.entries(extra)) args.push('--' + key, value);
+  const { stdout } = await execFileAsync(j.executable, args, {
+    timeout: Math.min(5000, Math.floor(j.ttl_seconds * 1000 / 3)), maxBuffer: 8 * 1024 * 1024,
+  });
+  return JSON.parse(stdout);
+}
+function validJob(j) {
+  return object(j) && ['executable', 'state'].every(k => typeof j[k] === 'string' && path.isAbsolute(j[k])) &&
+    ['id', 'worker', 'token'].every(k => typeof j[k] === 'string' && j[k].trim()) &&
+    Number.isInteger(j.ttl_seconds) && j.ttl_seconds >= 1 && j.ttl_seconds <= 3600;
+}
+async function startJob() {
+  if (!request.job) return;
+  if (!validJob(request.job)) throw new Error('invalid job lease binding');
+  await jobOperation('renew'); // A delayed launch must not start with an expired claim.
+  publish({ job_id: request.job.id, job_status: 'running' });
+  jobTimer = setInterval(() => {
+    // Serialize operations; never overlap a renewal with result reporting.
+    jobPending = jobPending.then(async () => {
+      if (jobError) return;
+      try { await jobOperation('renew'); }
+      catch (e) {
+        jobError = e.message;
+        publish({ job_status: 'lease_lost', job_error: jobError });
+        await cancel();
+      }
+    });
+  }, request.job.ttl_seconds * 1000 / 3);
+}
+async function gitOutput(args) {
+  try {
+    const { stdout } = await execFileAsync('git', ['--no-optional-locks', '-C', request.cwd, ...args], { timeout: 5000, maxBuffer: 1024 * 1024 });
+    return stdout.trim();
+  } catch { return null; } // Missing Git evidence stays unknown; it never earns acceptance.
+}
+async function finishJob() {
+  if (!request.job) return;
+  if (jobError) throw new Error('job lease lost: ' + jobError);
+  if (!state.provider_terminal || state.provider_state !== 'completed' || interrupted) {
+    publish({ job_status: 'unfinished' });
+    return;
+  }
+  const result = { schema: 'fleet.job-result.v1', job_id: request.job.id,
+    attempt: request.attempt, cwd: request.cwd, provider: request.provider,
+    session: state.provider_session, trace: state.trace,
+    head: await gitOutput(['rev-parse', 'HEAD']),
+    working_tree: await gitOutput(['status', '--porcelain=v1']),
+    summary: finalText.slice(-16384), usage: modelUsage ?? null,
+    limitation: 'Agent-reported work; requires independent acceptance. Dirty files remain in the workspace.' };
+  clearInterval(jobTimer);
+  await jobPending;
+  if (jobError) throw new Error('job lease lost: ' + jobError);
+  if (interrupted) { publish({ job_status: 'unfinished' }); return; }
+  const resultPath = request.state_file + '.result.json';
+  fs.writeFileSync(resultPath, JSON.stringify(result) + '\n', {mode: 0o600, flag: 'wx'});
+  publish({ job_result: resultPath }); // Retain the artifact even if reporting fails.
+  await jobOperation('complete', { result: JSON.stringify({ artifact: resultPath, cwd: result.cwd, head: result.head }) });
+  publish({ job_status: 'reported' });
+}
+
 function publish(fields = {}) {
   Object.assign(state, fields);
   const tmp = request.state_file + '.tmp';
@@ -113,11 +187,12 @@ async function claude() {
       spawnProvider(command, args, { cwd, env, signal, stdio: ['pipe', 'pipe', 'inherit'] }),
     systemPrompt: { type: 'preset', preset: 'claude_code' },
     ...(request.model ? { model: request.model } : {}),
+    ...(request.max_budget_usd ? { maxBudgetUsd: request.max_budget_usd } : {}),
     ...(request.resume ? { resume: request.resume } : {}),
     ...(request.permission_mode ? { permissionMode: request.permission_mode } : {}),
     canUseTool: async () => {
       activity('approval_required', { provider_state: 'blocked', error: 'tool requires approval; headless runtime cannot approve it' });
-      return { behavior: 'deny', message: 'Requires operator approval; report the blocker and end this turn.' };
+      return { behavior: 'deny', message: 'This request was not executed: it needs interactive approval, unavailable in this headless turn. Continue authorized independent work with already allowed tools. Report the exact blocked operation if it remains necessary; do not evade a denial.' };
     } };
   // Streaming input enables the SDK control channel; no token streaming needed.
   async function* input() {
@@ -134,6 +209,7 @@ async function claude() {
         if (request.resume && message.session_id !== request.resume) throw new Error('provider resumed a different session');
         state.provider_session = message.session_id;
       }
+      if (message.type === 'system' && message.model) state.provider_model = message.model;
       activity(message.type + (message.subtype ? '/' + message.subtype : ''),
         state.provider_state === 'starting' ? { provider_state: 'running' } : {});
       if (typeof message.error === 'string') state.error = message.error;
@@ -141,6 +217,8 @@ async function claude() {
       if (message.type !== 'result') continue;
       if (!state.provider_session) throw new Error('Claude returned no observed session identity');
       terminal = true;
+      finalText = typeof message.result === 'string' ? message.result : '';
+      modelUsage = { reported_cost_usd: message.total_cost_usd ?? null, turns: message.num_turns ?? null, model: state.provider_model ?? request.model ?? null };
       publish({provider_terminal: true});
       publish({ provider_state: interrupted ? 'interrupted' : message.is_error ? 'failed' : 'completed',
         reason: message.subtype, ...(message.is_error ? {} : settledError()) });
@@ -253,6 +331,8 @@ async function codex() {
       const p = msg.params || {};
       if (p.threadId && state.provider_session && p.threadId !== state.provider_session) return;
       event(msg);
+      if (msg.method === 'item/completed' && p.item?.type === 'agentMessage') finalText = p.item.text || finalText;
+      if (msg.method === 'thread/tokenUsage/updated') modelUsage = { token_usage: p.tokenUsage, reported_cost_usd: null, model: request.model ?? null };
       activity(msg.method);
       if (msg.method === 'turn/started') {
         publish({ turn_may_have_been_sent: true, provider_turn: p.turn.id, provider_state: interrupted ? 'interrupting' : 'running' });
@@ -308,13 +388,17 @@ async function codex() {
 try {
   publish();
   if (!['claude', 'codex'].includes(request.provider)) throw new Error(`unsupported provider: ${request.provider}`);
+  await startJob();
   if (request.provider === 'claude') await claude();
   if (request.provider === 'codex') await codex();
+  await finishJob();
 } catch (e) {
   publish({ provider_state: 'failed', error: interruptTimeout || e.message });
-  output({ type: 'result', session_id: state.provider_session, subtype: 'runtime_error', is_error: true, error: request.check ? 'Codex setup inspection failed; check provider compatibility and availability' : e.message });
+  output({ type: 'result', session_id: state.provider_session, subtype: 'runtime_error', is_error: true, ...(modelUsage ? {total_cost_usd: modelUsage.reported_cost_usd, num_turns: modelUsage.turns} : {}), error: request.check ? 'Codex setup inspection failed; check provider compatibility and availability' : e.message });
   process.exitCode = interrupted ? 130 : 1;
 } finally {
   clearInterval(control);
+  clearInterval(jobTimer);
+  await jobPending;
   clearTimeout(timer);
 }

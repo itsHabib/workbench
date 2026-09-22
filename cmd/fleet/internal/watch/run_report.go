@@ -59,6 +59,9 @@ func attemptReport(path string, at float64) fleet.Rec {
 	row := fleet.Rec{"output": path, "output_at": at, "state": "exit_unknown"}
 	if meta := fleet.ReadJSON(strings.TrimSuffix(path, ".log") + ".meta.json"); meta != nil {
 		row["address"], row["cwd"], row["started_at"] = meta["address"], meta["cwd"], meta["at"]
+		if id := fleet.S(meta, "job_id"); id != "" {
+			row["job_id"] = id
+		}
 	}
 	exit := fleet.ReadJSON(strings.TrimSuffix(path, ".log") + ".exit.json")
 	if exit != nil {

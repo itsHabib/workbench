@@ -252,15 +252,7 @@ func (s Store) save(d snapshot) error {
 	if err = f.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(f.Name(), filepath.Join(s.Dir, "jobs.json")); err != nil {
-		return err
-	}
-	dir, err := os.Open(s.Dir)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
+	return publishSnapshot(f.Name(), filepath.Join(s.Dir, "jobs.json"), s.Dir)
 }
 func (d snapshot) index(id string) int {
 	for i := range d.Jobs {
