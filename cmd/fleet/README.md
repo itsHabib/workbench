@@ -330,12 +330,12 @@ binary lives under `$FLEET_HOME/bin` (default `~/.fleet/bin/fleet`).
 
 Equivalent MCP tools are `fleet_request` (requires caller cwd) and `fleet_status`.
 The supervisor chooses a stable request ID before calling. Same repo + same ID +
-same branch/worker/lead/brief returns the existing assignment without renewing its
+same branch/worker/lead/brief/relationship/input contract returns the existing assignment without renewing its
 timestamp, resetting its initial head, posting a message or acquiring a lease.
 Full-ID retries remain valid after branch deletion or session-record cleanup; a
 short session prefix must still resolve uniquely. Supply a branch name, not a
 numbered change. Changing the payload under that ID refuses. A second assignment for the same
-branch refuses, as do unknown ownership, an unavailable worker and an applicable
+branch and relationship refuses, as do unknown ownership, an unavailable worker and an applicable
 stop flag. A recorded assignment is not an execution reservation; the ordinary
 hook/lease guard still controls actual effects.
 
@@ -349,6 +349,42 @@ records manually to reuse IDs. Ordinary legacy records remain supported.
 `request` is effectful and performs the existing lazy key migration before lease
 inspection. Retained collisions refuse; failed requests can leave a migration
 marker/lock but no new assignment. No GitHub write or worker launch occurs.
+
+### Optional evidence at entry (POC)
+
+For a consequential handoff, name the receiving relationship and its required
+input evidence. Ordinary requests need no extra phases or flags:
+
+```sh
+fleet request my-branch --id verify-1 --as verify --worker SESSION \
+  --for lead:project --brief 'Verify the acceptance examples at the pinned revision.' \
+  --head FULL_COMMIT_SHA --requires unit,integration
+```
+
+`--as` defaults to `implementation`. `--head` and `--requires` are paired;
+the SHA must be full and lowercase, and the kinds distinct. The same optional
+fields are `as`, `head`, `requires` on `fleet_request` in MCP.
+
+Before recording, Fleet checks the local branch revision, each requested receipt's
+repository/head/kind and clean-tree provenance, and agreement between its history
+and published latest record. Every selected verdict must pass. A later pass may
+supersede a failure; missing, damaged, torn or contradictory publication refuses.
+This strict reader requires receipt history from the current receipt producer;
+it does not import cached GitHub evidence or upgrade a legacy single-file receipt.
+
+The assignment retains an `entry` object with `head`, sorted `requires` and the
+selected `receipts`. Receipt publication serializes with admission in this build.
+An identical retry returns the original historical admission without rereading
+mutable evidence. A different contract under the same ID refuses. Another
+relationship can coexist without replacing earlier work or transferring its lease.
+`fleet status --json` exposes the packet and local revision drift; it does not
+grant permission or prove tests ran. Consumers recheck the pinned revision before
+working. Local state is trusted, not cryptographically authenticated.
+
+Try the [self-contained example](examples/relay-boundary/README.md) and read the
+[design and limits](../../docs/features/relay-boundary/spec.md). The current
+request lifecycle still cannot retire/replace an occupied receiving relationship;
+this POC does not schedule repair attempts or bypass that protection.
 
 ### Observe without claiming more than the evidence
 

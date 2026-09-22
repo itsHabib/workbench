@@ -15,13 +15,17 @@ var requestID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$`)
 // CmdRequest declares an immutable, retry-safe assignment in the existing dispatch
 // store. It does not launch, message, accept, acquire a lease, or place a worktree.
 // The ID is repo-scoped. Replaying it preserves the original head and timestamp.
-func CmdRequest(change, id, worker, lead, brief string) error {
+func CmdRequest(change, id, worker, lead, brief string, options ...RequestOptions) error {
 	if fleet.ReadOnly {
 		return refuse("fleet request: cannot dispatch in read-only mode")
 	}
 
 	if !requestID.MatchString(id) || worker == "" || lead == "" || strings.TrimSpace(brief) == "" {
 		return refuse("fleet request: requires --id (1-96 letters/digits/._-), --worker, --for and --brief")
+	}
+	rel, entry, err := requestOptions(options)
+	if err != nil {
+		return err
 	}
 	branch := strings.TrimSpace(change)
 	if branch == "" || strings.HasPrefix(branch, "#") {
@@ -37,40 +41,15 @@ func CmdRequest(change, id, worker, lead, brief string) error {
 	requested := branch
 	branch, found := canonicalBranch(cwd(), branch)
 	wanted := fleet.Rec{"request_id": id, "repo": rid, "change": branch, "requested": requested,
-		"worker": worker, "for": lead, "brief": strings.TrimSpace(brief), "relationship": "implementation"}
+		"worker": worker, "for": lead, "brief": strings.TrimSpace(brief), "relationship": rel}
+	if entry != nil {
+		wanted["entry"] = entry
+	}
 	replay := false
-	err := fleet.KeyLock("dispatch", func() error {
-		// Reconcile existing keys like legacy dispatch; a retained collision refuses.
-		fleet.MigrateLegacyKeys()
-		if fleet.MigrationPending() {
-			return refuse("fleet request: legacy ownership needs reconciliation before assigning work")
-		}
-		rows, err := strictDispatchRows()
-		if err != nil {
-			return err
-		}
-		for _, row := range rows {
-			if fleet.S(row, "repo") != rid {
-				continue
-			}
-			if fleet.S(row, "request_id") == id {
-				if err := validateReplay(row, wanted, worker, found); err != nil {
-					return err
-				}
-				replay = true
-				return nil
-			}
-		}
-		_, _, head, err := resolveDispatchTarget("request", branch)
-		if err != nil {
-			return err
-		}
-		sid, err := findSession(worker)
-		if err != nil {
-			return err
-		}
-		wanted["worker"] = sid
-		return createRequest(rows, wanted, head)
+	err = fleet.KeyLock("dispatch", func() error {
+		var recordErr error
+		replay, recordErr = recordRequest(wanted, worker, found)
+		return recordErr
 	})
 	if err != nil {
 		return err
@@ -81,6 +60,33 @@ func CmdRequest(change, id, worker, lead, brief string) error {
 	}
 	say("Queued: %s. Assignment recorded; worker delivery and acceptance are not yet confirmed.", branch)
 	return nil
+}
+
+func recordRequest(wanted fleet.Rec, worker string, found bool) (bool, error) {
+	// Reconcile existing keys like legacy dispatch; a retained collision refuses.
+	fleet.MigrateLegacyKeys()
+	if fleet.MigrationPending() {
+		return false, refuse("fleet request: legacy ownership needs reconciliation before assigning work")
+	}
+	rows, err := strictDispatchRows()
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		if fleet.S(row, "repo") == fleet.S(wanted, "repo") && fleet.S(row, "request_id") == fleet.S(wanted, "request_id") {
+			return true, validateReplay(row, wanted, worker, found)
+		}
+	}
+	_, _, head, err := resolveDispatchTarget("request", fleet.S(wanted, "change"))
+	if err != nil {
+		return false, err
+	}
+	sid, err := findSession(worker)
+	if err != nil {
+		return false, err
+	}
+	wanted["worker"] = sid
+	return false, createRequest(rows, wanted, head)
 }
 
 // A full retained ID survives session cleanup; prefixes must still resolve
@@ -111,6 +117,9 @@ func sameRequest(a, b fleet.Rec, resolved bool) bool {
 			return false
 		}
 	}
+	if !sameEntry(a, b) {
+		return false
+	}
 	if resolved {
 		return fleet.S(a, "change") == fleet.S(b, "change")
 	}
@@ -118,10 +127,10 @@ func sameRequest(a, b fleet.Rec, resolved bool) bool {
 }
 
 func createRequest(rows []fleet.Rec, wanted fleet.Rec, head string) error {
-	rid, branch, sid := fleet.S(wanted, "repo"), fleet.S(wanted, "change"), fleet.S(wanted, "worker")
+	rid, branch, sid, rel := fleet.S(wanted, "repo"), fleet.S(wanted, "change"), fleet.S(wanted, "worker"), fleet.S(wanted, "relationship")
 	for _, row := range rows {
-		if fleet.S(row, "repo") == rid && fleet.S(row, "change") == branch {
-			return refuse("fleet request: this branch already has an assignment; inspect `fleet status` and existing work before assigning again")
+		if fleet.S(row, "repo") == rid && fleet.S(row, "change") == branch && fleet.S(row, "relationship") == rel {
+			return refuse("fleet request: this branch and relationship already have an assignment; inspect `fleet status` and existing work before assigning again")
 		}
 	}
 	if !fleet.SessionAlive(fleet.SessionRecord(sid)) {
@@ -134,7 +143,7 @@ func createRequest(rows []fleet.Rec, wanted fleet.Rec, head string) error {
 		if fleet.MigrationPending() {
 			return refuse("fleet request: legacy ownership changed during dispatch; inspect state")
 		}
-		if _, err := os.Lstat(dispatchFile(rid, branch, "implementation")); !os.IsNotExist(err) {
+		if _, err := os.Lstat(dispatchFile(rid, branch, rel)); !os.IsNotExist(err) {
 			return refuse("fleet request: assignment path already exists or is unreadable; inspect state")
 		}
 		if reason := fleet.CheckStop(key, branch, sid); reason != "" {
@@ -147,13 +156,20 @@ func createRequest(rows []fleet.Rec, wanted fleet.Rec, head string) error {
 		if lease != nil && fleet.S(lease, "session") != sid {
 			return refuse("fleet request: another session holds this branch; no assignment or takeover performed")
 		}
-		wanted["at"], wanted["head_at_dispatch"], wanted["by"] = fleet.Now(), head, dispatcher("")
-		if err := fleet.WriteJSON(dispatchFile(rid, branch, "implementation"), wanted); err != nil {
-			return err
+		if fleet.M(wanted, "entry") != nil {
+			return fleet.KeyLock("receipts", func() error { return admitRequest(wanted) })
 		}
-		fleet.ObserveAction("dispatch", wanted)
-		return nil
+		return publishRequest(wanted, head)
 	})
+}
+
+func publishRequest(wanted fleet.Rec, head string) error {
+	wanted["at"], wanted["head_at_dispatch"], wanted["by"] = fleet.Now(), head, dispatcher("")
+	if err := fleet.WriteJSON(dispatchFile(fleet.S(wanted, "repo"), fleet.S(wanted, "change"), fleet.S(wanted, "relationship")), wanted); err != nil {
+		return err
+	}
+	fleet.ObserveAction("dispatch", wanted)
+	return nil
 }
 
 // strictDispatchRows refuses gaps instead of letting a damaged row disappear and
@@ -181,6 +197,9 @@ func strictDispatchRows() ([]fleet.Rec, error) {
 			ids, ok := id.(string)
 			if !ok || !requestID.MatchString(ids) || fleet.S(row, "worker") == "" || fleet.S(row, "for") == "" || fleet.F(row, "at") <= 0 {
 				return nil, fmt.Errorf("assignment evidence damaged: %s", entry.Name())
+			}
+			if err := validateRecordedEntry(row); err != nil {
+				return nil, fmt.Errorf("assignment evidence damaged: %s: %w", entry.Name(), err)
 			}
 		}
 		rows = append(rows, row)
@@ -217,16 +236,24 @@ func canonicalBranch(dir, cand string) (string, bool) {
 
 func dispatchRequest(args []string) error {
 	vals := map[string]string{}
-	for _, flag := range []string{"--id", "--worker", "--for", "--brief"} {
+	for _, flag := range []string{"--id", "--worker", "--for", "--brief", "--as", "--head", "--requires"} {
+		if i := index(args, flag); i >= 0 && index(args[i+1:], flag) >= 0 {
+			return refuse("fleet request: %s must appear only once", flag)
+		}
 		value, err := optValue(args, flag, "request")
 		if err != nil {
 			return err
 		}
+		if contains(args, flag) && value == "" {
+			return refuse("fleet request: %s needs a non-empty value", flag)
+		}
 		vals[flag] = value
 	}
-	pos := positional(args, "--id", "--worker", "--for", "--brief")
+	pos := positional(args, "--id", "--worker", "--for", "--brief", "--as", "--head", "--requires")
 	if len(pos) != 1 {
 		return refuse("usage: fleet request <branch> --id <request> --worker <session> --for <lead> --brief <text>")
 	}
-	return CmdRequest(pos[0], vals["--id"], vals["--worker"], vals["--for"], vals["--brief"])
+	return CmdRequest(pos[0], vals["--id"], vals["--worker"], vals["--for"], vals["--brief"], RequestOptions{
+		Relationship: vals["--as"], Head: vals["--head"], Requires: vals["--requires"],
+	})
 }

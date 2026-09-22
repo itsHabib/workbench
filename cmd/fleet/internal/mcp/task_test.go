@@ -44,3 +44,16 @@ func TestTaskStatusMCPDoesNotInitializeOrMigrate(t *testing.T) {
 		t.Fatal("legacy moved", err)
 	}
 }
+
+func TestTaskEntryMCPRejectsEmptyAndMistypedRequirements(t *testing.T) {
+	for _, key := range []string{"as", "head", "requires"} {
+		args := map[string]any{"change": "task", "id": "one", "worker": "worker", "for": "lead", "brief": "check", "cwd": t.TempDir(), key: ""}
+		if err := requestTool(args); err == nil || !strings.Contains(err.Error(), "non-empty") {
+			t.Fatalf("%s silently disabled: %v", key, err)
+		}
+		args[key] = 7
+		if err := checkArguments("fleet_request", args); err == nil {
+			t.Fatalf("non-string %s ignored", key)
+		}
+	}
+}

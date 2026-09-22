@@ -135,6 +135,12 @@ fleet receipt ACTUAL_COMMIT_SHA implementation pass "Actual checks run and obser
 fleet done ACTUAL_COMMIT_SHA --kind implementation
 ```
 
+A receiving assignment can optionally demand named receipts before it is queued:
+`fleet request ... --as verify --head FULL_SHA --requires unit,integration`.
+See the [Relay example](../examples/relay-boundary/README.md) for missing, failed,
+stale and contradictory evidence, plus restart recovery. This retains a handoff's
+input evidence; ordinary work does not acquire mandatory phases.
+
 A missing receipt is not pass. Nor is an exit code from the provider, an agent's “done”
 message, or an old receipt for a different commit. Fleet does not authorize a merge;
 repository review rules and Gate govern that next step. The example ends at a checked draft.

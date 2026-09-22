@@ -77,7 +77,8 @@ var tools = []schema{
 			"required": []any{"change", "as", "cwd"}}},
 	{"name": "fleet_request",
 		"description": "Record one retry-safe local assignment for a known worker; does not deliver, accept, launch or transfer a lease.",
-		"inputSchema": schema{"type": "object", "properties": schema{"change": str("branch"), "id": str("stable repo-scoped request ID"), "worker": str("known session ID or unique prefix"), "for": str("accountable lead"), "brief": str("bounded assignment"), "cwd": cwdArg}, "required": []any{"change", "id", "worker", "for", "brief", "cwd"}}},
+		"inputSchema": schema{"type": "object", "properties": schema{"change": str("branch"), "id": str("stable repo-scoped request ID"), "worker": str("known session ID or unique prefix"), "for": str("accountable lead"), "brief": str("bounded assignment"),
+			"as": str("receiving relationship; default implementation"), "head": str("optional full input commit SHA; requires requires"), "requires": str("comma-separated passing receipt kinds; requires head"), "cwd": cwdArg}, "required": []any{"change", "id", "worker", "for", "brief", "cwd"}}},
 	{"name": "fleet_status", "description": "Read-only local request board; activity is not acceptance or completion.",
 		"inputSchema": schema{"type": "object", "properties": schema{}}},
 	{"name": "fleet_work",
@@ -276,7 +277,9 @@ func dispatch(name string, a map[string]any) (string, bool) {
 			return verbs.CmdDispatch(s("change"), s("as"), s("for"), s("due"), s("slot"), s("brief"), "mcp", s("reply_to"), take, s("repo"))
 		})
 	case "fleet_request":
-		return runVerb(func() error { return verbs.CmdRequest(s("change"), s("id"), s("worker"), s("for"), s("brief")) })
+		return runVerb(func() error {
+			return requestTool(a)
+		})
 	case "fleet_status":
 		return taskStatusJSON()
 	case "fleet_work":
@@ -337,6 +340,17 @@ func handle(msg map[string]any) map[string]any {
 			"content": []any{map[string]any{"type": "text", "text": text}}, "isError": isErr}}
 	}
 	return rpcError(id, -32601, "method not found: "+method)
+}
+
+func requestTool(a map[string]any) error {
+	for _, key := range []string{"as", "head", "requires"} {
+		if _, present := a[key]; present && fleet.S(a, key) == "" {
+			return fmt.Errorf("fleet request: %s needs a non-empty value", key)
+		}
+	}
+	return verbs.CmdRequest(fleet.S(a, "change"), fleet.S(a, "id"), fleet.S(a, "worker"), fleet.S(a, "for"), fleet.S(a, "brief"), verbs.RequestOptions{
+		Relationship: fleet.S(a, "as"), Head: fleet.S(a, "head"), Requires: fleet.S(a, "requires"),
+	})
 }
 
 // safeCall turns a tool's own panic into a tool error, not a dead server.
