@@ -1,0 +1,12 @@
+[
+  {
+    "action": "complete",
+    "reason": "durable completion and process result",
+    "role": "author"
+  },
+  {
+    "action": "complete",
+    "reason": "durable completion and process result",
+    "role": "verifier"
+  }
+]

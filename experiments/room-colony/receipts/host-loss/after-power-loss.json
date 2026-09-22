@@ -1,0 +1,16 @@
+{
+  "boot": "2e9cd3f8-8738-4ab3-8198-1b29b8ce149f",
+  "candidate_preserved": true,
+  "plan": [
+    {
+      "action": "start",
+      "attempt": 2,
+      "role": "author"
+    },
+    {
+      "action": "start",
+      "attempt": 2,
+      "role": "verifier"
+    }
+  ]
+}
