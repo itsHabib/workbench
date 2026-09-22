@@ -1,5 +1,7 @@
-import json, pathlib, datetime, collections, statistics
-root=pathlib.Path('/Users/mh/dev/workbench/.claude/worktrees/codex/swarm-adversarial-review/cmd/swarm/poc/runs')
+import json, pathlib, datetime, collections, statistics, sys
+# Run archive: argv[1] if given, else cmd/swarm/poc/runs relative to this script.
+root=pathlib.Path(sys.argv[1]) if len(sys.argv)>1 else pathlib.Path(__file__).resolve().parent.parent/'runs'
+if not root.is_dir(): sys.exit(f'run archive not found: {root}')
 def rows(p): return [json.loads(x) for x in p.read_text().splitlines() if x.strip()] if p.exists() else []
 def ts(x):return datetime.datetime.fromisoformat(x.replace('Z','+00:00')).timestamp()
 out={}

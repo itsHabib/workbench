@@ -231,12 +231,29 @@ None of this requires an elaborate agent bureaucracy. It requires making the few
 
 ## Reproduction packet
 
-- [Normal test output](go-test.txt)
-- [Independent reproduction output](probes.txt) and [Go overlay probes](review_probe_test.go)
-- [Scorer probe](scorer_probe_test.go), [output](scorer-probes.txt)
+Everything linked here is committed in this directory. Run the commands from the
+repository root.
+
+- [Independent reproduction output](probes.txt) and [Go overlay probes](review_probe_test.go.txt)
+- [Scorer probe](scorer_probe_test.go.txt), [output](scorer-probes.txt)
 - [Raw-log recount](recompute.py), [results](recomputed.json)
 - [Intent/check model](model.py), [results](model-results.json)
 - [Rooms lease model](rooms-model.py), [results](rooms-model-results.txt)
-- [Original kill conditions](kill-original.md), [amended conditions](kill-amended.md), [history](history.txt), [post-run intent fix](post-run-intent-fix.diff)
+- [Review history](history.txt)
 
-The Go probes are injected through `go test -overlay=...`; the worktree remains unchanged. Review checkpoint and all source links are pinned to the reviewed revision. No claim here relies on an unrecorded successful cloud run.
+The two Go probes carry a `.txt` suffix so they do not join the build; they are
+injected through the overlay, and the worktree is unchanged:
+
+```
+go test -overlay=cmd/swarm/poc/review-2026-09-17-codex/overlay.json ./cmd/swarm/internal/swarm/... ./cmd/swarm/internal/poc/...
+```
+
+`recompute.py` reads `cmd/swarm/poc/runs` relative to itself; pass another
+archive as its first argument.
+
+Not preserved in this packet: the normal `go test` output, the original and
+amended kill conditions as separate files, and the post-run intent-fix diff. The
+kill conditions before and after the run are in [`poc/KILL.md`](../KILL.md) and
+its git history; the intent fix is in the history of `cmd/swarm/internal/poc`.
+Review checkpoint and all source links are pinned to the reviewed revision. No
+claim here relies on an unrecorded successful cloud run.

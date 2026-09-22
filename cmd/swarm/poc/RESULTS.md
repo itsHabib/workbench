@@ -7,7 +7,7 @@
 > handoffs a lead would author; kill condition 4 cannot fail; the scored scale runs predate the
 > fix that made `check` read intent; and one run per mode gives no variance. What survives: a
 > derived board, scoped rulings and wakes can carry some coordination on a pre-decomposed local
-> workload. The review also reproduced ten safety defects in the substrate; see
+> workload. The review also reproduced thirteen defects — twelve in the substrate, one in the scorer; see
 > [KNOWN-DEFECTS.md](../KNOWN-DEFECTS.md).
 
 The claim under test: a fleet of coding agents needs a management hierarchy to run safely.

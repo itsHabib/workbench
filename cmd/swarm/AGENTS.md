@@ -4,7 +4,9 @@ A fleet substrate with no management sessions: a board derived from git, a hash-
 decision ledger, claims with fencing epochs, resource leases, admission, and a watcher that
 renders, nudges and wakes. One binary, state in files under `<git common dir>/swarm`, shared by
 every worktree of the repository. `README.md` is the operator's guide; `docs/DESIGN.md` is the
-contract; `poc/KILL.md` and `poc/RESULTS.md` are the adversarial run that justifies it.
+contract; `poc/KILL.md` and `poc/RESULTS.md` record the adversarial run; an independent review
+found it does not justify the tool (`poc/review-2026-09-17-codex/REVIEW.md`,
+`KNOWN-DEFECTS.md`).
 
 ## Layout
 

@@ -1,7 +1,7 @@
 # flat
 
 > **Experimental. Not for unattended use.** An independent review found the experiment behind
-> this tool does not support its headline claim and reproduced ten safety defects
+> this tool does not support its headline claim and reproduced thirteen defects
 > ([KNOWN-DEFECTS.md](KNOWN-DEFECTS.md), [the review](poc/review-2026-09-17-codex/REVIEW.md)).
 > The parts worth keeping are the read-only git/RESULT observer, a scoped decisions record, and
 > alerts over an existing wake mechanism; the plan is to fold those into `cmd/fleet` and delete
