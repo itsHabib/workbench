@@ -8,3 +8,5 @@ Bounded prototypes and their evidence, separate from supported Workbench tools.
 - [Language bakeoff archive](https://github.com/itsHabib/bakeoffs/tree/main/workbench-language-09-14):
   the HCL, custom-language and typed-Go POCs, their baselines, and the decision
   to keep plan/evidence semantics while avoiding a Workbench-owned language.
+- [Agentic work controller](work-controller/README.md): coordinator/worker cards
+  and a local durable job-lifecycle experiment.

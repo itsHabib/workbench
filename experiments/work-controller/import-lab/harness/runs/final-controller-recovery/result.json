@@ -1,0 +1,32 @@
+{
+  "app_dir": "/Users/mh/dev/workbench/.claude/worktrees/codex/import-controller/experiments/work-controller/import-lab/controller-app",
+  "checks": [
+    {
+      "detail": "import completed synchronously before kill",
+      "evidence": {
+        "import_id": "2e11e4467103",
+        "request_bytes": 8499121
+      },
+      "name": "mid_import_recovery",
+      "status": "not_covered"
+    },
+    {
+      "detail": "same accepted result survived process kill and identical request retry",
+      "evidence": {
+        "import_id": "c731d5d1430d"
+      },
+      "name": "accepted_result_crash_retry",
+      "status": "pass"
+    }
+  ],
+  "counts": {
+    "error": 0,
+    "fail": 0,
+    "not_covered": 1,
+    "pass": 1
+  },
+  "data_dir": "data-_vg_qqhk",
+  "elapsed_ms": 746,
+  "round": "recovery",
+  "schema": "import-lab-harness-v1"
+}

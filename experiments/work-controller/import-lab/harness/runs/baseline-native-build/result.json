@@ -1,0 +1,49 @@
+{
+  "app_dir": "/Users/mh/dev/workbench/.claude/worktrees/codex/import-native/experiments/work-controller/import-lab/native-app",
+  "checks": [
+    {
+      "detail": "health returned HTTP 200 JSON",
+      "evidence": {
+        "elapsed_ms": 0
+      },
+      "name": "startup_health",
+      "status": "pass"
+    },
+    {
+      "detail": "UI has no form",
+      "evidence": {},
+      "name": "browser_surface",
+      "status": "fail"
+    },
+    {
+      "detail": "mixed import ended 'failed'",
+      "evidence": {},
+      "name": "mixed_csv_validation",
+      "status": "fail"
+    },
+    {
+      "detail": "corrected input completed without errors",
+      "evidence": {
+        "import_id": "3e7107caf794"
+      },
+      "name": "corrected_retry",
+      "status": "pass"
+    },
+    {
+      "detail": "prerequisite imports did not pass",
+      "evidence": {},
+      "name": "inspection_listing",
+      "status": "fail"
+    }
+  ],
+  "counts": {
+    "error": 0,
+    "fail": 3,
+    "not_covered": 0,
+    "pass": 2
+  },
+  "data_dir": "data-i9vqfxz6",
+  "elapsed_ms": 70,
+  "round": "build",
+  "schema": "import-lab-harness-v1"
+}

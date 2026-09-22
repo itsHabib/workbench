@@ -1,0 +1,1 @@
+{"id": "34992a795474", "status": "completed", "records": [{"id": "2", "name": "No ID", "email": "noid@example.com"}, {"id": "3", "name": "No Domain", "email": "nodomain@example.com"}, {"id": "4", "name": "Space", "email": "hasspace@example.com"}], "errors": [], "csv": "id,name,email\n2,No ID,noid@example.com\n3,No Domain,nodomain@example.com\n4,Space,hasspace@example.com\n"}

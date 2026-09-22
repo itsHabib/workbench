@@ -1,0 +1,18 @@
+[
+  {
+    "arm": "controller",
+    "responseSeen": true,
+    "errors": [],
+    "overflow": false,
+    "showsRowError": true,
+    "body": "Import desk\n\nCheck a small CSV before it enters your records.\n\nLocal only\nUpload records\nValidate import\nImport saved\nLatest result\n1\nvalid records\n1\nrows to fix\nRow 3: email must contain one @ with text on both sides\nID\tName\tEmail\n1\tAda\tada@example.com\nFix and retry\nRecent imports\n2c5bd2f4e71f · completed\n1 valid · 1 errors"
+  },
+  {
+    "arm": "native",
+    "responseSeen": true,
+    "errors": [],
+    "overflow": false,
+    "showsRowError": true,
+    "body": "LOCAL DATA UTILITY\nImport desk\n\nValidate a CSV, keep good rows, and repair the ones that need attention.\n\nNew import\nRequired columns: id, name, email\nChoose a CSV file\nCSV records\nValidate import\nImport failed.\nRecent imports\nRefresh\nd67cba86281d\nFAILED\n1 valid, 1 errors\nInspect\nImport d67cba86281d\nFAILED\n1 valid record(s), 1 error(s)\nValid rows\nID\tName\tEmail\n1\tAda\tada@example.com\nRows to repair\nRow 3: email must contain one @ with text on both sides\nLoad CSV to repair"
+  }
+]

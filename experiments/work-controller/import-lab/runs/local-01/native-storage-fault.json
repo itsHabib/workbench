@@ -1,0 +1,5 @@
+{
+  "fault": "query_only write refusal, then restore write access and retry",
+  "failure_observed": true,
+  "survives_restart": true
+}

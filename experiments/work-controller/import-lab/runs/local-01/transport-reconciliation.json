@@ -1,0 +1,144 @@
+{
+  "at": "2026-09-19T19:01:12.403953+00:00",
+  "note": "Delayed delivery stamps reconciled against observed native launches, claims and read result; no intents re-executed",
+  "runtime_addresses": {
+    "import-builder": "/root/import_builder",
+    "import-replacement": "/root/controller_replacement"
+  },
+  "actions": [
+    {
+      "event": {
+        "delivered": 0,
+        "id": 1,
+        "job": "build-import-desk",
+        "kind": "spawn",
+        "payload": {
+          "context": "Build the import desk outcome in import-lab/BRIEF.md"
+        },
+        "worker": "import-builder"
+      },
+      "ack": {
+        "delivered": 1
+      }
+    },
+    {
+      "event": {
+        "delivered": 0,
+        "id": 2,
+        "job": "build-import-desk",
+        "kind": "assignment",
+        "payload": {
+          "reason": "First independent app outcome; start one builder, defer additional staffing until needed",
+          "text": "Build the import desk outcome in import-lab/BRIEF.md"
+        },
+        "worker": "import-builder"
+      },
+      "ack": {
+        "delivered": 2
+      }
+    },
+    {
+      "event": {
+        "delivered": 0,
+        "id": 3,
+        "job": "build-import-desk",
+        "kind": "reported",
+        "payload": {
+          "result": "{\"commit\":\"560f6338ad1d22a854ebc5d7275295a40dbe1b2b\",\"checks\":[\"python3 -m unittest discover -s experiments/work-controller/import-lab/controller-app -p test_*.py -v\",\"HTTP smoke: /health / /imports POST+GET\"],\"limits\":[\"synchronous local JSON-backed store; no auth or multi-user concurrency policy\"]}",
+          "token": 1
+        },
+        "worker": null
+      },
+      "ack": {
+        "delivered": 3
+      }
+    },
+    {
+      "event": {
+        "delivered": 0,
+        "id": 4,
+        "job": "pressure-import-desk",
+        "kind": "assignment",
+        "payload": {
+          "reason": "Parser/store/UI changes belong with existing app owner; measured responsiveness does not yet justify async queue or extra builder",
+          "text": "Address observed import pressure and browser failures under newly explicit operating needs; choose only needed mechanisms"
+        },
+        "worker": "import-builder"
+      },
+      "ack": {
+        "delivered": 4
+      }
+    },
+    {
+      "event": {
+        "delivered": 0,
+        "id": 5,
+        "job": "pressure-import-desk",
+        "kind": "assignment",
+        "payload": {
+          "reason": "Deliberate worker-context replacement after committed checkpoint; old agent completed, no active writer",
+          "text": "Address observed import pressure and browser failures under newly explicit operating needs; choose only needed mechanisms"
+        },
+        "worker": "import-replacement"
+      },
+      "ack": {
+        "delivered": 5
+      }
+    }
+  ],
+  "snapshot": {
+    "decisions": [
+      {
+        "id": 1,
+        "job": "build-import-desk",
+        "kind": "decide",
+        "reason": "First independent app outcome; start one builder, defer additional staffing until needed",
+        "worker": "import-builder"
+      },
+      {
+        "id": 2,
+        "job": "pressure-import-desk",
+        "kind": "decide",
+        "reason": "Parser/store/UI changes belong with existing app owner; measured responsiveness does not yet justify async queue or extra builder",
+        "worker": "import-builder"
+      },
+      {
+        "id": 3,
+        "job": "pressure-import-desk",
+        "kind": "reassign",
+        "reason": "Deliberate worker-context replacement after committed checkpoint; old agent completed, no active writer",
+        "worker": "import-replacement"
+      }
+    ],
+    "jobs": [
+      {
+        "evidence": "Initial commit560f633 independently inspected and 3 unit tests passed. Initial build accepted for external evaluation, not pressure-readiness or merge.",
+        "id": "build-import-desk",
+        "result": "{\"commit\":\"560f6338ad1d22a854ebc5d7275295a40dbe1b2b\",\"checks\":[\"python3 -m unittest discover -s experiments/work-controller/import-lab/controller-app -p test_*.py -v\",\"HTTP smoke: /health / /imports POST+GET\"],\"limits\":[\"synchronous local JSON-backed store; no auth or multi-user concurrency policy\"]}",
+        "state": "accepted",
+        "text": "Build the import desk outcome in import-lab/BRIEF.md",
+        "token": 1,
+        "worker": "import-builder"
+      },
+      {
+        "evidence": null,
+        "id": "pressure-import-desk",
+        "result": null,
+        "state": "running",
+        "text": "Address observed import pressure and browser failures under newly explicit operating needs; choose only needed mechanisms",
+        "token": 3,
+        "worker": "import-replacement"
+      }
+    ],
+    "workers": [
+      {
+        "context": "Build the import desk outcome in import-lab/BRIEF.md",
+        "id": "import-builder"
+      },
+      {
+        "context": "Fresh Luna worker; resumes pressure fixes from persisted job and HANDOFF.md",
+        "id": "import-replacement"
+      }
+    ]
+  }
+}

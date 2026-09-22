@@ -1,0 +1,91 @@
+{
+  "acceptance": [
+    {
+      "args": [
+        "accept",
+        "lifecycle",
+        "--token",
+        "1",
+        "--evidence",
+        "Parent inspected controller.py and independently ran 10 passing tests plus 26-call process drill; local lifecycle only"
+      ],
+      "result": {
+        "evidence": "Parent inspected controller.py and independently ran 10 passing tests plus 26-call process drill; local lifecycle only",
+        "id": "lifecycle",
+        "result": "Implemented experiments/work-controller/controller.py (222 lines) and test_controller.py (10 passing tests): replay/conflict, concurrent claims, busy worker, stale token, reporting versus acceptance, restart, transactional outbox. Validated with python3 -W error::ResourceWarning -m unittest discover -s experiments/work-controller -p test_*.py -v.",
+        "state": "accepted",
+        "text": "Build local durable lifecycle and test concurrency, stale attempts and replay",
+        "token": 1,
+        "worker": "controller-worker"
+      }
+    },
+    {
+      "args": [
+        "accept",
+        "replay-review",
+        "--token",
+        "2",
+        "--evidence",
+        "Parent inspected worker-receipt.json and implementation: snapshot recovers current claim; README records single-consumer and uncertain launch limitations"
+      ],
+      "result": {
+        "evidence": "Parent inspected worker-receipt.json and implementation: snapshot recovers current claim; README records single-consumer and uncertain launch limitations",
+        "id": "replay-review",
+        "result": "Lost claim response: duplicate claim rejects; snapshot recovers current worker and running attempt token. Safe reconciliation requires one execution consumer per worker identity; identity is not authentication. Outbox events survive reassignment and may be stale. Consumer must reconcile authoritative current job/worker/state before spawning or delivering; checking does not atomically fence external effects. Spawn is intent only, not exactly-once process launch. Reassignment fences result acceptance, not old process writes. Distributed transport remains unimplemented.",
+        "state": "accepted",
+        "text": "Inspect replay behavior after a lost claim response; document recovery or fix if it loses ownership",
+        "token": 2,
+        "worker": "controller-worker"
+      }
+    }
+  ],
+  "snapshot": {
+    "decisions": [
+      {
+        "id": 1,
+        "job": "lifecycle",
+        "kind": "decide",
+        "reason": "Already implementing this outcome; record ongoing work rather than spawn a duplicate",
+        "worker": "controller-worker"
+      },
+      {
+        "id": 2,
+        "job": "replay-review",
+        "kind": "decide",
+        "reason": "Same lifecycle code and context; queue follow-up rather than spawn another builder",
+        "worker": "controller-worker"
+      }
+    ],
+    "jobs": [
+      {
+        "evidence": "Parent inspected controller.py and independently ran 10 passing tests plus 26-call process drill; local lifecycle only",
+        "id": "lifecycle",
+        "result": "Implemented experiments/work-controller/controller.py (222 lines) and test_controller.py (10 passing tests): replay/conflict, concurrent claims, busy worker, stale token, reporting versus acceptance, restart, transactional outbox. Validated with python3 -W error::ResourceWarning -m unittest discover -s experiments/work-controller -p test_*.py -v.",
+        "state": "accepted",
+        "text": "Build local durable lifecycle and test concurrency, stale attempts and replay",
+        "token": 1,
+        "worker": "controller-worker"
+      },
+      {
+        "evidence": "Parent inspected worker-receipt.json and implementation: snapshot recovers current claim; README records single-consumer and uncertain launch limitations",
+        "id": "replay-review",
+        "result": "Lost claim response: duplicate claim rejects; snapshot recovers current worker and running attempt token. Safe reconciliation requires one execution consumer per worker identity; identity is not authentication. Outbox events survive reassignment and may be stale. Consumer must reconcile authoritative current job/worker/state before spawning or delivering; checking does not atomically fence external effects. Spawn is intent only, not exactly-once process launch. Reassignment fences result acceptance, not old process writes. Distributed transport remains unimplemented.",
+        "state": "accepted",
+        "text": "Inspect replay behavior after a lost claim response; document recovery or fix if it loses ownership",
+        "token": 2,
+        "worker": "controller-worker"
+      }
+    ],
+    "workers": [
+      {
+        "context": "Native subagent controller_worker; owns controller.py and its tests",
+        "id": "controller-worker"
+      }
+    ]
+  },
+  "sha256": {
+    "controller.py": "944c6dba86568202699899f79d007a807337ee0426b8d5118e6ec2416e470052",
+    "test_controller.py": "01aefb126226c51f3f6bf2bdaaca6df1f2d1dda3471185cc9a5a835e23b08641",
+    "drill.py": "745221570924af226d7844dfc61269c91d6a4e501998e988f207f217977d96fb"
+  }
+}

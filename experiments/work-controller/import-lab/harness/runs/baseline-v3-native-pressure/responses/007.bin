@@ -1,0 +1,1 @@
+{"id": "f2feadbdada5", "status": "failed", "records": [], "errors": [{"row": 1, "message": "invalid CSV: unexpected end of data"}], "csv": "id,name,email\n1,\"unterminated,user@example.com\n"}

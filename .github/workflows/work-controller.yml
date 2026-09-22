@@ -1,0 +1,32 @@
+name: Work controller experiment
+on:
+  pull_request:
+    paths:
+      - 'experiments/work-controller/**'
+      - '.github/workflows/work-controller.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  local-drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -W error::ResourceWarning -m unittest discover -s experiments/work-controller -p 'test_*.py' -v
+      - run: python3 experiments/work-controller/drill.py /tmp/controller-drill.json
+      - name: Import desk unit checks
+        run: |
+          for component in harness controller-app native-app; do
+            python3 -m unittest discover -s "experiments/work-controller/import-lab/$component" -p 'test_*.py' -v
+          done
+      - name: Import desk external checks
+        run: |
+          for arm in controller native; do
+            for phase in build pressure; do
+              python3 experiments/work-controller/import-lab/harness/harness.py --app-dir "$PWD/experiments/work-controller/import-lab/$arm-app" --round "$phase" --out "/tmp/import-$arm-$phase"
+            done
+          done

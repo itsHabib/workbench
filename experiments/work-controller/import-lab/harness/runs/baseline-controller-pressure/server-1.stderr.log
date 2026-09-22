@@ -1,0 +1,28 @@
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 49524)
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 496, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 484, in handle_one_request
+    method()
+    ~~~~~~^^
+  File "/Users/mh/dev/workbench/.claude/worktrees/codex/import-controller/experiments/work-controller/import-lab/controller-app/server.py", line 121, in do_POST
+    item = self.server.store.create(source, body.get("request_id"))
+  File "/Users/mh/dev/workbench/.claude/worktrees/codex/import-controller/experiments/work-controller/import-lab/controller-app/server.py", line 63, in create
+    records, errors = validate_csv(source)
+                      ~~~~~~~~~~~~^^^^^^^^
+  File "/Users/mh/dev/workbench/.claude/worktrees/codex/import-controller/experiments/work-controller/import-lab/controller-app/server.py", line 25, in validate_csv
+    for row_number, values in enumerate(reader, start=2):
+                              ~~~~~~~~~^^^^^^^^^^^^^^^^^
+_csv.Error: field larger than field limit (131072)
+----------------------------------------

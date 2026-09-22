@@ -1,0 +1,40 @@
+{
+  "at": "2026-09-19T19:05:35.447963+00:00",
+  "events": [
+    {
+      "args": [
+        "submit",
+        "storage-failure-retry",
+        "Fix observed JSON store write failure: retry returns success from memory but record disappears on restart. Add failure-injection regression."
+      ],
+      "result": {
+        "evidence": null,
+        "id": "storage-failure-retry",
+        "result": null,
+        "state": "queued",
+        "text": "Fix observed JSON store write failure: retry returns success from memory but record disappears on restart. Add failure-injection regression.",
+        "token": null,
+        "worker": null
+      }
+    },
+    {
+      "args": [
+        "decide",
+        "storage-failure-retry",
+        "--worker",
+        "import-replacement",
+        "--reason",
+        "Fresh observed consistency bug in the same store; reuse existing worker context instead of spawning"
+      ],
+      "result": {
+        "evidence": null,
+        "id": "storage-failure-retry",
+        "result": null,
+        "state": "assigned",
+        "text": "Fix observed JSON store write failure: retry returns success from memory but record disappears on restart. Add failure-injection regression.",
+        "token": null,
+        "worker": "import-replacement"
+      }
+    }
+  ]
+}

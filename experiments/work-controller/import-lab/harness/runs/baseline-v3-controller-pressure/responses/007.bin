@@ -1,0 +1,1 @@
+{"id": "eca9db2ff2d9", "status": "completed", "records": [], "errors": [{"row": 2, "message": "expected exactly 3 columns: id, name, email"}]}

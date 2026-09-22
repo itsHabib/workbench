@@ -1,0 +1,59 @@
+{
+  "note": "Instrumentation began after worker launch; not an autonomous dispatch run",
+  "records": [
+    {
+      "args": [
+        "init"
+      ],
+      "result": {
+        "initialized": true
+      }
+    },
+    {
+      "args": [
+        "register",
+        "controller-worker",
+        "Native subagent controller_worker; owns controller.py and its tests"
+      ],
+      "result": {
+        "context": "Native subagent controller_worker; owns controller.py and its tests",
+        "worker": "controller-worker"
+      }
+    },
+    {
+      "args": [
+        "submit",
+        "lifecycle",
+        "Build local durable lifecycle and test concurrency, stale attempts and replay"
+      ],
+      "result": {
+        "evidence": null,
+        "id": "lifecycle",
+        "result": null,
+        "state": "queued",
+        "text": "Build local durable lifecycle and test concurrency, stale attempts and replay",
+        "token": null,
+        "worker": null
+      }
+    },
+    {
+      "args": [
+        "decide",
+        "lifecycle",
+        "--worker",
+        "controller-worker",
+        "--reason",
+        "Already implementing this outcome; record ongoing work rather than spawn a duplicate"
+      ],
+      "result": {
+        "evidence": null,
+        "id": "lifecycle",
+        "result": null,
+        "state": "assigned",
+        "text": "Build local durable lifecycle and test concurrency, stale attempts and replay",
+        "token": null,
+        "worker": "controller-worker"
+      }
+    }
+  ]
+}
