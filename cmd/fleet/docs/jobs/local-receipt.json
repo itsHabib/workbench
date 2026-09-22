@@ -1,0 +1,31 @@
+{
+  "checks": [
+    "two process workers claim distinct jobs and report results",
+    "reported artifacts survive API SIGKILL/restart and independent acceptance",
+    "killed claimant expires; replacement claims once; late result rejected",
+    "review rejection queues a fresh fenced repair attempt"
+  ],
+  "metrics": {
+    "states": {
+      "accepted": 2,
+      "queued": 0,
+      "reported": 0,
+      "running": 1
+    },
+    "expired_eligible": 0,
+    "attempts": 5,
+    "retries": 2,
+    "oldest_queue_wait_seconds": 0
+  },
+  "limits": [
+    "deterministic workers; no LLM/provider run",
+    "lease fences results, not external effects",
+    "single host; no Rooms or cloud run"
+  ],
+  "source_sha256": {
+    "cmd/fleet/main.go": "dd2774298b9afeea08229bd44a3af8f0f2027c811de9d20936b0ead7b13f73bc",
+    "cmd/fleet/jobs.go": "c627a1b10d717932bc8ad25f4c4f2df34463d8871d039be576821879f990b5d9",
+    "cmd/fleet/internal/jobs/store.go": "26e37632adf71fad2fac256cb82a43e270f9408fd4d74ed46ce9bc2e492cc5c8",
+    "cmd/fleet/e2e/jobs.py": "2ef0c40c442a7c027914465023f6a3ab9ae1a2d22572c3d0480160007af93045"
+  }
+}

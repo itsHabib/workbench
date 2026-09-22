@@ -1,0 +1,11 @@
+{
+  "attempts": 3,
+  "checks": [
+    "watcher SIGKILL/restart retained one renewed attempt and exact artifact",
+    "cancelled job stayed unaccepted, preserved partial output, and auto-reclaimed"
+  ],
+  "jobs": 2,
+  "llm_productivity_claim": false,
+  "ok": true,
+  "paths_redacted": true
+}
