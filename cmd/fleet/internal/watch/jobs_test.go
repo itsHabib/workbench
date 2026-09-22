@@ -305,3 +305,32 @@ func TestGoneBridgeSurfacesPendingProviderCleanup(t *testing.T) {
 		t.Fatalf("missing cleanup warning: %v", row)
 	}
 }
+
+func TestPrelaunchRecordsDoNotBecomeUnknownProcesses(t *testing.T) {
+	if launchPresent(fleet.Rec{"status": "claiming", "provider": "codex"}) {
+		t.Fatal("claiming record without a PID must permit claim replay")
+	}
+	for _, expired := range []bool{false, true} {
+		state := t.TempDir()
+		now := time.Now()
+		if expired {
+			now = now.Add(-time.Minute)
+		}
+		store := &jobs.Store{Dir: state, Now: func() time.Time { return now }}
+		if _, err := store.Execute(jobs.Request{Op: "submit", ID: "job", Brief: "recover before launch"}); err != nil {
+			t.Fatal(err)
+		}
+		result, err := store.Execute(jobs.Request{Op: "claim", ID: "job", Worker: "worker", Key: "key", TTLSeconds: 30})
+		if err != nil {
+			t.Fatal(err)
+		}
+		job := result.(jobs.Job)
+		record := fleet.Rec{"status": "claimed", "provider": "codex", "job": fleet.Rec{"state": state, "id": "job", "token": job.Attempts[0].Token}}
+		if got := launchPresent(record); got == expired {
+			t.Fatalf("expired=%v reserved=%v", expired, got)
+		}
+	}
+	if !launchPresent(fleet.Rec{"status": "running", "provider": "codex"}) {
+		t.Fatal("uncertain launched provider must remain reserved")
+	}
+}

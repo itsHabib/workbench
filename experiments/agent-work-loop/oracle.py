@@ -112,7 +112,10 @@ def persistence_fault(base, state_dir, seed):
     text = csv_text(rows)
     try:
         try:
-            status, _ = request(base, "/imports", {"request_id": request_id, "csv": text}, timeout=7)
+            started = time.monotonic()
+            status, _ = request(base, "/imports", {"request_id": request_id, "csv": text}, timeout=6)
+            if time.monotonic() - started > 6:
+                raise AssertionError("locked-write response exceeded six seconds")
         except (urllib.error.URLError, TimeoutError) as error:
             raise AssertionError("locked-write response was lost; write failure is unproven") from error
         if 200 <= status < 300:
@@ -125,6 +128,7 @@ def persistence_fault(base, state_dir, seed):
     _, record = expect(base, f"/imports/{retry_id}", status=200)
     if record.get("documents", record.get("rows")) != rows:
         raise AssertionError("post-fault retry data mismatch")
+    return rows, retry_id, request_id, text
 
 
 def checks(base, state_dir, seed, full):
@@ -149,8 +153,8 @@ def checks(base, state_dir, seed, full):
         raise AssertionError("export did not exactly round-trip documents")
     if not full:
         raise AssertionError("--url mode cannot verify restart persistence or SQLite fault")
-    persistence_fault(base, state_dir, seed)
-    return rows, import_id
+    fault = persistence_fault(base, state_dir, seed)
+    return rows, import_id, fault
 
 
 def wait_healthy(base):
@@ -183,11 +187,18 @@ def main():
             command = [sys.executable, str(args.app), "--port", str(args.port), "--state", state.name]
             process = subprocess.Popen(command)
             wait_healthy(base)
-            rows, import_id = checks(base, Path(state.name), args.seed, full=True)
+            rows, import_id, fault = checks(base, Path(state.name), args.seed, full=True)
             process.terminate()
             process.wait(timeout=3)
             process = subprocess.Popen(command)
             wait_healthy(base)
+            fault_rows, fault_id, fault_request, fault_csv = fault
+            _, recovered = expect(base, f"/imports/{fault_id}", status=200)
+            if recovered.get("documents", recovered.get("rows")) != fault_rows:
+                raise AssertionError("post-fault retry lost after restart")
+            _, replay = expect(base, "/imports", {"request_id": fault_request, "csv": fault_csv}, status=200)
+            if result_id(replay) != fault_id:
+                raise AssertionError("post-fault retry id changed after restart")
             _, record = expect(base, f"/imports/{import_id}", status=200)
             if record.get("documents", record.get("rows")) != rows:
                 raise AssertionError("restart persistence data mismatch")

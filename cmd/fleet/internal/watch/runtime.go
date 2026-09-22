@@ -51,15 +51,15 @@ func launchPresent(r fleet.Rec) bool {
 	if r == nil {
 		return false
 	}
-	state, _ := processState(r)
-	if state == "running" || state == "unknown" {
-		return true
-	}
 	if fleet.S(r, "status") == "claiming" {
 		return false
 	}
 	if fleet.S(r, "status") == "claimed" {
 		return jobReservationActive(r)
+	}
+	state, _ := processState(r)
+	if state == "running" || state == "unknown" {
+		return true
 	}
 	if fleet.S(r, "provider") == "" || fleet.S(r, "status") == "failed" || fleet.S(r, "status") == "released" {
 		return false

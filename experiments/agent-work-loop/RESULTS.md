@@ -73,3 +73,12 @@ Rooms comes after that: replace the local storage assumption and test real proce
 death and isolation, rather than treating a local pass as cloud readiness.
 
 See the [launcher guide](README.md) for commands.
+
+**Post-pilot review corrections**
+
+Review found that prelaunch claim records were checked for process liveness before
+their claim status; a missing PID could retain a reservation indefinitely. Status
+now handles claim replay and lease expiry first, with regression coverage. The
+current oracle also enforces the six-second locked-write deadline and verifies the
+post-lock retry after restart. Historical receipts retain the original oracle hash;
+they do not claim those stronger checks ran during the pilot.
