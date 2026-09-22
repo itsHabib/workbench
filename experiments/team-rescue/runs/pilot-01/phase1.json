@@ -1,0 +1,732 @@
+{
+  "evidence_kind": "live_seeded_pilot",
+  "runtime_commit": "5bf1545ae5b94f278f5133ed34afb13e5e428341",
+  "grade": "original_frozen_checker_before_posthoc_probes",
+  "qualification": "one run per arm; no statistical or dollar-efficiency claim",
+  "protocol_sha256": "71b510459ad37cd7cb55f5cc92c7b2da2aad32398ef1e7b1737ac612f6775f83",
+  "implementation": {
+    "call_worker.py": "8d4a4471716a7c1c89a9910b0868be3fffb285fe562f97b64f7155ba6baeec39",
+    "lab.py": "f410763922d3fc365d0c97d0197a2aa1ef4c01df321dc315b8203d331b15d2dd",
+    "matrix.py": "da437614f39553b6f01f98dd1f143deb8aef61ac6fdbbdded47befcc1a2f103b",
+    "service_worker.py": "98d56d39ecc570989d290c7374fdf0b47e2316f707e704f088aaaa6226b5b4fc",
+    "test_lab.py": "2df008c4277b133ee88958d8ac90c32bafad34214ea792900920cc3790e0aba6",
+    "test_transport.py": "427da360d834172d091b151ffc5b2fa285629e7210ff9a559f869780d778f770",
+    "test_verifier.py": "25e4dd9ef2a405166c0f3b6bec1b7b7348dbe710f41425082b406a32edb6c0e6",
+    "transport.py": "daf75936333a240548c6a3fca8cc9709f796a8b58271979cbdffb493218b55c4",
+    "verifier.py": "fc31f1c6e0f263a45eefbc681481c04dbb6f600c9daf329af3e3aa1eef267965",
+    "workload/service.py": "096e2cb2aa119c1b47641438744a7102721edd7b66e15f1f5dcdd1f2f97acae2"
+  },
+  "fleet_sha256": "aef41c2cd71b429988657897712b234685bdbffb90990acfb2a493299024a74c",
+  "rows": [
+    {
+      "arm": "reference-solo",
+      "repeat": 1,
+      "mode": "solo",
+      "status": "complete",
+      "phase": 1,
+      "model": "gpt-6-astra",
+      "calls": 2,
+      "tokens_known": 63674,
+      "unknown_usage_calls": 0,
+      "cost_usd": null,
+      "charged_model_seconds": 73.70601866603829,
+      "human_interventions": 0,
+      "candidate_sha256": "16cce56bd899f59e0f351ac09d8af8625eff9ce22a02e441d02aade199be5de8",
+      "checked_source_matches": true,
+      "all_checks_pass": true,
+      "accepted": true,
+      "checks": [
+        {
+          "name": "api_fanout_and_idempotency",
+          "passed": true,
+          "detail": "fanout, response bodies, original payload, idempotency, and success terminality hold"
+        },
+        {
+          "name": "network_error_isolation",
+          "passed": true,
+          "detail": "connection refusal is isolated, recorded with null status, and retried on schedule"
+        },
+        {
+          "name": "retry_isolation_and_cap",
+          "passed": true,
+          "detail": "failure isolation, deterministic 10/20 backoff, cap, and no success redelivery hold"
+        },
+        {
+          "name": "metrics_consistency",
+          "passed": true,
+          "detail": "all required counters match mixed successful and retrying state"
+        },
+        {
+          "name": "restart_persistence",
+          "passed": true,
+          "detail": "subscription, event, schedule, terminal state, history, and metrics survive restarts"
+        },
+        {
+          "name": "invalid_input",
+          "passed": true,
+          "detail": "malformed JSON, missing fields, bad time types, and unknown routes return JSON 4xx"
+        },
+        {
+          "name": "source_integrity",
+          "passed": true,
+          "detail": "candidate source remained unchanged"
+        }
+      ],
+      "input_hashes": {
+        "service.py": "9499f5bafd85eaf6e534cd3c2e91a55f233fe7b46fc8cb0a4b15eefce8df9813",
+        "README.md": "b58484edb7cf99813ebd6bd78e609689f51261e151786a1429e944ee95a9fef4"
+      },
+      "candidate": "candidates/reference-solo",
+      "initial_source_sha256": "a8ba7f43e655b8d4e6c97d3b7a203df6c4bc299b76e473b583ba0247e67dcb48",
+      "initial_context_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "calls_detail": [
+        {
+          "number": 1,
+          "role": "worker-1",
+          "model": "gpt-6-astra",
+          "usage": {
+            "input_tokens": 30509,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 1960,
+            "reasoning_output_tokens": 69
+          },
+          "error": null,
+          "elapsed_seconds": 65.72725812508725,
+          "cost_usd": null,
+          "action": "edit",
+          "message": "Persist all service state in SQLite, committing subscription creation, event fanout, and each attempt before responding. Serialize state access to preserve idempotency under concurrent requests.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "b3742955d188ade7bc883344e7b7d6ae65ce7c661d7e1621cb6750d882b85231"
+        },
+        {
+          "number": 2,
+          "role": "worker-1",
+          "model": "gpt-6-astra",
+          "usage": {
+            "input_tokens": 31134,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 71,
+            "reasoning_output_tokens": 0
+          },
+          "error": null,
+          "elapsed_seconds": 7.978760540951043,
+          "cost_usd": null,
+          "action": "finish",
+          "message": "Phase 1 is complete. All seven checks passed, including restart persistence, retry scheduling, delivery isolation, idempotency, metrics, and invalid-input handling.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "80349813e24a2ffbafc821920949fe49a807616a11bdd69fcf5e5f9414d0275d"
+        }
+      ],
+      "config": {
+        "mode": "solo",
+        "model": "gpt-6-astra",
+        "lead_model": "gpt-6-astra",
+        "critic_model": "gpt-6-astra",
+        "max_calls": 8,
+        "call_timeout": 120.0,
+        "wall_seconds": 960.0
+      }
+    },
+    {
+      "arm": "pair",
+      "repeat": 1,
+      "mode": "pair",
+      "status": "budget",
+      "phase": 1,
+      "model": "gpt-5.6-luna",
+      "calls": 8,
+      "tokens_known": 239783,
+      "unknown_usage_calls": 0,
+      "cost_usd": null,
+      "charged_model_seconds": 188.24756233324297,
+      "human_interventions": 0,
+      "candidate_sha256": "99d31c23be7099bb9ac09911faac17e1ee0012da73ea7e3dc9030eb5c7741571",
+      "checked_source_matches": true,
+      "all_checks_pass": true,
+      "accepted": false,
+      "checks": [
+        {
+          "name": "api_fanout_and_idempotency",
+          "passed": true,
+          "detail": "fanout, response bodies, original payload, idempotency, and success terminality hold"
+        },
+        {
+          "name": "network_error_isolation",
+          "passed": true,
+          "detail": "connection refusal is isolated, recorded with null status, and retried on schedule"
+        },
+        {
+          "name": "retry_isolation_and_cap",
+          "passed": true,
+          "detail": "failure isolation, deterministic 10/20 backoff, cap, and no success redelivery hold"
+        },
+        {
+          "name": "metrics_consistency",
+          "passed": true,
+          "detail": "all required counters match mixed successful and retrying state"
+        },
+        {
+          "name": "restart_persistence",
+          "passed": true,
+          "detail": "subscription, event, schedule, terminal state, history, and metrics survive restarts"
+        },
+        {
+          "name": "invalid_input",
+          "passed": true,
+          "detail": "malformed JSON, missing fields, bad time types, and unknown routes return JSON 4xx"
+        },
+        {
+          "name": "source_integrity",
+          "passed": true,
+          "detail": "candidate source remained unchanged"
+        }
+      ],
+      "input_hashes": {
+        "service.py": "a9080c26a92d1a0a6dc6161e870af8653bc1fa9aef48a53e05bb2fba2773ce38",
+        "README.md": "b58484edb7cf99813ebd6bd78e609689f51261e151786a1429e944ee95a9fef4"
+      },
+      "candidate": "candidates/pair",
+      "initial_source_sha256": "a8ba7f43e655b8d4e6c97d3b7a203df6c4bc299b76e473b583ba0247e67dcb48",
+      "initial_context_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "calls_detail": [
+        {
+          "number": 1,
+          "role": "lead",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 28160,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 163,
+            "reasoning_output_tokens": 47
+          },
+          "error": null,
+          "elapsed_seconds": 7.980197000084445,
+          "cost_usd": null,
+          "action": "dispatch",
+          "message": "Repair service.py durability for --db: persist subscriptions, events, deliveries, retry schedules, histories, and metrics across restart using only the standard library. Preserve all currently passing behavior and validate the restart-persistence check plus the full Phase 1 checker.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "558b13490a5af793b7e838e791dc0bd2267d1cf12ba224c54753f8a281604c63"
+        },
+        {
+          "number": 2,
+          "role": "worker-1",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 28245,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 1926,
+            "reasoning_output_tokens": 169
+          },
+          "error": null,
+          "elapsed_seconds": 39.73364204191603,
+          "cost_usd": null,
+          "action": "edit",
+          "message": "Implemented durable --db persistence for subscriptions, events, deliveries, retry schedules, histories, and metrics while preserving the existing API and retry behavior.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "7bd54f7a1bca1065128c5c3c0db8ac7d699a80881be310620a8425505c580c6c"
+        },
+        {
+          "number": 3,
+          "role": "challenger",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 28479,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 632,
+            "reasoning_output_tokens": 353
+          },
+          "error": null,
+          "elapsed_seconds": 26.996860624989495,
+          "cost_usd": null,
+          "action": "assess",
+          "message": "Concrete omissions remain despite the checker passing: (1) POST /subscriptions accepts any value for `url` without requiring a string or validating an HTTP loopback URL; malformed URLs are only discovered later during delivery, violating invalid-input 4xx behavior. (2) POST /events does not validate that `id` is a non-empty string: integers are accepted and returned, while unhashable values merely trigger a generic error. (3) `load_state` trusts persisted JSON shape; a valid-but-malformed state such as `{\"deliveries\":[]}` can make GET/tick/metrics crash with uncaught attribute/type errors rather than returning JSON 4xx or safely recovering. (4) `json_body` does not enforce request Content-Type, despite the JSON content-type contract. (5) A failed `save_state()` occurs after in-memory mutation, so an invalid/unwritable DB path can leave state mutated despite the request returning 400; subsequent requests can observe phantom subscriptions/events. Add explicit schema/path validation, validate persisted state before installing it, and stage or roll back mutations around durable writes.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "9068fa2c8bb73f4f230e3c0f42a11811908978433a9a85542341e7e3205ee18e"
+        },
+        {
+          "number": 4,
+          "role": "lead",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 28912,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 171,
+            "reasoning_output_tokens": 37
+          },
+          "error": null,
+          "elapsed_seconds": 8.461062249960378,
+          "cost_usd": null,
+          "action": "dispatch",
+          "message": "Repair the consequential gaps identified by the challenger in service.py: validate JSON request shape, non-empty string event IDs, HTTP loopback subscription URLs, and Content-Type; safely validate persisted state before installation; ensure failed durable writes do not leave phantom in-memory mutations. Preserve passing behavior, run the full Phase 1 checker, and report exact results.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "204baeef7fff1cce036483936cb2aba0879cf591f3a8e53ff5f4ffd18783a6b7"
+        },
+        {
+          "number": 5,
+          "role": "worker-1",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 29020,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 2899,
+            "reasoning_output_tokens": 112
+          },
+          "error": null,
+          "elapsed_seconds": 57.313639166997746,
+          "cost_usd": null,
+          "action": "edit",
+          "message": "Repaired request validation, loopback URL checks, persisted-state validation, Content-Type enforcement, and mutation rollback on durable-write failure. The supplied checker was already green; changes target the challenger\u2019s uncovered failure cases.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "bbd09e15c2582785060b9fd907b7b075d364408499efd3e92653ae9bdc7a3805"
+        },
+        {
+          "number": 6,
+          "role": "challenger",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 29497,
+            "cached_input_tokens": 19200,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 715,
+            "reasoning_output_tokens": 516
+          },
+          "error": null,
+          "elapsed_seconds": 27.62555370805785,
+          "cost_usd": null,
+          "action": "assess",
+          "message": "Finding: unsupported HTTP methods (for example PUT, PATCH, or DELETE) are handled by BaseHTTPRequestHandler's default 501 response, which is typically an HTML body without `Content-Type: application/json`. The contract requires malformed requests/unknown paths to return a 4xx JSON response, and requires response bodies to use JSON. Add explicit handlers (or override `send_error`) so unsupported methods return a JSON 4xx (prefer 405) with the required content type. Evidence: `Handler` defines only `do_POST` and `do_GET`; no `do_PUT`/`do_PATCH`/`do_DELETE`/`send_error`, so the base implementation emits 501 HTML before application error handling.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "cb28bb53743b8bdac97a0951c889d62d4dfb44d95ebd5af786167e08dd83e78a"
+        },
+        {
+          "number": 7,
+          "role": "lead",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 30238,
+            "cached_input_tokens": 9984,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 159,
+            "reasoning_output_tokens": 29
+          },
+          "error": null,
+          "elapsed_seconds": 10.498922875151038,
+          "cost_usd": null,
+          "action": "dispatch",
+          "message": "Independently challenge the integrated service against the full Phase 1 specification, focusing on unsupported methods, malformed paths, persistence edge cases, concurrency/isolation, and any regression from worker-1's validation changes. Run the supplied checker and report only consequential defects with concrete evidence; do not edit files.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "72dad28530fa7b8ba038ddb164e99bd62bdbbb247c90055dd794d43348173806"
+        },
+        {
+          "number": 8,
+          "role": "worker-2",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 30310,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 257,
+            "reasoning_output_tokens": 102
+          },
+          "error": null,
+          "elapsed_seconds": 9.637684666085988,
+          "cost_usd": null,
+          "action": "assess",
+          "message": "One consequential defect remains: unsupported methods such as PUT, PATCH, DELETE, and HEAD fall through to BaseHTTPRequestHandler's default 501 HTML response because Handler defines only do_POST and do_GET and does not override send_error. This violates the JSON response/4xx error contract for invalid requests. Add explicit unsupported-method handlers or override send_error to return a JSON 405/4xx with Content-Type application/json. The supplied Phase 1 checker passes; no other consequential defect observed from the provided implementation.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "4701a539c3618e6f44df057d968a5cd0991e4b920555d5e19393fcff41098751"
+        }
+      ],
+      "config": {
+        "mode": "pair",
+        "model": "gpt-5.6-luna",
+        "lead_model": "gpt-5.6-luna",
+        "critic_model": "gpt-5.6-luna",
+        "max_calls": 8,
+        "call_timeout": 120.0,
+        "wall_seconds": 960.0
+      }
+    },
+    {
+      "arm": "lead",
+      "repeat": 1,
+      "mode": "lead",
+      "status": "complete",
+      "phase": 1,
+      "model": "gpt-5.6-luna",
+      "calls": 5,
+      "tokens_known": 149545,
+      "unknown_usage_calls": 0,
+      "cost_usd": null,
+      "charged_model_seconds": 129.12597824982367,
+      "human_interventions": 0,
+      "candidate_sha256": "9d235093525f213021612d6546deace73e389e1885e7c098a3efd6e66111a57e",
+      "checked_source_matches": true,
+      "all_checks_pass": true,
+      "accepted": true,
+      "checks": [
+        {
+          "name": "api_fanout_and_idempotency",
+          "passed": true,
+          "detail": "fanout, response bodies, original payload, idempotency, and success terminality hold"
+        },
+        {
+          "name": "network_error_isolation",
+          "passed": true,
+          "detail": "connection refusal is isolated, recorded with null status, and retried on schedule"
+        },
+        {
+          "name": "retry_isolation_and_cap",
+          "passed": true,
+          "detail": "failure isolation, deterministic 10/20 backoff, cap, and no success redelivery hold"
+        },
+        {
+          "name": "metrics_consistency",
+          "passed": true,
+          "detail": "all required counters match mixed successful and retrying state"
+        },
+        {
+          "name": "restart_persistence",
+          "passed": true,
+          "detail": "subscription, event, schedule, terminal state, history, and metrics survive restarts"
+        },
+        {
+          "name": "invalid_input",
+          "passed": true,
+          "detail": "malformed JSON, missing fields, bad time types, and unknown routes return JSON 4xx"
+        },
+        {
+          "name": "source_integrity",
+          "passed": true,
+          "detail": "candidate source remained unchanged"
+        }
+      ],
+      "input_hashes": {
+        "service.py": "88b62dfc87b0e54722d3b1ee11fa88eb44d3828a16ad689a7841488c4538babb",
+        "README.md": "b58484edb7cf99813ebd6bd78e609689f51261e151786a1429e944ee95a9fef4"
+      },
+      "candidate": "candidates/lead",
+      "initial_source_sha256": "a8ba7f43e655b8d4e6c97d3b7a203df6c4bc299b76e473b583ba0247e67dcb48",
+      "initial_context_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "calls_detail": [
+        {
+          "number": 1,
+          "role": "lead",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 28163,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 215,
+            "reasoning_output_tokens": 60
+          },
+          "error": null,
+          "elapsed_seconds": 11.38628387521021,
+          "cost_usd": null,
+          "action": "dispatch",
+          "message": "Repair service.py to persist subscriptions, events, deliveries, retry schedules, histories, and metrics across restarts using only the standard library and the supplied --db path. Also ensure malformed/unsupported HTTP methods return JSON 4xx responses rather than default HTML/501. Preserve all currently passing behavior and run the checker.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "43e12374ff519f61b990257d3b7f13334aa92c4a0f5410074e6f57887c654884"
+        },
+        {
+          "number": 2,
+          "role": "worker-1",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 28276,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 2374,
+            "reasoning_output_tokens": 172
+          },
+          "error": null,
+          "elapsed_seconds": 48.28570608398877,
+          "cost_usd": null,
+          "action": "edit",
+          "message": "Implementing SQLite-backed durable state, retry history/schedules, metrics derived from persisted deliveries, and JSON 4xx handling for unsupported methods and malformed requests.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "50db855f07f55a2f8e94f4fd5898e45c76e596ee205166275f9d5288290f5ab3"
+        },
+        {
+          "number": 3,
+          "role": "lead",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 29198,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 242,
+            "reasoning_output_tokens": 133
+          },
+          "error": null,
+          "elapsed_seconds": 9.901698249857873,
+          "cost_usd": null,
+          "action": "dispatch",
+          "message": "Implementation appears complete and supplied checks pass. Perform a focused final verification of service.py, especially restart persistence, retry timing, and JSON responses for unsupported methods; fix any regression and rerun the checker.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "82fbe6f70bf5889fecc352d685f9938a70b10162184a817360f4339eb4cfb6b8"
+        },
+        {
+          "number": 4,
+          "role": "worker-1",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 29172,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 2396,
+            "reasoning_output_tokens": 183
+          },
+          "error": null,
+          "elapsed_seconds": 48.65929058287293,
+          "cost_usd": null,
+          "action": "edit",
+          "message": "Focused verification found the service already satisfies the supplied checks. Added JSON 405 handling for TRACE, preventing BaseHTTPRequestHandler\u2019s default HTML/501 response for an unsupported method.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "d6f453acc1a6e3c19feaf8db875c3b96bcdb9d4b500111f1b6c282143e655a14"
+        },
+        {
+          "number": 5,
+          "role": "lead",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 29270,
+            "cached_input_tokens": 19200,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 239,
+            "reasoning_output_tokens": 155
+          },
+          "error": null,
+          "elapsed_seconds": 10.892999457893893,
+          "cost_usd": null,
+          "action": "finish",
+          "message": "Implementation is complete and independently verified: all supplied checks pass, including restart persistence, retry timing/isolation, metrics, idempotency, invalid-input handling, and JSON responses for unsupported methods.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "e74de7728b4ecbd8dbbef0e895c0ec15cdf68df1139a78cd2a1dc53831b0481c"
+        }
+      ],
+      "config": {
+        "mode": "lead",
+        "model": "gpt-5.6-luna",
+        "lead_model": "gpt-5.6-luna",
+        "critic_model": "gpt-5.6-luna",
+        "max_calls": 8,
+        "call_timeout": 120.0,
+        "wall_seconds": 960.0
+      }
+    },
+    {
+      "arm": "solo",
+      "repeat": 1,
+      "mode": "solo",
+      "status": "complete",
+      "phase": 1,
+      "model": "gpt-5.6-luna",
+      "calls": 7,
+      "tokens_known": 222055,
+      "unknown_usage_calls": 0,
+      "cost_usd": null,
+      "charged_model_seconds": 331.57119241915643,
+      "human_interventions": 0,
+      "candidate_sha256": "4456bb7f41c44ce79c73e8941ebbb35110a62bbb467f9704e51652cb8caf5dcd",
+      "checked_source_matches": true,
+      "all_checks_pass": true,
+      "accepted": true,
+      "checks": [
+        {
+          "name": "api_fanout_and_idempotency",
+          "passed": true,
+          "detail": "fanout, response bodies, original payload, idempotency, and success terminality hold"
+        },
+        {
+          "name": "network_error_isolation",
+          "passed": true,
+          "detail": "connection refusal is isolated, recorded with null status, and retried on schedule"
+        },
+        {
+          "name": "retry_isolation_and_cap",
+          "passed": true,
+          "detail": "failure isolation, deterministic 10/20 backoff, cap, and no success redelivery hold"
+        },
+        {
+          "name": "metrics_consistency",
+          "passed": true,
+          "detail": "all required counters match mixed successful and retrying state"
+        },
+        {
+          "name": "restart_persistence",
+          "passed": true,
+          "detail": "subscription, event, schedule, terminal state, history, and metrics survive restarts"
+        },
+        {
+          "name": "invalid_input",
+          "passed": true,
+          "detail": "malformed JSON, missing fields, bad time types, and unknown routes return JSON 4xx"
+        },
+        {
+          "name": "source_integrity",
+          "passed": true,
+          "detail": "candidate source remained unchanged"
+        }
+      ],
+      "input_hashes": {
+        "service.py": "bc82f43a96e01157c5d8748c6db02b4a3b22ec345f543a87f0dc197f6c37fc5a",
+        "README.md": "b58484edb7cf99813ebd6bd78e609689f51261e151786a1429e944ee95a9fef4"
+      },
+      "candidate": "candidates/solo",
+      "initial_source_sha256": "a8ba7f43e655b8d4e6c97d3b7a203df6c4bc299b76e473b583ba0247e67dcb48",
+      "initial_context_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "calls_detail": [
+        {
+          "number": 1,
+          "role": "worker-1",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 28134,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 2352,
+            "reasoning_output_tokens": 54
+          },
+          "error": null,
+          "elapsed_seconds": 47.57612216682173,
+          "cost_usd": null,
+          "action": "edit",
+          "message": "Implemented durable SQLite-backed state, including subscriptions, events, deliveries, retry schedules, attempt history, and metrics persistence across restart. The service retains idempotency and delivery isolation while validating JSON inputs and URL paths.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "ec54b45205a903bac91cd6bc3c574c738b10c6cf9070c8a906cdf4b95203d494"
+        },
+        {
+          "number": 2,
+          "role": "worker-1",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 29652,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 2717,
+            "reasoning_output_tokens": 113
+          },
+          "error": null,
+          "elapsed_seconds": 54.518283542012796,
+          "cost_usd": null,
+          "action": "edit",
+          "message": "Fixed the SQLite schema string syntax errors so the service starts successfully; preserved durable state, idempotent event handling, isolated delivery attempts, retry scheduling, attempt history, and metrics.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "94f18c23af593b8cec31a6c7a5126c99b02c51cd9b392454181428c3ab3a7476"
+        },
+        {
+          "number": 3,
+          "role": "worker-1",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 29470,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 2778,
+            "reasoning_output_tokens": 49
+          },
+          "error": null,
+          "elapsed_seconds": 56.39783504209481,
+          "cost_usd": null,
+          "action": "edit",
+          "message": "Repaired service.py with durable SQLite state, idempotent event ingestion, fan-out delivery, isolated HTTP attempts, deterministic retries capped at three attempts, attempt history, metrics, restart persistence, and JSON 4xx handling for invalid requests. Acceptance checks passed.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "9da33c93ae742c242a12bcfed6b6487e9a6537f4d1c3539d2c1f4dadb56d1b8d"
+        },
+        {
+          "number": 4,
+          "role": "worker-1",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 29544,
+            "cached_input_tokens": 9984,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 2823,
+            "reasoning_output_tokens": 94
+          },
+          "error": null,
+          "elapsed_seconds": 56.372806292027235,
+          "cost_usd": null,
+          "action": "edit",
+          "message": "Phase 1 acceptance checks pass: durable SQLite state, idempotent event ingestion, fan-out delivery, isolated HTTP attempts, deterministic capped retries, attempt history, metrics, restart persistence, and JSON 4xx handling are implemented.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "a55e3c4648a2fe24a14c280b51d2220ee31ff64f1fb7b307747ab421dbe12494"
+        },
+        {
+          "number": 5,
+          "role": "worker-1",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 29616,
+            "cached_input_tokens": 19200,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 2780,
+            "reasoning_output_tokens": 72
+          },
+          "error": null,
+          "elapsed_seconds": 55.15032249991782,
+          "cost_usd": null,
+          "action": "edit",
+          "message": "Phase 1 acceptance checks pass. Durable SQLite state, idempotent event ingestion, fan-out delivery, isolated HTTP attempts, deterministic capped retries, attempt history, metrics, restart persistence, and JSON 4xx handling are implemented.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "d53412c2de450e8a41c20df1860feff49f5bc0f1bf15cf48908de1d7e9d06906"
+        },
+        {
+          "number": 6,
+          "role": "worker-1",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 29660,
+            "cached_input_tokens": 19200,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 2713,
+            "reasoning_output_tokens": 135
+          },
+          "error": null,
+          "elapsed_seconds": 54.119058709125966,
+          "cost_usd": null,
+          "action": "edit",
+          "message": "Phase 1 implementation is complete. Acceptance checks passed.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "79bdf673fa475daf81c88a7ffe8fc6b77e40efd1cf3643bb60f9842fa0b9159e"
+        },
+        {
+          "number": 7,
+          "role": "worker-1",
+          "model": "gpt-5.6-luna",
+          "usage": {
+            "input_tokens": 29710,
+            "cached_input_tokens": 9984,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 106,
+            "reasoning_output_tokens": 27
+          },
+          "error": null,
+          "elapsed_seconds": 7.4367641671560705,
+          "cost_usd": null,
+          "action": "finish",
+          "message": "Phase 1 is complete. Acceptance checks pass for durable persistence, idempotency, fan-out, isolated retries, metrics, restart recovery, and JSON 4xx handling.",
+          "tool_execution_count": 0,
+          "prompt_sha256": "ad3c815518c96c90ec7a0f2bd4405f1e0939e451f543a2270ba03bc5e2252c94"
+        }
+      ],
+      "config": {
+        "mode": "solo",
+        "model": "gpt-5.6-luna",
+        "lead_model": "gpt-5.6-luna",
+        "critic_model": "gpt-5.6-luna",
+        "max_calls": 8,
+        "call_timeout": 120.0,
+        "wall_seconds": 960.0
+      }
+    }
+  ]
+}

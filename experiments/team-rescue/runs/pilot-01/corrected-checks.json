@@ -1,0 +1,393 @@
+{
+  "evidence_kind": "post_hoc_not_scored",
+  "checker_runtime": "9e79875293d45a3c4036823ab6716c591cd39eb9",
+  "qualification": "Corrected checks reveal gaps; these do not replace original trial grades or usage.",
+  "rows": [
+    {
+      "phase": 1,
+      "arm": "reference-solo",
+      "passed": false,
+      "workspace": "candidates/reference-solo",
+      "input_hashes": {
+        "service.py": "9499f5bafd85eaf6e534cd3c2e91a55f233fe7b46fc8cb0a4b15eefce8df9813",
+        "README.md": "b58484edb7cf99813ebd6bd78e609689f51261e151786a1429e944ee95a9fef4"
+      },
+      "checks": [
+        {
+          "name": "api_fanout_and_idempotency",
+          "passed": true,
+          "detail": "fanout, response bodies, original payload, idempotency, and success terminality hold"
+        },
+        {
+          "name": "payload_roundtrip",
+          "passed": true,
+          "detail": "null, boolean, number, string, list, and object payloads survive restart and delivery"
+        },
+        {
+          "name": "network_error_isolation",
+          "passed": true,
+          "detail": "connection refusal is isolated, recorded with null status, and retried on schedule"
+        },
+        {
+          "name": "retry_isolation_and_cap",
+          "passed": true,
+          "detail": "failure isolation, deterministic 10/20 backoff, cap, and no success redelivery hold"
+        },
+        {
+          "name": "metrics_consistency",
+          "passed": true,
+          "detail": "all required counters match mixed successful and retrying state"
+        },
+        {
+          "name": "restart_persistence",
+          "passed": true,
+          "detail": "subscription, event, schedule, terminal state, history, and metrics survive restarts"
+        },
+        {
+          "name": "invalid_input",
+          "passed": false,
+          "detail": "VerificationError: unsupported method returned HTTP 501: {'raw': '<!DOCTYPE HTML>\\n<html lang=\"en\">\\n    <head>\\n        <meta charset=\"utf-8\">\\n        <style type=\"text/css\">\\n            :root {\\n                color-scheme: light dark;\\n            }\\n        </style>\\n        <title>Error response</title>\\n    </head>\\n    <body>\\n        <h1>Error response</h1>\\n        <p>Error code: 501</p>\\n        <p>Message: Unsupported method (\\'PUT\\').</p>\\n        <p>Error code explanation: 501 - Server does not support this operation.</p>\\n    </body>\\n</html>\\n'}"
+        },
+        {
+          "name": "source_integrity",
+          "passed": true,
+          "detail": "candidate source remained unchanged"
+        }
+      ],
+      "elapsed_ms": 10172
+    },
+    {
+      "phase": 1,
+      "arm": "pair",
+      "passed": false,
+      "workspace": "candidates/pair",
+      "input_hashes": {
+        "service.py": "a9080c26a92d1a0a6dc6161e870af8653bc1fa9aef48a53e05bb2fba2773ce38",
+        "README.md": "b58484edb7cf99813ebd6bd78e609689f51261e151786a1429e944ee95a9fef4"
+      },
+      "checks": [
+        {
+          "name": "api_fanout_and_idempotency",
+          "passed": true,
+          "detail": "fanout, response bodies, original payload, idempotency, and success terminality hold"
+        },
+        {
+          "name": "payload_roundtrip",
+          "passed": false,
+          "detail": "VerificationError: JSON payload deliveries were lost across restart"
+        },
+        {
+          "name": "network_error_isolation",
+          "passed": true,
+          "detail": "connection refusal is isolated, recorded with null status, and retried on schedule"
+        },
+        {
+          "name": "retry_isolation_and_cap",
+          "passed": true,
+          "detail": "failure isolation, deterministic 10/20 backoff, cap, and no success redelivery hold"
+        },
+        {
+          "name": "metrics_consistency",
+          "passed": true,
+          "detail": "all required counters match mixed successful and retrying state"
+        },
+        {
+          "name": "restart_persistence",
+          "passed": true,
+          "detail": "subscription, event, schedule, terminal state, history, and metrics survive restarts"
+        },
+        {
+          "name": "invalid_input",
+          "passed": false,
+          "detail": "VerificationError: unsupported method returned HTTP 501: {'raw': '<!DOCTYPE HTML>\\n<html lang=\"en\">\\n    <head>\\n        <meta charset=\"utf-8\">\\n        <style type=\"text/css\">\\n            :root {\\n                color-scheme: light dark;\\n            }\\n        </style>\\n        <title>Error response</title>\\n    </head>\\n    <body>\\n        <h1>Error response</h1>\\n        <p>Error code: 501</p>\\n        <p>Message: Unsupported method (\\'PUT\\').</p>\\n        <p>Error code explanation: 501 - Server does not support this operation.</p>\\n    </body>\\n</html>\\n'}"
+        },
+        {
+          "name": "source_integrity",
+          "passed": true,
+          "detail": "candidate source remained unchanged"
+        }
+      ],
+      "elapsed_ms": 9673
+    },
+    {
+      "phase": 1,
+      "arm": "lead",
+      "passed": true,
+      "workspace": "candidates/lead",
+      "input_hashes": {
+        "service.py": "88b62dfc87b0e54722d3b1ee11fa88eb44d3828a16ad689a7841488c4538babb",
+        "README.md": "b58484edb7cf99813ebd6bd78e609689f51261e151786a1429e944ee95a9fef4"
+      },
+      "checks": [
+        {
+          "name": "api_fanout_and_idempotency",
+          "passed": true,
+          "detail": "fanout, response bodies, original payload, idempotency, and success terminality hold"
+        },
+        {
+          "name": "payload_roundtrip",
+          "passed": true,
+          "detail": "null, boolean, number, string, list, and object payloads survive restart and delivery"
+        },
+        {
+          "name": "network_error_isolation",
+          "passed": true,
+          "detail": "connection refusal is isolated, recorded with null status, and retried on schedule"
+        },
+        {
+          "name": "retry_isolation_and_cap",
+          "passed": true,
+          "detail": "failure isolation, deterministic 10/20 backoff, cap, and no success redelivery hold"
+        },
+        {
+          "name": "metrics_consistency",
+          "passed": true,
+          "detail": "all required counters match mixed successful and retrying state"
+        },
+        {
+          "name": "restart_persistence",
+          "passed": true,
+          "detail": "subscription, event, schedule, terminal state, history, and metrics survive restarts"
+        },
+        {
+          "name": "invalid_input",
+          "passed": true,
+          "detail": "malformed JSON, bad field types, unknown routes, and unsupported methods return JSON 4xx"
+        },
+        {
+          "name": "source_integrity",
+          "passed": true,
+          "detail": "candidate source remained unchanged"
+        }
+      ],
+      "elapsed_ms": 9956
+    },
+    {
+      "phase": 1,
+      "arm": "solo",
+      "passed": false,
+      "workspace": "candidates/solo",
+      "input_hashes": {
+        "service.py": "bc82f43a96e01157c5d8748c6db02b4a3b22ec345f543a87f0dc197f6c37fc5a",
+        "README.md": "b58484edb7cf99813ebd6bd78e609689f51261e151786a1429e944ee95a9fef4"
+      },
+      "checks": [
+        {
+          "name": "api_fanout_and_idempotency",
+          "passed": true,
+          "detail": "fanout, response bodies, original payload, idempotency, and success terminality hold"
+        },
+        {
+          "name": "payload_roundtrip",
+          "passed": true,
+          "detail": "null, boolean, number, string, list, and object payloads survive restart and delivery"
+        },
+        {
+          "name": "network_error_isolation",
+          "passed": true,
+          "detail": "connection refusal is isolated, recorded with null status, and retried on schedule"
+        },
+        {
+          "name": "retry_isolation_and_cap",
+          "passed": true,
+          "detail": "failure isolation, deterministic 10/20 backoff, cap, and no success redelivery hold"
+        },
+        {
+          "name": "metrics_consistency",
+          "passed": true,
+          "detail": "all required counters match mixed successful and retrying state"
+        },
+        {
+          "name": "restart_persistence",
+          "passed": true,
+          "detail": "subscription, event, schedule, terminal state, history, and metrics survive restarts"
+        },
+        {
+          "name": "invalid_input",
+          "passed": false,
+          "detail": "VerificationError: POST /subscriptions failed: Remote end closed connection without response"
+        },
+        {
+          "name": "source_integrity",
+          "passed": true,
+          "detail": "candidate source remained unchanged"
+        }
+      ],
+      "elapsed_ms": 9971
+    },
+    {
+      "phase": 2,
+      "arm": "reference-solo",
+      "passed": false,
+      "workspace": "phase2-candidates/reference-solo",
+      "input_hashes": {
+        "service.py": "9a4b5f35cddcc4aa0675f49db2aa20243db31d284dc68046208a0e70619bad6e",
+        "README.md": "b58484edb7cf99813ebd6bd78e609689f51261e151786a1429e944ee95a9fef4"
+      },
+      "checks": [
+        {
+          "name": "api_fanout_and_idempotency",
+          "passed": true,
+          "detail": "fanout, response bodies, original payload, idempotency, and success terminality hold"
+        },
+        {
+          "name": "payload_roundtrip",
+          "passed": true,
+          "detail": "null, boolean, number, string, list, and object payloads survive restart and delivery"
+        },
+        {
+          "name": "network_error_isolation",
+          "passed": true,
+          "detail": "connection refusal is isolated, recorded with null status, and retried on schedule"
+        },
+        {
+          "name": "retry_isolation_and_cap",
+          "passed": true,
+          "detail": "failure isolation, deterministic 10/20 backoff, cap, and no success redelivery hold"
+        },
+        {
+          "name": "metrics_consistency",
+          "passed": true,
+          "detail": "all required counters match mixed successful and retrying state"
+        },
+        {
+          "name": "restart_persistence",
+          "passed": true,
+          "detail": "subscription, event, schedule, terminal state, history, and metrics survive restarts"
+        },
+        {
+          "name": "invalid_input",
+          "passed": false,
+          "detail": "VerificationError: unsupported method returned HTTP 501: {'raw': '<!DOCTYPE HTML>\\n<html lang=\"en\">\\n    <head>\\n        <meta charset=\"utf-8\">\\n        <style type=\"text/css\">\\n            :root {\\n                color-scheme: light dark;\\n            }\\n        </style>\\n        <title>Error response</title>\\n    </head>\\n    <body>\\n        <h1>Error response</h1>\\n        <p>Error code: 501</p>\\n        <p>Message: Unsupported method (\\'PUT\\').</p>\\n        <p>Error code explanation: 501 - Server does not support this operation.</p>\\n    </body>\\n</html>\\n'}"
+        },
+        {
+          "name": "replay",
+          "passed": true,
+          "detail": "terminal replay survives restart, retains history, and opens a fresh activation"
+        },
+        {
+          "name": "source_integrity",
+          "passed": true,
+          "detail": "candidate source remained unchanged"
+        }
+      ],
+      "elapsed_ms": 10935
+    },
+    {
+      "phase": 2,
+      "arm": "lead",
+      "passed": false,
+      "workspace": "phase2-candidates/lead",
+      "input_hashes": {
+        "service.py": "ae1733cfb2fb4e086a267fd6a11dfad70a348982d633ac10a9a1d51172bc2af7",
+        "README.md": "b58484edb7cf99813ebd6bd78e609689f51261e151786a1429e944ee95a9fef4"
+      },
+      "checks": [
+        {
+          "name": "api_fanout_and_idempotency",
+          "passed": true,
+          "detail": "fanout, response bodies, original payload, idempotency, and success terminality hold"
+        },
+        {
+          "name": "payload_roundtrip",
+          "passed": true,
+          "detail": "null, boolean, number, string, list, and object payloads survive restart and delivery"
+        },
+        {
+          "name": "network_error_isolation",
+          "passed": true,
+          "detail": "connection refusal is isolated, recorded with null status, and retried on schedule"
+        },
+        {
+          "name": "retry_isolation_and_cap",
+          "passed": true,
+          "detail": "failure isolation, deterministic 10/20 backoff, cap, and no success redelivery hold"
+        },
+        {
+          "name": "metrics_consistency",
+          "passed": true,
+          "detail": "all required counters match mixed successful and retrying state"
+        },
+        {
+          "name": "restart_persistence",
+          "passed": true,
+          "detail": "subscription, event, schedule, terminal state, history, and metrics survive restarts"
+        },
+        {
+          "name": "invalid_input",
+          "passed": true,
+          "detail": "malformed JSON, bad field types, unknown routes, and unsupported methods return JSON 4xx"
+        },
+        {
+          "name": "replay",
+          "passed": false,
+          "detail": "VerificationError: replayed delivery did not get a second activation attempt"
+        },
+        {
+          "name": "source_integrity",
+          "passed": true,
+          "detail": "candidate source remained unchanged"
+        }
+      ],
+      "elapsed_ms": 10953
+    },
+    {
+      "phase": 2,
+      "arm": "solo",
+      "passed": false,
+      "workspace": "phase2-candidates/solo",
+      "input_hashes": {
+        "service.py": "46747c14f2d2df3c21d280a08acba9bcc49447b58d4d95d5d623753ab71ee5ae",
+        "README.md": "b58484edb7cf99813ebd6bd78e609689f51261e151786a1429e944ee95a9fef4"
+      },
+      "checks": [
+        {
+          "name": "api_fanout_and_idempotency",
+          "passed": true,
+          "detail": "fanout, response bodies, original payload, idempotency, and success terminality hold"
+        },
+        {
+          "name": "payload_roundtrip",
+          "passed": true,
+          "detail": "null, boolean, number, string, list, and object payloads survive restart and delivery"
+        },
+        {
+          "name": "network_error_isolation",
+          "passed": true,
+          "detail": "connection refusal is isolated, recorded with null status, and retried on schedule"
+        },
+        {
+          "name": "retry_isolation_and_cap",
+          "passed": true,
+          "detail": "failure isolation, deterministic 10/20 backoff, cap, and no success redelivery hold"
+        },
+        {
+          "name": "metrics_consistency",
+          "passed": true,
+          "detail": "all required counters match mixed successful and retrying state"
+        },
+        {
+          "name": "restart_persistence",
+          "passed": true,
+          "detail": "subscription, event, schedule, terminal state, history, and metrics survive restarts"
+        },
+        {
+          "name": "invalid_input",
+          "passed": false,
+          "detail": "VerificationError: POST /subscriptions failed: Remote end closed connection without response"
+        },
+        {
+          "name": "replay",
+          "passed": false,
+          "detail": "VerificationError: POST /deliveries/e0786580a09748a7af20be42ff4f6047/replay returned HTTP 400: {'error': 'delivery must be terminal'}"
+        },
+        {
+          "name": "source_integrity",
+          "passed": true,
+          "detail": "candidate source remained unchanged"
+        }
+      ],
+      "elapsed_ms": 10701
+    }
+  ]
+}

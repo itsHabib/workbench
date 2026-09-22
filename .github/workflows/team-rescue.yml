@@ -1,0 +1,37 @@
+name: Team rescue experiment
+
+on:
+  pull_request:
+    paths: ['experiments/team-rescue/**', '.github/workflows/team-rescue.yml']
+  push:
+    branches: [main]
+    paths: ['experiments/team-rescue/**', '.github/workflows/team-rescue.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  local-mechanics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: subject
+      # Pin the consumer contract while the Fleet job foundation is a separate PR.
+      - uses: actions/checkout@v4
+        with:
+          repository: itsHabib/workbench
+          ref: 026b7ea4467a21fd0cf32f7d60bf7347a04b38c4
+          path: fleet-runtime
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: fleet-runtime/go.mod
+      - name: Build the pinned Fleet job binary
+        working-directory: fleet-runtime
+        run: go build -o "$RUNNER_TEMP/fleet-team-rescue" ./cmd/fleet
+      - name: Local mechanism and independent checker tests (no model calls)
+        working-directory: subject
+        env:
+          FLEET_BIN: ${{ runner.temp }}/fleet-team-rescue
+        run: python3 -m unittest discover -s experiments/team-rescue -p 'test_*.py' -v
