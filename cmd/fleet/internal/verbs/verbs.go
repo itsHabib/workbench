@@ -87,6 +87,8 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet reassign <branch|#n> --for <role>        move a change's rows to another accountable role (splitting a hub is this plus one roles.map line)
   fleet undispatch <branch|#n> [--as <rel>]      retire a change's rows
   fleet sync [--repo <r>]                        refresh the cache of open changes and the rows other machines declared on them
+  fleet plan <intent.json> [--out plan.json]     preview unseated work declarations (POC)
+  fleet apply <plan.json> --expect-digest <hash> apply the reviewed plan; no worker launch
   fleet request <branch> --id <request> --worker <session> --for <lead> --brief <text>
                                                  record one retry-safe local assignment; does not launch a worker
   fleet send <address> [--id <id>] --kind <kind> --subject <text> --body <text|-> [--head <sha>] [--session <id8>]
@@ -149,6 +151,9 @@ func Dispatch(args []string) error {
 	}
 	if args[0] == "status" {
 		return CmdStatus(args[1:])
+	}
+	if args[0] == "plan" || args[0] == "apply" {
+		return dispatchPlan(args)
 	}
 	if args[0] == "request" {
 		return dispatchRequest(args[1:])
