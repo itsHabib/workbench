@@ -1,5 +1,15 @@
 # Results, 2026-09-17
 
+> **Status, 2026-09-17: development evidence, not a result.** An independent adversarial review
+> ([review-2026-09-17-codex/REVIEW.md](review-2026-09-17-codex/REVIEW.md)) found the headline claim
+> unsupported. Both arms ran on this substrate, so nothing here compares against the
+> prompts-and-loop hierarchy that actually worked; the generator supplied the decomposition and
+> handoffs a lead would author; kill condition 4 cannot fail; the scored scale runs predate the
+> fix that made `check` read intent; and one run per mode gives no variance. What survives: a
+> derived board, scoped rulings and wakes can carry some coordination on a pre-decomposed local
+> workload. The review also reproduced thirteen defects — twelve in the substrate, one in the scorer; see
+> [KNOWN-DEFECTS.md](../KNOWN-DEFECTS.md).
+
 The claim under test: a fleet of coding agents needs a management hierarchy to run safely.
 `KILL.md` set the conditions before any run. Both modes ran the same six tasks on the same
 sandbox, the same model (`claude-sonnet-5`), four seats, the same planted faults, the same

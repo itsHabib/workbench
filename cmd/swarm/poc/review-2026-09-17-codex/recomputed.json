@@ -1,0 +1,267 @@
+{
+  "flat": {
+    "sessions": {
+      "builder": 6,
+      "resume": 1
+    },
+    "wake_sessions": 4,
+    "output_tokens_sessions": 27288,
+    "output_tokens_wakes": 3046,
+    "cost_recorded": 3.0655068000000005,
+    "session_wall_s": 209.15207409858704,
+    "including_wakes_wall_s": 209.15207409858704,
+    "event_span_s": 174.52664589881897,
+    "asks_by_tier": {
+      "peer": 5,
+      "operator": 1
+    },
+    "rulers_by_tier": {
+      "peer": 5,
+      "operator": 1
+    },
+    "wait": {
+      "claim": {
+        "n": 6,
+        "median_s": 7.512096524238586,
+        "max_s": 23.031092882156372,
+        "missing": []
+      },
+      "rule": {
+        "n": 6,
+        "median_s": 7.512465476989746,
+        "max_s": 23.031514883041382,
+        "missing": []
+      }
+    },
+    "killed": [
+      {
+        "seat": "t2-config-retries",
+        "duration_s": 25.010663,
+        "cost_usd": 0,
+        "output_tokens": 0
+      }
+    ],
+    "event_counts": {
+      "admit": 6,
+      "session_start": 11,
+      "refuse_admit": 9,
+      "take": 2,
+      "drop": 2,
+      "nudge": 21,
+      "wake": 4,
+      "ask": 6,
+      "route": 6,
+      "claim": 6,
+      "rule": 6,
+      "refusal": 6
+    },
+    "duplicate_request_decisions": {},
+    "lead_output_tokens": 0
+  },
+  "tree": {
+    "sessions": {
+      "lead": 2,
+      "builder": 6,
+      "resume": 1
+    },
+    "wake_sessions": 5,
+    "output_tokens_sessions": 30031,
+    "output_tokens_wakes": 6256,
+    "cost_recorded": 4.3649642,
+    "session_wall_s": 241.93197417259216,
+    "including_wakes_wall_s": 365.7828600406647,
+    "event_span_s": 376.14082193374634,
+    "asks_by_tier": {
+      "peer": 3,
+      "lead": 5,
+      "operator": 1
+    },
+    "rulers_by_tier": {
+      "lead": 4,
+      "peer": 1,
+      "operator": 1
+    },
+    "wait": {
+      "claim": {
+        "n": 7,
+        "median_s": 13.16324496269226,
+        "max_s": 135.0705211162567,
+        "missing": [
+          "req_dlh9jqisic68_665ae338",
+          "req_dlh9lkj3ns74_e0a6cd96"
+        ]
+      },
+      "rule": {
+        "n": 6,
+        "median_s": 12.353851914405823,
+        "max_s": 50.109978914260864,
+        "missing": [
+          "req_dlh9hcxmlj3s_c79ed325",
+          "req_dlh9jqisic68_665ae338",
+          "req_dlh9lkj3ns74_e0a6cd96"
+        ]
+      }
+    },
+    "killed": [
+      {
+        "seat": "t2-config-retries",
+        "duration_s": 24.992473,
+        "cost_usd": 0,
+        "output_tokens": 0
+      }
+    ],
+    "event_counts": {
+      "admit": 9,
+      "session_start": 16,
+      "refuse_admit": 9,
+      "take": 2,
+      "nudge": 31,
+      "wake": 7,
+      "ask": 9,
+      "route": 9,
+      "claim": 7,
+      "rule": 6,
+      "drop": 2,
+      "refusal": 5
+    },
+    "duplicate_request_decisions": {},
+    "lead_output_tokens": 4614
+  },
+  "scale-flat": {
+    "sessions": {
+      "builder": 32,
+      "resume": 1,
+      "consolidator": 1
+    },
+    "wake_sessions": 4,
+    "output_tokens_sessions": 130148,
+    "output_tokens_wakes": 1648,
+    "cost_recorded": 17.891658,
+    "session_wall_s": 940.0521078109741,
+    "including_wakes_wall_s": 940.0521078109741,
+    "event_span_s": 954.6314461231232,
+    "asks_by_tier": {
+      "peer": 7
+    },
+    "rulers_by_tier": {
+      "peer": 7
+    },
+    "wait": {
+      "claim": {
+        "n": 7,
+        "median_s": 7.5439817905426025,
+        "max_s": 85.53216886520386,
+        "missing": []
+      },
+      "rule": {
+        "n": 7,
+        "median_s": 7.544486999511719,
+        "max_s": 85.53274297714233,
+        "missing": []
+      }
+    },
+    "killed": [
+      {
+        "seat": "t02-p2-k2",
+        "duration_s": 25.010721,
+        "cost_usd": 0,
+        "output_tokens": 0
+      }
+    ],
+    "event_counts": {
+      "admit": 40,
+      "session_start": 38,
+      "refuse_admit": 7,
+      "decide": 1,
+      "split": 1,
+      "nudge": 40,
+      "verify": 33,
+      "intend": 1,
+      "refusal": 15,
+      "ask": 7,
+      "route": 7,
+      "take": 6,
+      "claim": 7,
+      "rule": 7,
+      "wake": 4,
+      "drop": 6,
+      "consolidate": 1
+    },
+    "duplicate_request_decisions": {},
+    "lead_output_tokens": 0
+  },
+  "scale-tree": {
+    "sessions": {
+      "builder": 32,
+      "lead": 8,
+      "resume": 1,
+      "consolidator": 1
+    },
+    "wake_sessions": 13,
+    "output_tokens_sessions": 149312,
+    "output_tokens_wakes": 6810,
+    "cost_recorded": 19.388018000000002,
+    "session_wall_s": 1006.6084251403809,
+    "including_wakes_wall_s": 1006.6084251403809,
+    "event_span_s": 1041.8921988010406,
+    "asks_by_tier": {
+      "peer": 11,
+      "lead": 2
+    },
+    "rulers_by_tier": {
+      "peer": 5,
+      "lead": 7,
+      "operator": 1
+    },
+    "wait": {
+      "claim": {
+        "n": 13,
+        "median_s": 33.198298931121826,
+        "max_s": 54.71527099609375,
+        "missing": []
+      },
+      "rule": {
+        "n": 13,
+        "median_s": 33.19943189620972,
+        "max_s": 54.71645998954773,
+        "missing": []
+      }
+    },
+    "killed": [
+      {
+        "seat": "t02-p2-k2",
+        "duration_s": 25.011755,
+        "cost_usd": 0,
+        "output_tokens": 0
+      },
+      {
+        "seat": "lead",
+        "duration_s": 12.315451,
+        "cost_usd": 0,
+        "output_tokens": 0
+      }
+    ],
+    "event_counts": {
+      "admit": 36,
+      "session_start": 55,
+      "refuse_admit": 7,
+      "decide": 1,
+      "split": 1,
+      "nudge": 58,
+      "intend": 1,
+      "verify": 33,
+      "refusal": 15,
+      "take": 6,
+      "ask": 13,
+      "route": 13,
+      "wake": 13,
+      "claim": 17,
+      "rule": 13,
+      "drop": 6,
+      "escalate": 2,
+      "consolidate": 1
+    },
+    "duplicate_request_decisions": {},
+    "lead_output_tokens": 18729
+  }
+}

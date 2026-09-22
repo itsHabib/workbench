@@ -1,0 +1,20 @@
+{
+  "shared_linearizable": {
+    "interleavings": 6,
+    "both_clear": 0,
+    "example": []
+  },
+  "separate_unreplicated_views": {
+    "interleavings": 6,
+    "both_clear": 6,
+    "example": [
+      [
+        "Ai",
+        "Ac",
+        "Bi",
+        "Bc"
+      ]
+    ]
+  },
+  "limits": "Only proves two compliant peers cannot both observe clear with durable monotone intents and shared fresh reads; no write fencing, no rule-order enforcement, no intent withdrawal or crash identity."
+}

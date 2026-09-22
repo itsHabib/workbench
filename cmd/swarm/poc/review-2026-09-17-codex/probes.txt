@@ -1,0 +1,48 @@
+=== RUN   TestReviewExpiredEpoch
+    review_probe_test.go:4: REPRO: expired explicit epoch accepted dec_dlhkqdy9wuzk_6007c7e6
+--- PASS: TestReviewExpiredEpoch (0.11s)
+=== RUN   TestReviewStaleOtherEpoch
+    review_probe_test.go:5: REPRO: superseded epoch accepted after other's expiry dec_dlhkqewpbpjc_3fd56515
+--- PASS: TestReviewStaleOtherEpoch (0.08s)
+=== RUN   TestReviewTierOverride
+    review_probe_test.go:6: REPRO: peer superseded operator dec_dlhkqd3wr3nc_1b4b3f2b
+--- PASS: TestReviewTierOverride (0.07s)
+=== RUN   TestReviewAgeLock
+    review_probe_test.go:7: REPRO: B took live A lock; A release deleted B lock; C entered while B owns
+--- PASS: TestReviewAgeLock (0.07s)
+=== RUN   TestReviewLedger
+    review_probe_test.go:8: REPRO: suffix truncation accepted; un-rehashed alteration rejected
+    review_probe_test.go:8: REPRO: torn append makes whole ledger unreadable
+--- PASS: TestReviewLedger (0.07s)
+=== RUN   TestReviewRuleCrash
+    review_probe_test.go:9: REPRO: request ruled twice after restoring pre-save state (crash-boundary simulation)
+--- PASS: TestReviewRuleCrash (0.08s)
+=== RUN   TestReviewAdmission
+    review_probe_test.go:10: REPRO: two admits for one slot before either start
+--- PASS: TestReviewAdmission (0.10s)
+=== RUN   TestReviewResource
+    review_probe_test.go:11: REPRO: release resets token to 1; stale same-seat drop removes replacement lease
+--- PASS: TestReviewResource (0.07s)
+=== RUN   TestReviewSplit
+    review_probe_test.go:12: REPRO: duplicate child accepted; second split refused after child already queued must_supersede: dec_dlhkqdb8f2ao_e6d064e1 already ruled on task:parent; pass --supersedes dec_dlhkqdb8f2ao_e6d064e1 and say why in --evidence
+--- PASS: TestReviewSplit (0.07s)
+=== RUN   TestReviewWakeLost
+    review_probe_test.go:13: REPRO: provider missing, note consumed, exit recorded zero exec: "claude": executable file not found in $PATH
+--- PASS: TestReviewWakeLost (0.28s)
+=== RUN   TestReviewLateSession
+    review_probe_test.go:14: REPRO: delayed old Stop overwrites live replacement and enables resume
+--- PASS: TestReviewLateSession (0.10s)
+=== RUN   TestReviewOwnFilesMergeMoved
+    review_probe_test.go:16: REPRO: peer tip advancing changes inherited peer.go into a's ownership [briefs/out/a/START.md own.go] [briefs/out/a/START.md own.go peer.go]
+--- PASS: TestReviewOwnFilesMergeMoved (0.31s)
+=== RUN   TestReviewOwnFilesMergeResolution
+    review_probe_test.go:17: REPRO: edit made only by merge commit invisible to ownFiles [briefs/out/a/START.md own.go]
+--- PASS: TestReviewOwnFilesMergeResolution (0.25s)
+=== RUN   TestReviewOwnFilesRebaseControl
+    review_probe_test.go:18: CONTROL: start marker correctly bounds simple rebase after peer advances [briefs/out/a/START.md own.go]
+--- PASS: TestReviewOwnFilesRebaseControl (0.25s)
+=== RUN   TestReviewConsolidationCrash
+    review_probe_test.go:19: REPRO: durable merge-before-verify crash state skips verification on retry &{theme [] [] [] [a]}
+--- PASS: TestReviewConsolidationCrash (0.30s)
+PASS
+ok  	github.com/itsHabib/workbench/cmd/swarm/internal/swarm	2.496s
