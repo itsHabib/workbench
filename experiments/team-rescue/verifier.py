@@ -260,6 +260,7 @@ def check_api_and_idempotency(workspace: Path) -> str:
         root = Path(raw_root)
         first = stack.enter_context(Recipient())
         second = stack.enter_context(Recipient())
+        late = stack.enter_context(Recipient())
         candidate = new_candidate(workspace, root, "state")
         stack.callback(candidate.close)
         first_id = subscribe(candidate, first)
@@ -272,7 +273,14 @@ def check_api_and_idempotency(workspace: Path) -> str:
         duplicate = event(candidate, "invoice.paid:1001", {"invoice": "replacement"})
         require(duplicate.get("id") == "invoice.paid:1001" and duplicate.get("created") is False,
                 f"duplicate event response was {duplicate!r}")
+        # A subscription applies only to events accepted after it (TASK.md). Subscribing
+        # here, after the event exists, is the only arrangement that can catch an
+        # implementation which backfills the whole event log to every new subscriber.
+        late_id = subscribe(candidate, late)
+        require(late_id not in {first_id, second_id}, "late subscription reused an ID")
         require(tick(candidate, 100) == 2, "first tick must attempt exactly two fanout deliveries")
+        require(len(late.receipts) == 0,
+                f"a subscription created after the event was delivered {len(late.receipts)} times")
         require(len(first.receipts) == 1 and len(second.receipts) == 1,
                 f"fanout receipts were {len(first.receipts)} and {len(second.receipts)}")
         rows = delivery_rows(candidate)
@@ -296,6 +304,8 @@ def check_api_and_idempotency(workspace: Path) -> str:
         require(set(by_url) == {first.url, second.url}, "delivery URLs do not match subscriptions")
         require({row["subscription_id"] for row in rows} == {first_id, second_id},
                 "deliveries do not retain subscription IDs")
+        require(late.url not in by_url,
+                "the event was backfilled to a subscription created after it")
         for recipient in (first, second):
             receipt = recipient.receipts[0]
             row = by_url[recipient.url]
@@ -305,7 +315,9 @@ def check_api_and_idempotency(workspace: Path) -> str:
         require(tick(candidate, 1000) == 0, "successful deliveries were attempted again")
         require(len(first.receipts) == 1 and len(second.receipts) == 1,
                 "successful recipients received a redelivery")
-    return "fanout, response bodies, original payload, idempotency, and success terminality hold"
+        require(len(late.receipts) == 0, "a later tick backfilled the late subscription")
+    return ("fanout, response bodies, original payload, idempotency, late-subscription "
+            "exclusion, and success terminality hold")
 
 
 def canonical_json(value: Any) -> str:

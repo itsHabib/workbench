@@ -109,6 +109,20 @@ from the initial pilot; this is not an isolated test of model strength.
 - **Keep failures and versions.** We could reproduce exactly where a green
   implementation regressed and rescue the same snapshot without inventing faults.
 
+### Checker gap found after the runs
+
+An independent review of this PR found one more blind spot: `check_api_and_idempotency`
+created every subscription before the event, so an implementation that backfilled the
+whole event log to each new subscriber would still have been accepted, against the rule
+in `workload/TASK.md` that a subscription applies only to events accepted after it. The
+check now subscribes a third recipient after the event and asserts it receives nothing,
+on that tick and on the later redelivery sweep.
+
+Re-running that rule against all ten archived candidates plus the reference workload
+found **no backfilling implementation** — every one attempted exactly one delivery and
+left the late subscriber empty. The recorded acceptances stand; the gap was real but
+unexploited. Original scores are unchanged.
+
 ## What is built, and what remains
 
 The local driver uses Fleet's durable claims and action receipts, records model
