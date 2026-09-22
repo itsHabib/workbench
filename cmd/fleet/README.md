@@ -3,6 +3,11 @@
 ## What this is for
 
 Fleet records agent sessions, assignments, mail, handoffs and exact-head receipts.
+
+The optional [receipt admission POC](../../docs/features/sdlc-handoff/README.md)
+lets a local dispatch demand passing evidence with `--requires <kind,kind>
+--head <full-sha>`. It records the admission before declaring the next work row;
+the first slice supports dispatch without slot placement.
 Leads use those records to answer questions, coordinate separate worktrees and
 check results. The Go watcher can start configured headless sessions.
 

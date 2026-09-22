@@ -106,6 +106,10 @@ func receiptPaths(sha, head, kind string) (latest, history string) {
 // latest record first, so the history never starts by claiming the earlier verdict
 // never happened.
 func recordReceipt(sha, kind string, rec fleet.Rec) error {
+	return fleet.KeyLock("receipts", func() error { return recordReceiptLocked(sha, kind, rec) })
+}
+
+func recordReceiptLocked(sha, kind string, rec fleet.Rec) error {
 	latest, history := receiptPaths(sha, fleet.S(rec, "head"), kind)
 	// The seed must be durable BEFORE the latest file is overwritten. An ignored failure
 	// here (an unwritable .jsonl) followed by the write below erases the very legacy

@@ -82,6 +82,7 @@ revoke / handoff act on the repo you are standing in. ` + "`main`" + ` in two re
   fleet assign <slot> <branch> ["<brief>"]       check <branch> out in a free slot and record the assignment (read at the slot's next SessionStart)
   fleet unassign <slot>                          clear placement and matching rows; retain files and leases
   fleet dispatch <branch|#n> --as <rel> [--for <role>] [--due 45m] [--slot <name>] [--brief "…"] [--reply-to <address>] [--repo <owner/repo|path>] [--take]
+                 [--requires <kind,kind> --head <full-sha>]  require local receipt history before declaring work; POC without slot placement
                                                  the one declared act: an ownership row (change, relationship, accountable, due), placed in a slot when named
   fleet work [--for <role>] [--json]             every row with its observed state: dead · late · undeclared · working · idle · dispatched · done
   fleet reassign <branch|#n> --for <role>        move a change's rows to another accountable role (splitting a hub is this plus one roles.map line)
@@ -330,16 +331,7 @@ func dispatchSeats(verb string, plain []string, parg func(int) string) (bool, er
 func dispatchWork(verb string, plain []string, asJSON bool) (bool, error) {
 	switch verb {
 	case "dispatch":
-		vals := map[string]string{}
-		for _, f := range []string{"--as", "--for", "--due", "--slot", "--brief", "--reply-to", "--repo"} {
-			v, err := optValue(plain, f, verb)
-			if err != nil {
-				return true, err
-			}
-			vals[f] = v
-		}
-		pos := positional(without(plain, "--take"), "--as", "--for", "--due", "--slot", "--brief", "--reply-to", "--repo")
-		return true, CmdDispatch(first(pos), vals["--as"], vals["--for"], vals["--due"], vals["--slot"], vals["--brief"], "", vals["--reply-to"], contains(plain, "--take"), vals["--repo"])
+		return true, dispatchWorkEntry(plain)
 	case "reassign":
 		forRole, err := optValue(plain, "--for", verb)
 		if err != nil {
@@ -381,6 +373,24 @@ func dispatchWork(verb string, plain []string, asJSON bool) (bool, error) {
 	default:
 		return false, nil
 	}
+}
+
+func dispatchWorkEntry(args []string) error {
+	flags := []string{"--as", "--for", "--due", "--slot", "--brief", "--reply-to", "--repo", "--requires", "--head"}
+	vals := map[string]string{}
+	for _, f := range flags {
+		v, err := optValue(args, f, "dispatch")
+		if err != nil {
+			return err
+		}
+		if (f == "--requires" || f == "--head") && contains(args, f) && strings.TrimSpace(v) == "" {
+			return refuse("fleet dispatch: %s needs a non-empty value", f)
+		}
+		vals[f] = v
+	}
+	pos := positional(without(args, "--take"), flags...)
+	opts := DispatchOptions{Repo: vals["--repo"], Requires: vals["--requires"], Head: vals["--head"]}
+	return CmdDispatch(first(pos), vals["--as"], vals["--for"], vals["--due"], vals["--slot"], vals["--brief"], "", vals["--reply-to"], contains(args, "--take"), opts)
 }
 
 // dispatchActs is what a session does by hand: receipts, resources, handoff, role binding.
