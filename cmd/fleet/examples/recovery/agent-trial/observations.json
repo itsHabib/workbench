@@ -1,0 +1,165 @@
+{
+  "audited_at": "2026-09-13T23:40:37.725362+00:00",
+  "scope": "Retained fixture files, Git objects and process event records; not a provider or isolation guarantee.",
+  "source_sha256": "2f156c4b94cb33e0cc17d6a8d9c30cec13c1e1946b61000dc7ee727c105c2207",
+  "cases": {
+    "direct": {
+      "original_worker_pid": 92511,
+      "event_counts": {
+        "worker-started": 1,
+        "checkpoint-published": 1,
+        "worker-completed": 1
+      },
+      "immutable_files": {
+        "supervisor/snapshot.json": {
+          "sha256": "2f156c4b94cb33e0cc17d6a8d9c30cec13c1e1946b61000dc7ee727c105c2207",
+          "mtime_ns": 1789341748278791333
+        },
+        "supervisor/snapshot-check.md": {
+          "sha256": "de522e1f12972cb45259d22a9391fdba11fd9004c9312ddc6c7c62183e669b95",
+          "mtime_ns": 1789341918509724511
+        },
+        "render/snapshot.json": {
+          "sha256": "2f156c4b94cb33e0cc17d6a8d9c30cec13c1e1946b61000dc7ee727c105c2207",
+          "mtime_ns": 1789341748278791333
+        }
+      },
+      "queue_sha256": "21d87a1b724759de5f4bf113e60684bca64de9d5b7e25da17eb6f39b1c49496f",
+      "queue_commit": "5f00a3a9a3b262ee466cc6f6dece38903ade5c3a",
+      "assessment_sha256": "dc091657603bc88799f309204f5342ee7532cffa0b548f051edc614960281fd9",
+      "assessment_commit": "a359a5df029a533d3206373cf1236f5a7acd6f5a",
+      "verified_pr_rows": 5,
+      "check_outcomes": {
+        "SUCCESS": 21,
+        "SKIPPED": 2,
+        "IN_PROGRESS": 2,
+        "NEUTRAL": 1
+      },
+      "extra_clarification_reported": [],
+      "draft_preservation_basis": "Matching start hash and worker assertion at release; no continuous write audit.",
+      "events": [
+        {
+          "at": 1789341794.391438,
+          "pid": 92511,
+          "kind": "worker-started",
+          "draft_sha256": "f2f77e3ad6703b154469f7e02a2c821dcda8b5691a8aa60307278364c216b767"
+        },
+        {
+          "at": 1789342007.799768,
+          "pid": 96391,
+          "kind": "checkpoint-published",
+          "checkpoint_sha256": "a7d2576d54177637a96341993da77d7502f7ade9b296f40c38d3810177d8db0b"
+        },
+        {
+          "at": 1789342175.600856,
+          "pid": 92511,
+          "kind": "worker-completed",
+          "output_sha256": "21d87a1b724759de5f4bf113e60684bca64de9d5b7e25da17eb6f39b1c49496f",
+          "draft_preserved_until_release": true
+        }
+      ],
+      "reported_clock_start": "2026-09-13T23:28:20Z",
+      "reported_clock_end": "2026-09-13T23:33:06.812376Z",
+      "clock_limit": "Agent clock samples exclude some initial reading; descriptive only, not a causal timing comparison.",
+      "retrieval_friction": [
+        {
+          "observation": "Two initial Git queries at the case root returned exit 128: not a git repository.",
+          "resolution": "Used the supervisor and render checkouts specified in the brief; no clarification or reconstruction help required."
+        }
+      ]
+    },
+    "fleet": {
+      "original_worker_pid": 92495,
+      "event_counts": {
+        "worker-started": 1,
+        "checkpoint-published": 1,
+        "worker-completed": 1
+      },
+      "immutable_files": {
+        "supervisor/snapshot.json": {
+          "sha256": "2f156c4b94cb33e0cc17d6a8d9c30cec13c1e1946b61000dc7ee727c105c2207",
+          "mtime_ns": 1789341748278791333
+        },
+        "supervisor/snapshot-check.md": {
+          "sha256": "de522e1f12972cb45259d22a9391fdba11fd9004c9312ddc6c7c62183e669b95",
+          "mtime_ns": 1789341918509724511
+        },
+        "render/snapshot.json": {
+          "sha256": "2f156c4b94cb33e0cc17d6a8d9c30cec13c1e1946b61000dc7ee727c105c2207",
+          "mtime_ns": 1789341748278791333
+        }
+      },
+      "queue_sha256": "21d87a1b724759de5f4bf113e60684bca64de9d5b7e25da17eb6f39b1c49496f",
+      "queue_commit": "110af8aa0b1a0609017b5ac3b17606fa0faffe04",
+      "assessment_sha256": "8266f90447705c4a2c35fd6cd67b04bd716a2acdfe3947b02b3338ba164017db",
+      "assessment_commit": "688cde3bdbfbed458353641af2c2063ed6745645",
+      "verified_pr_rows": 5,
+      "check_outcomes": {
+        "SUCCESS": 21,
+        "SKIPPED": 2,
+        "IN_PROGRESS": 2,
+        "NEUTRAL": 1
+      },
+      "extra_clarification_reported": [],
+      "draft_preservation_basis": "Matching start hash and worker assertion at release; no continuous write audit.",
+      "events": [
+        {
+          "at": 1789341794.326944,
+          "pid": 92495,
+          "kind": "worker-started",
+          "draft_sha256": "f2f77e3ad6703b154469f7e02a2c821dcda8b5691a8aa60307278364c216b767"
+        },
+        {
+          "at": 1789342007.757186,
+          "pid": 96391,
+          "kind": "checkpoint-published",
+          "checkpoint_sha256": "a7d2576d54177637a96341993da77d7502f7ade9b296f40c38d3810177d8db0b"
+        },
+        {
+          "at": 1789342186.59256,
+          "pid": 92495,
+          "kind": "worker-completed",
+          "output_sha256": "21d87a1b724759de5f4bf113e60684bca64de9d5b7e25da17eb6f39b1c49496f",
+          "draft_preserved_until_release": true
+        }
+      ],
+      "reported_clock_start": "2026-09-13T23:28:40Z",
+      "reported_clock_end": "2026-09-13T23:35:13.407846+00:00",
+      "clock_limit": "Agent clock samples exclude some initial reading; descriptive only, not a causal timing comparison.",
+      "retrieval_friction": [
+        "The entry-directed full role_handoff_record worked; its preview was truncated and could not serve as the entire handoff.",
+        "An unnecessary attempt to read supervisor/HANDOFF.md failed because this fixture carries it through Fleet. No reconstruction help was needed.",
+        "fleet work --help printed the current work row instead of help.",
+        "inspect reported no observed readable trace for both roles; the full checkpoint, process record and artifact evidence were sufficient.",
+        "A raw checkpoint-hash equality assertion failed. Follow-up isolated exactly one missing trailing newline; adding it matches the publication event hash."
+      ]
+    }
+  },
+  "verdict": "pass: both completed the controlled workload and retained the completed input bytes and mtimes",
+  "tested_fleet_head": "03f541a8d7d525968112ba9cc1387fbaacf94c45",
+  "interruption": {
+    "at": 1789342061.69171,
+    "original_supervisor": "/root/impact_supervisor",
+    "interrupt_result": "previous_status=running",
+    "workers_still_alive": [
+      92495,
+      92511
+    ],
+    "fresh_initial_prompts_per_case": 1
+  },
+  "prompt_count_basis": "Root dispatched one initial prompt per fresh agent with fork_turns=none and sent neither a reconstruction followup; both reported no clarification needed.",
+  "checkpoint_observation": {
+    "checkpoint_sha256": "a11066e095383dc59e0a8d04a31dbb9c0dee8134b0aed28845d083ea29c7bbcc",
+    "checkpoint_bytes": 5373,
+    "published_checkpoint_sha256": [
+      "a7d2576d54177637a96341993da77d7502f7ade9b296f40c38d3810177d8db0b"
+    ],
+    "checkpoint_sha256_with_final_newline": "a7d2576d54177637a96341993da77d7502f7ade9b296f40c38d3810177d8db0b",
+    "checkpoint_start_repr": "'# PR review batch handoff\\n\\nThe outc'",
+    "checkpoint_end_repr": "' assessment is committed; it does not mean any PR is approved or ready to merge.'",
+    "checkpoint_session": "trial-checkpoint-bridge",
+    "implementation_receipt_matches_render_commit": "110af8aa0b1a0609017b5ac3b17606fa0faffe04",
+    "work_state": "done",
+    "trace_error": "no observed readable trace for supervisor:batch"
+  }
+}

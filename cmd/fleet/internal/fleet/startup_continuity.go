@@ -1,14 +1,21 @@
 package fleet
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
 
 const roleHandoffBodyBytes = 16384
 const roleHandoffContextBytes = 1024
+
+// Allow JSON escaping of the entire accepted body plus identity metadata.
+const roleHandoffFileBytes = 128 * 1024
 
 // currentStartupAssignment reads and stamps under the same lock as placement.
 // The slot name alone cannot identify work after the slot has been reused.
@@ -126,22 +133,100 @@ func WriteRoleHandoff(rec Rec, conclusion, next string) error {
 		"session": S(rec, "session"), "conclusion": conclusion, "next": next, "at": Now()})
 }
 
-// RoleHandoffLine supplies bounded authored context across branches and sessions.
-// Identity in the record is checked as well as in its filename.
+// ReadRoleHandoff returns the complete checkpoint for an already resolved
+// identity, without resolving a mutable role map again during the read.
+// Missing context is nil; unreadable or mismatched context is an error.
+// Authored context is advisory, never evidence of completion or authority.
+func ReadRoleHandoff(tenant, role string) (Rec, error) {
+	if role == "" || tenant == "" {
+		return nil, nil
+	}
+	path := roleHandoffPath(tenant, role)
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read role handoff: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() > roleHandoffFileBytes {
+		return nil, fmt.Errorf("role handoff must be a regular file of at most %d bytes", roleHandoffFileBytes)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("read role handoff: %w", err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, roleHandoffFileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read role handoff: %w", err)
+	}
+	var r Rec
+	if len(data) > roleHandoffFileBytes || !utf8.Valid(data) || json.Unmarshal(data, &r) != nil || r == nil || !validHandoffSurrogates(data) {
+		return nil, fmt.Errorf("role handoff is oversized or invalid JSON")
+	}
+	if !validRoleHandoff(r, tenant, role) {
+		return nil, fmt.Errorf("role handoff has invalid identity, provenance or body")
+	}
+	return r, nil
+}
+
+// encoding/json replaces unpaired UTF-16 escapes with U+FFFD. On otherwise
+// valid JSON, reject those escapes instead of silently changing authored text.
+func validHandoffSurrogates(data []byte) bool {
+	for i := 0; i < len(data); i++ {
+		if data[i] != '\\' {
+			continue
+		}
+		i++
+		if data[i] != 'u' {
+			continue // includes a literal escaped backslash, not a Unicode escape
+		}
+		value, _ := strconv.ParseUint(string(data[i+1:i+5]), 16, 16)
+		i += 4
+		if value < 0xd800 || value > 0xdfff {
+			continue
+		}
+		if value > 0xdbff || i+6 >= len(data) || string(data[i+1:i+3]) != `\u` {
+			return false
+		}
+		low, err := strconv.ParseUint(string(data[i+3:i+7]), 16, 16)
+		if err != nil || low < 0xdc00 || low > 0xdfff {
+			return false
+		}
+		i += 6
+	}
+	return true
+}
+
+func validRoleHandoff(r Rec, tenant, role string) bool {
+	conclusion, cok := r["conclusion"].(string)
+	next, nok := r["next"].(string)
+	return S(r, "tenant") == tenant && S(r, "role") == role && S(r, "session") != "" && F(r, "at") > 0 &&
+		cok && nok && strings.TrimSpace(conclusion) != "" && len(conclusion)+len(next) <= roleHandoffBodyBytes
+}
+
+// RoleHandoffLine supplies the short startup hint. Inspect exposes read errors
+// and the full record; startup retains its optional, bounded context behavior.
 func RoleHandoffLine(rec Rec) string {
 	role, tenant, slot := roleHandoffIdentity(rec)
-	if role == "" || tenant == "" || slot != "" {
+	if slot != "" {
 		return ""
 	}
-	r := ReadJSON(roleHandoffPath(tenant, role))
-	if S(r, "tenant") != tenant || S(r, "role") != role || S(r, "conclusion") == "" {
+	r, _ := ReadRoleHandoff(tenant, role)
+	return RoleHandoffSummary(r)
+}
+
+// RoleHandoffSummary formats a previously read checkpoint for existing displays.
+func RoleHandoffSummary(r Rec) string {
+	if r == nil {
 		return ""
 	}
 	text := strings.Join(strings.Fields(S(r, "conclusion")), " ")
 	if next := strings.Join(strings.Fields(S(r, "next")), " "); next != "" {
 		text += " · next: " + next
 	}
-	line := fmt.Sprintf("[fleet] authored role handoff for %s/%s (%s ago, session %s; advisory): %q", tenant, role, FmtAge(Now()-F(r, "at")), Short(S(r, "session")), text)
+	line := fmt.Sprintf("[fleet] authored role handoff for %s/%s (%s ago, session %s; advisory): %q", S(r, "tenant"), S(r, "role"), FmtAge(Now()-F(r, "at")), Short(S(r, "session")), text)
 	return continuityExcerpt(line, roleHandoffContextBytes)
 }
 
