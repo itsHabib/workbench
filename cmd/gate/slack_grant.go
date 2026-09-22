@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/itsHabib/workbench/cmd/gate/internal/capability"
 	"github.com/itsHabib/workbench/cmd/gate/internal/evidence"
+	"github.com/itsHabib/workbench/cmd/gate/internal/readiness"
 	"github.com/itsHabib/workbench/cmd/gate/internal/state"
 	"github.com/itsHabib/workbench/contracts/grantrequest"
 	"github.com/itsHabib/workbench/slackauth"
@@ -20,6 +22,38 @@ import (
 // A Slack approval is human-paced and each observation scans the append-only
 // state log, so sub-second polling only creates avoidable I/O and lock pressure.
 const slackGrantPollInterval = 2 * time.Second
+
+func slackBoundResult(e env, fs *flag.FlagSet, res gateResult, code int, err error) (gateResult, int, error) {
+	// Convert only the head mismatch itself. A joined abort-recording failure
+	// still needs the hard-error renderer and its state-repair diagnostics.
+	moved, ok := err.(*gateHeadChangedError)
+	if !ok {
+		return res, code, err
+	}
+	res.Outcome, res.Code = "capability_refused", capability.ErrHeadMismatch.Error()
+	res.Why = fmt.Sprintf("%s: Slack approved %s but the PR head is now %s", res.Code, moved.expected, moved.observed)
+	res.HeadSHA = moved.observed
+	res.Escape = &readiness.Route{
+		Why:  "the exact-head Slack grant no longer applies; request fresh approval for the current head",
+		Next: slackRetryCommand(e, fs),
+	}
+	return res, codeRefused, nil
+}
+
+func slackRetryCommand(e env, fs *flag.FlagSet) string {
+	args := []string{"gate", "gate"}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "state" || f.Name == "key" || f.Name == "floor" {
+			return
+		}
+		args = append(args, "-"+f.Name+"="+f.Value.String())
+	})
+	floor := e.floorBin
+	if strings.ContainsAny(floor, `/\`) {
+		floor = absStateDir(floor)
+	}
+	return shellJoin(append(args, "-state", absStateDir(e.stateDir), "-key", absStateDir(filepath.Dir(e.keyPath)), "-floor", floor))
+}
 
 type grantCallbackResult struct {
 	Outcome   string `json:"outcome"`

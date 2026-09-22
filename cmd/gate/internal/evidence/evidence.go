@@ -178,7 +178,7 @@ func GatherFrom(st *state.Store, run string, pr PRRef, viewID string, view json.
 	body := diffBody{PR: pr, Method: "api"}
 	r, err := primaryDiff(pr, viewed.HeadRefOid)
 	if tooLarge(err) {
-		r, err = fallbackDiff(pr, view)
+		r, err = fallbackDiff(pr, viewed.HeadRefOid)
 		body.Method = "local-merge-base"
 	}
 	if err != nil {
@@ -217,6 +217,45 @@ func GatherFrom(st *state.Store, run string, pr PRRef, viewID string, view json.
 	}
 	b.Stances = a.ID
 	return b, nil
+}
+
+// CurrentSubject reads the head and open/closed state without recording evidence.
+// A closed PR has no new merge authority to request, even if its diff is readable.
+func CurrentSubject(pr PRRef) (head, status string, err error) {
+	pull, err := gh("api", fmt.Sprintf("repos/%s/pulls/%d", pr.Repo, pr.Number))
+	if err != nil {
+		return "", "", err
+	}
+	var fields struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(pull, &fields); err != nil {
+		return "", "", err
+	}
+	if fields.State != "open" && fields.State != "closed" {
+		return "", "", fmt.Errorf("evidence: unread PR state %q", fields.State)
+	}
+	_, head, err = parsePullHeads(pull)
+	if err != nil {
+		return "", "", err
+	}
+	if !reSHA.MatchString(head) {
+		return "", "", fmt.Errorf("evidence: invalid current head %q", head)
+	}
+	return head, fields.State, nil
+}
+
+// SubjectDiff reads an immutable comparison without writing evidence. The
+// ordinary collector and grant discovery share the same commit-pair binding.
+func SubjectDiff(pr PRRef, head string) (string, error) {
+	result, err := primaryDiff(pr, head)
+	if tooLarge(err) {
+		result, err = fallbackDiff(pr, head)
+	}
+	if err != nil {
+		return "", err
+	}
+	return result.Diff, nil
 }
 
 func primaryDiff(pr PRRef, viewHead string) (diffResult, error) {
