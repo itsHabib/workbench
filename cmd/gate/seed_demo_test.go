@@ -32,6 +32,9 @@ func TestSeedDemoState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The base read is as offline as the evidence sweep: seed a head that
+	// contains the base, so the park is the only thing the demo decides.
+	e.baseHead = baseReader(fakeBaseSHA, 0)
 	grant, err := capability.Mint(e.st, e.keyPath, "itsHabib/ship", "merge", "T2", 0, "operator", time.Hour, time.Now)
 	if err != nil {
 		t.Fatal(err)

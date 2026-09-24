@@ -33,6 +33,7 @@ func newParkedFixture(t *testing.T) parkedFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	e.baseHead = baseReader(fakeBaseSHA, 0)
 	grantArt, err := capability.Mint(e.st, e.keyPath, "o/r", "merge", "T2", 0, "test", time.Hour, time.Now)
 	if err != nil {
 		t.Fatal(err)

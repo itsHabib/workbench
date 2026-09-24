@@ -92,6 +92,22 @@ log entry. Consequences the code enforces:
   no longer parks on a pure refresh, the refresh consumes no cycle: cycle count
   is derived from parks and merge outcomes, and a refresh that produces neither
   leaves the count where it was.
+- **A merge is authorized only onto a base the head contains.** A merge lands
+  `merge(head, base)` against the base's head at merge time, and evidence
+  gathered on the head covers that tree only when the head already contains the
+  base's head — the merged tree is then the head's own. Gate cannot prove
+  anything weaker: GitHub keeps no record of which base a CI run merged against
+  (`baseRefOid` and a run's `pull_requests[].base.sha` keep the base the PR was
+  opened on, and check runs carry the PR head, not the merge commit a job
+  tested). So `act` reads the base branch's live head at emission — after a
+  judgment too, since hours can separate the two — records it as evidence the
+  outcome names, and blocks a head that lacks it with
+  `base_moved_since_evidence`. A block, not a park: no judgment makes stale
+  evidence current. It runs before the content park, so no one is paged about a
+  merge the evidence cannot license, and it spends no review cycle, since the
+  review repeats on the refreshed head. It is stricter than the up-to-date rung,
+  which asks only whether GitHub will accept the merge: ivy#115 merged cleanly
+  and still broke main.
 - **A complete panel satisfies readiness, because the judge's answer was never
   a judgment.** GitHub reports its aggregate `reviewDecision` only from
   submitted reviews, so the comment-posting panel above leaves it empty however
@@ -374,10 +390,13 @@ judgment is durable and nothing followed it (observed on `itsHabib/ivy#22`,
 - **It is named.** `gate next` surfaces such a run as `judged but not authorized`
   with the command that finishes it. Without that it also reads as *parked*,
   sending an operator to judge a park whose one judgment is already spent.
-- **No network precedes the durable authorization.** The `gate/authorized` stamp
-  requires the action artifact's chain hash, which exists only once that artifact
-  is appended — so the ordering is a precondition of the payload, not a
-  convention about call order. The stamp's outcome is reported on the result
+- **No network write precedes the durable authorization.** The `gate/authorized`
+  stamp requires the action artifact's chain hash, which exists only once that
+  artifact is appended — so the ordering is a precondition of the payload, not a
+  convention about call order. The one network call before the action is a
+  read — `act`'s base read, which the action depends on — and a deadline or
+  fault there leaves the same resumable strand: the judgment is durable, and
+  resume reads the base again. The stamp's outcome is reported on the result
   JSON, not only logged: "best-effort" was half true while a failed post went to
   a stderr nobody read and the operator-facing card reported unqualified success.
 

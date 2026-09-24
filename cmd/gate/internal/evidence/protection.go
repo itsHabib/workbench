@@ -16,11 +16,11 @@ import (
 // land. This file records the one fact that makes the difference decidable:
 // does the base branch require up-to-date-ness, and by which mechanism.
 //
-// It records the fact; it never decides what the fact costs. BEHIND alone is
-// not a refresh requirement — on the portfolio's unprotected and non-strict
-// repositories a behind branch merges cleanly, and demanding a refresh there
-// would buy a wasted CI cycle on every merge. The verifier reads strictness and
-// BEHIND together (see verify.UpToDate).
+// It records the fact; it never decides what the fact costs. Strictness answers
+// only whether GitHub will ACCEPT a behind branch — on the portfolio's
+// unprotected and non-strict repositories it does. Whether that merge builds a
+// tree CI tested is read separately at emission (BaseHead). The verifier reads
+// strictness and BEHIND together (see verify.UpToDate).
 //
 // Two mechanisms carry the setting and both are live in the portfolio (see
 // docs/auto-mode-defaults.md): classic branch protection

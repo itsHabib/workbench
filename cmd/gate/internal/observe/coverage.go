@@ -333,18 +333,23 @@ type outcomeCoverageBody struct {
 	Code    string `json:"code"`
 }
 
+// codeBaseMoved mirrors verify.CodeBaseMoved — observe never imports verify.
+// TestBaseMovedBlockSpendsNoCycle (cmd/gate) pins the two counts together.
+const codeBaseMoved = "base_moved_since_evidence"
+
 // countsAsCycleRow mirrors main.go's countsAsCycle: an escalation counts only
 // when it carries no authorization code (a content park, not a ceiling park),
-// and an action counts unless it was a capability refusal.
+// and an action counts unless it was a capability refusal or a base-moved block.
 // An already_merged action is not excluded here, unlike in countsAsCycle:
 // countingSubject already drops it at the parent-kind check, since its parent
 // is view evidence, never a verdict. Do not "symmetrize" the two without
-// moving that guard.
+// moving that guard. A base-moved block DOES need its own clause: its parent is
+// the reduced verdict, so the parent-kind check keeps it.
 func countsAsCycleRow(kind string, b outcomeCoverageBody) bool {
 	if kind == state.KindEscalation {
 		return b.Code == ""
 	}
-	return b.Outcome != "capability_refused"
+	return b.Outcome != "capability_refused" && b.Code != codeBaseMoved
 }
 
 // assess answers the inventory question for one row. It returns nil when there
