@@ -29,7 +29,9 @@ import (
 )
 
 // testEnv builds an env over throwaway state and key dirs (the key dir a
-// sibling, honouring the key-outside-state invariant).
+// sibling, honouring the key-outside-state invariant). Its base read reports a
+// head that contains the base's head, the one state in which act may emit a
+// merge; tests about a moved base swap in their own reader.
 func testEnv(t *testing.T) env {
 	t.Helper()
 	root := t.TempDir()
@@ -37,6 +39,7 @@ func testEnv(t *testing.T) env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	e.baseHead = baseReader(fakeBaseSHA, 0)
 	return e
 }
 

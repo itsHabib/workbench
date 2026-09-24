@@ -162,6 +162,25 @@ func TestCoverageCycleCountSkipsCeilingParks(t *testing.T) {
 	}
 }
 
+// TestCoverageCycleCountSkipsBaseMovedBlocks mirrors gate's countsAsCycle for a
+// base-moved block. Unlike already_merged it is parented to the reduced verdict,
+// so the parent-kind check keeps it and only its code can exclude it: other
+// PRs' merges moving the base must not spend this PR's review budget.
+func TestCoverageCycleCountSkipsBaseMovedBlocks(t *testing.T) {
+	arts := []state.Artifact{
+		subjectVerdict("run_1", "vrd_1", inboxBase, "o/r", 7, "t", "sha"),
+		outcome(state.KindAction, "run_1", "act_1", "vrd_1", inboxBase.Add(time.Minute),
+			map[string]any{"outcome": "blocked", "code": codeBaseMoved}),
+		subjectVerdict("run_2", "vrd_2", inboxBase.Add(time.Hour), "o/r", 7, "t", "sha"),
+		outcome(state.KindAction, "run_2", "act_2", "vrd_2", inboxBase.Add(time.Hour+time.Minute), wouldMerge(mergeCmd)),
+	}
+	in := buildInbox(arts, inboxBase.Add(2*time.Hour), NextRequest{StateArg: ""})
+	c := in.ReadyToMerge[0].Coverage
+	if c == nil || c.CyclesUsed != 1 {
+		t.Fatalf("cycles_used = %+v, want only the would_merge run counted", c)
+	}
+}
+
 // TestCoverageExpiredNamesTheLapse distinguishes a re-mint from a first mint: a
 // repo whose grants lapsed says so, and carries the lapse instant.
 func TestCoverageExpiredNamesTheLapse(t *testing.T) {

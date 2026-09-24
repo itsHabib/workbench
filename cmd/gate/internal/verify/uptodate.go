@@ -13,11 +13,12 @@ import (
 // API — so gate would emit a pinned command that was never going to land, and
 // the operator learns the requirement from the rejection.
 //
-// The rung is deliberately narrow. BEHIND alone is NOT a reason to refresh:
+// The rung is deliberately narrow: it asks only what GitHub will accept, and
 // most portfolio repositories are unprotected or non-strict (see
-// docs/auto-mode-defaults.md), and demanding a refresh there would add a
-// pointless CI cycle to nearly every merge. Only strict protection makes BEHIND
-// decisive; conflicts are already readiness's block.
+// docs/auto-mode-defaults.md), so only strict protection makes BEHIND decisive
+// here; conflicts are already readiness's block. Whether the merge builds a tree
+// CI tested is a separate, stricter question that act asks at emission
+// (BaseFreshness): there a head lacking its base's head stops on any base.
 //
 // Unreadable protection degrades to the previous behaviour — pass, with the
 // degradation recorded in the verdict — never to a block. An unread fact is not

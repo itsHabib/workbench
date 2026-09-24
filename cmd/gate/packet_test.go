@@ -259,7 +259,11 @@ func packetCLIFixture(t *testing.T) (env, verify.Subject, string, string, func(i
 	raw, _ := json.Marshal(map[string]any{"type": "file", "path": "docs/companion.md", "sha": hex.EncodeToString(sum[:]), "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(content)), "size": len(content)})
 	commaRaw, _ := json.Marshal(map[string]any{"type": "file", "path": "docs/a,b.md", "sha": hex.EncodeToString(sum[:]), "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(content)), "size": len(content)})
 	indexRaw, _ := json.Marshal(map[string]any{"sha": subject.HeadSHA, "tree": []map[string]string{{"path": "docs/companion.md", "type": "blob"}, {"path": "docs/a,b.md", "type": "blob"}}, "truncated": false})
-	script := "#!/bin/sh\ncase \"$2\" in\n*/pulls/7) printf '%s' '{\"head\":{\"sha\":\"" + subject.HeadSHA + "\"}}';;\nrepos/o/r/contents/docs/companion.md?ref=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) printf '%s' '" + string(raw) + "';;\nrepos/o/r/contents/docs/a%2Cb.md?ref=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) printf '%s' '" + string(commaRaw) + "';;\nrepos/o/r/git/trees/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?recursive=1) printf '%s' '" + string(indexRaw) + "';;\n*) exit 99;;\nesac\n"
+	// The judge reads the base at emission: a head that contains the base's
+	// head, so the pass the fixture judges can emit.
+	liveBase := `{"data":{"repository":{"pullRequest":{"state":"OPEN","baseRefName":"main","baseRef":{"target":{"oid":"` + fakeBaseSHA + `"}}}}}}`
+	contained := `{"status":"ahead","behind_by":0,"merge_base_commit":{"sha":"` + fakeBaseSHA + `"}}`
+	script := "#!/bin/sh\ncase \"$2\" in\ngraphql) printf '%s' '" + liveBase + "';;\nrepos/o/r/compare/" + fakeBaseSHA + "..." + subject.HeadSHA + "?per_page=1) printf '%s' '" + contained + "';;\n*/pulls/7) printf '%s' '{\"head\":{\"sha\":\"" + subject.HeadSHA + "\"}}';;\nrepos/o/r/contents/docs/companion.md?ref=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) printf '%s' '" + string(raw) + "';;\nrepos/o/r/contents/docs/a%2Cb.md?ref=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) printf '%s' '" + string(commaRaw) + "';;\nrepos/o/r/git/trees/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?recursive=1) printf '%s' '" + string(indexRaw) + "';;\n*) exit 99;;\nesac\n"
 	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}

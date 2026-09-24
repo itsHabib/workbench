@@ -221,3 +221,28 @@ autonomously would be smuggling a policy decision out of a proof; that call is t
   fires in practice, and a compare 5xx on a huge PR aborts the gather fail-closed (exit 4) rather
   than falling back. Not an authorization defect. Revisit if a real PR hits the 5xx path: either
   fall back on it too, or delete the fallback.
+
+## Deferred from the base-freshness check (ivy#115 incident), 2026-09-23
+
+- [ ] **The executor's live binding cannot see the base move.** `readExecutorPull` binds
+  `BaseSHA` from the pulls API's `base.sha`, which GitHub does not advance when the base branch
+  moves: ivy#115 still reported its 2026-09-09 fork point when it merged on 2026-09-23. So
+  `validateLive`'s base comparison only catches a retarget. The would_merge action the executor
+  consumes is freshness-checked when `act` records it, but the base can move between that and
+  `executor run`, and a protected approval sits in that window. **Fix:** bind the live base head
+  (GraphQL `baseRef.target.oid`, as `evidence.BaseHead` reads it) and re-apply
+  `verify.BaseFreshness` immediately before the merge call. Exposure: `GATE_EXECUTOR_ARMED` is
+  `true`, but `gate-executor.yml` last ran on 2026-07-31 (the canary runs), so the path is dormant,
+  not closed.
+- [ ] **The base can still move between gate's read and the merge.** `act` reads the base
+  seconds before it emits; the operator runs the command later. Only GitHub-side enforcement —
+  strict required checks or a merge queue — closes that window, and both are repository settings,
+  not gate code.
+- [ ] **A refresh is required even when CI did see the latest base.** A `pull_request` run
+  merges the head into the base as of its trigger, so a behind head whose last push came after the
+  base's last move was tested on the right tree — but GitHub records no base for a run, and the
+  only proof available is timing (the repository activity API's push times against the run's
+  creation). That races GitHub's merge-ref computation and cannot see push-triggered or external
+  CI, so it would pass the unsafe direction on a guess. Revisit only if refresh cost becomes the
+  bottleneck; the measured base rate was 17 of the last 40 workbench and ivy merges behind their
+  base.

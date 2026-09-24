@@ -93,8 +93,10 @@ Constraints that are design decisions, not omissions:
 - **A killed run must not strand a decision.** The judgment path resumes a
   persisted judgment instead of refusing it, `gate next` surfaces a
   judged-but-unauthorized run with the command that finishes it, and no GitHub
-  call can precede the durable action — the stamp needs that artifact's chain
-  hash, so the ordering is a precondition of the payload.
+  write can precede the durable action — the stamp needs that artifact's chain
+  hash, so the ordering is a precondition of the payload. The one read before
+  it, `act`'s base read, strands nothing a resume cannot finish: resume re-reads
+  the base.
 - **State is the only channel.** Verifiers, the provider-neutral judge,
   `explain`, and `audit`
   read artifacts from the log — never side channels, process memory, or path
@@ -172,16 +174,40 @@ Constraints that are design decisions, not omissions:
   requirement from BOTH mechanisms that carry it — classic branch protection's
   `required_status_checks.strict` and a ruleset's
   `strict_required_status_checks_policy` — and unions them: a base can carry
-  both, and GitHub enforces whichever requires more. A BEHIND head blocks only
-  on a base that requires up-to-date-ness, naming the fix (refresh from base,
-  let CI re-run, gate again). BEHIND alone never blocks: most bases require
-  nothing, and a refresh there buys a wasted CI cycle. The negative answer is
+  both, and GitHub enforces whichever requires more. A BEHIND head blocks in
+  this rung only on a base that requires up-to-date-ness, naming the fix
+  (refresh from base, let CI re-run, gate again): the rung answers whether
+  GitHub will ACCEPT the merge, and most bases require nothing. Whether the
+  merge builds a tree CI tested is the stricter question the next bullet
+  answers. The negative answer is
   the demanding one — "nothing requires it" is a fact only when every mechanism
   was read, and only GitHub's specific `Branch not protected` response proves a
   branch carries no classic protection (a bare 404 is a missing repo, a mistyped
   branch, or a permissions problem). Anything unread degrades to the prior
   behaviour with the reason recorded in the verdict — an unread fact is not
   evidence and must never stop a merge.
+- **A merge command is emitted only onto a base the judged head contains.** A
+  merge lands `merge(head, base)` against the base's head at merge time, and CI
+  evidence on the head covers that tree only when the head already contains
+  that base head. GitHub records no base for a CI run — a PR's `baseRefOid` and
+  a workflow run's `pull_requests[].base.sha` keep the base the PR was opened
+  on, and check runs carry the PR head, never the merge commit a job checked
+  out — so "CI probably saw the latest base" is unprovable. `act` therefore
+  reads the base branch's live head right before it records a pass or a park,
+  on `gate gate` and again after `judge`/`resolve` (hours can separate the
+  two), records the read as evidence those outcomes name, and blocks a head
+  that lacks it: exit 1, code `base_moved_since_evidence`, remedy "merge the
+  base into the branch, let CI re-run, gate again". It blocks rather than parks
+  because no judgment can make stale evidence current, and it precedes the
+  content park so no one is paged about a PR that cannot merge on its evidence.
+  It spends no review cycle — the review repeats on the refreshed head, and
+  that run is the cycle — and a failed read is a hard error, never a pass. The
+  cost is a refresh for every PR behind its base (17 of the last 40 workbench
+  and ivy merges before 2026-09-23 were). ivy#115 (2026-09-23) is the case it
+  closes: evidence at 05:31Z, three merges to main by 06:01Z, a judgment at
+  16:30Z released the merge, and main's receipt check failed. Still open: the
+  base moving between gate's read and the merge itself, which only GitHub-side
+  enforcement (strict protection or a merge queue) closes.
 - **Thread disposition observes, it never concludes.** `gate threads -repo R
   -pr N` lists a PR's unresolved review threads and, for each, the commits after
   its anchor that touch the reviewed file, flagging which of those also changed

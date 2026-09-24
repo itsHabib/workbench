@@ -55,7 +55,8 @@ import (
 //
 //	code | outcome                                | driver action
 //	  0  | would_merge / merged                   | land the PR
-//	  1  | blocked                                | stop; do not merge
+//	  1  | blocked                                | stop; do not merge — with code base_moved_since_evidence,
+//	     |                                        | merge the base into the branch, let CI re-run, then gate again
 //	  2  | parked_for_judgment                    | re-mint a wider grant (ceiling) or judge (escalation)
 //	  3  | capability_refused / already_merged /  | mint/repair the grant and retry once / nothing to merge /
 //	     | base_not_default                       | retarget the PR to the default branch, then gate again
@@ -205,6 +206,10 @@ type env struct {
 	anchor   string
 	floorBin string
 	now      func() time.Time
+	// baseHead records the PR's base branch as it stands when act is about to
+	// emit an outcome. A field only so tests drive act without gh;
+	// newEnvWithAnchor always wires the live read.
+	baseHead func(st *state.Store, run string, pr evidence.PRRef, headSHA string) (string, error)
 }
 
 func newEnv(stateDir, floorBin, keyDir string) (env, error) {
@@ -256,7 +261,7 @@ func newEnvWithAnchor(stateDir, floorBin, keyDir, anchorPath string) (env, error
 	}
 	return env{
 		st: st, stateDir: stateDir, keyPath: keyPath, anchor: anchorPath,
-		floorBin: floorBin, now: time.Now,
+		floorBin: floorBin, now: time.Now, baseHead: evidence.BaseHead,
 	}, nil
 }
 
@@ -974,17 +979,20 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 	// result for the downstream stamp. Zero until record runs; only the pass
 	// path reads it.
 	var actionHash string
+	// parents is what every outcome names: Parents[0] = the reduced verdict is
+	// a contract (cycleCount joins outcome → Parents[0] → Subject, and fails
+	// closed on anything else), then the grant, then — once act has read it —
+	// the base-branch evidence the outcome was decided against.
+	parents := []string{reducedID, grantID}
 	record := func(kind, outcome string, extra map[string]any) error {
 		body := map[string]any{"outcome": outcome, "verdict": reducedID, "grant": grantID}
 		for k, v := range extra {
 			body[k] = v
 		}
 		addTerminalArtifactMetadata(body, outcome, res, e.stateDir, filepath.Dir(e.keyPath))
-		// Parents[0] = the reduced verdict is a contract: cycleCount joins
-		// outcome → Parents[0] → Subject, and fails closed on anything else.
 		art, err := e.st.AppendIfAbsentParentWhereAfterAudit(
 			kind, []string{state.KindAction, state.KindEscalation}, run,
-			reducedID, []string{reducedID, grantID}, body,
+			reducedID, parents, body,
 			completedJudgmentOutcome, checkNoOpenClaim,
 		)
 		actionHash = art.Hash
@@ -1020,11 +1028,9 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 			body.Repo = reduced.Subject.Repo
 			body.Number = reduced.Subject.Number
 		}
-		// Parents[0] = the reduced verdict is a contract: cycleCount joins
-		// outcome → Parents[0] → Subject, and fails closed on anything else.
 		_, err := e.st.AppendIfAbsentParentWhereAfterAudit(
 			state.KindEscalation, []string{state.KindAction, state.KindEscalation},
-			run, reducedID, []string{reducedID, grantID}, body,
+			run, reducedID, parents, body,
 			completedJudgmentOutcome, checkNoOpenClaim,
 		)
 		return err
@@ -1059,6 +1065,22 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		res.Outcome = "blocked"
 		return res, codeBlocked, record(state.KindAction, "blocked", nil)
 	}
+	// Every outcome below either authorizes the merge or asks someone to, so the
+	// base is read HERE, at emission — on a gate run and again after a judgment,
+	// which can outlive the evidence sweep by hours. A head that does not contain
+	// the base's current head stops before a content park can page anyone about
+	// a merge this evidence cannot license (see verify.BaseFreshness).
+	baseID, fresh, err := readBaseFreshness(e, run, reduced.Subject)
+	if err != nil {
+		return res, codeError, err
+	}
+	parents = append(parents, baseID)
+	if !fresh.Fresh {
+		res.Outcome, res.Code, res.Why = "blocked", verify.CodeBaseMoved, fresh.Why
+		return res, codeBlocked, record(state.KindAction, "blocked", map[string]any{
+			"code": verify.CodeBaseMoved, "why": fresh.Why,
+		})
+	}
 	if reduced.Decision == verify.DecisionEscalate {
 		// A content park is the one escalation that pages a zero-context reader,
 		// so it carries a synthesized brief; the procedural parks below are
@@ -1078,36 +1100,17 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 		res.Outcome = "parked_for_judgment"
 		return res, codeParked, recordEscalation(reduced.Why, "", brief)
 	}
-	if !grant.TierWithin(reduced.Tier) {
-		res.Outcome = "parked_for_judgment"
-		res.Code = escalation.CodeTierExceeded
-		res.Why = fmt.Sprintf("%s: verdict tier %s exceeds grant ceiling %s; %s",
-			escalation.CodeTierExceeded, reduced.Tier, grant.MaxTier, reduced.Why)
-		return res, codeParked, recordEscalation(res.Why, escalation.CodeTierExceeded, nil)
-	}
-	// An unreadable count parks: absence never reads as "0 cycles consumed,
-	// proceed". A tampered log is corruption, not a judgment call: fail hard
-	// (codeError, no merge), never a park a re-mint could clear.
-	if errors.Is(countErr, errLogTampered) {
+	parkCode, why, err := ceilingPark(grant, reduced, n, countErr)
+	if err != nil {
 		res.Outcome = "error"
-		res.Why = countErr.Error()
-		return res, codeError, countErr
+		res.Why = err.Error()
+		return res, codeError, err
 	}
-	if countErr != nil {
+	if parkCode != "" {
 		res.Outcome = "parked_for_judgment"
-		res.Code = escalation.CodeCountUnreadable
-		res.Why = fmt.Sprintf("%s: cycle count unreadable: %v; %s", escalation.CodeCountUnreadable, countErr, reduced.Why)
-		return res, codeParked, recordEscalation(res.Why, escalation.CodeCountUnreadable, nil)
-	}
-	if !grant.CyclesWithin(n + 1) {
-		// A ceiling park resolves by re-minting a wider -max-cycles grant —
-		// an authorization decision. A judgment pass decides content and
-		// cannot launder a ceiling; this same check re-applies after judgment.
-		res.Outcome = "parked_for_judgment"
-		res.Code = escalation.CodeCycleExceeded
-		res.Why = fmt.Sprintf("%s: cycle %d exceeds grant ceiling %d; re-mint a wider -max-cycles grant to proceed; %s",
-			capability.ErrCycleExceeded, n+1, grant.MaxCycles, reduced.Why)
-		return res, codeParked, recordEscalation(res.Why, escalation.CodeCycleExceeded, nil)
+		res.Code = parkCode
+		res.Why = why
+		return res, codeParked, recordEscalation(why, parkCode, nil)
 	}
 
 	// --match-head-commit pins the merge to the exact SHA the evidence was
@@ -1140,6 +1143,47 @@ func act(e env, run string, grantID string, reduced verify.Verdict, reducedID st
 }
 
 func subjectNumber(v verify.Verdict) int { return v.Subject.Number }
+
+// ceilingPark names the authorization park a passing verdict has reached, if
+// any: the grant's tier ceiling, an unreadable cycle count, or the cycle
+// ceiling, in that order. A judgment pass decides content and cannot launder
+// one; act re-applies them after judgment. An empty code means none applies.
+//
+// An unreadable count parks: absence never reads as "0 cycles consumed,
+// proceed". A tampered log is corruption, not a judgment call: it comes back as
+// the error (codeError, no merge), never a park a re-mint could clear. A cycle
+// park resolves by re-minting a wider -max-cycles grant — an authorization
+// decision.
+func ceilingPark(grant capability.Grant, reduced verify.Verdict, n int, countErr error) (code, why string, err error) {
+	if !grant.TierWithin(reduced.Tier) {
+		return escalation.CodeTierExceeded, fmt.Sprintf("%s: verdict tier %s exceeds grant ceiling %s; %s",
+			escalation.CodeTierExceeded, reduced.Tier, grant.MaxTier, reduced.Why), nil
+	}
+	if errors.Is(countErr, errLogTampered) {
+		return "", "", countErr
+	}
+	if countErr != nil {
+		return escalation.CodeCountUnreadable, fmt.Sprintf("%s: cycle count unreadable: %v; %s",
+			escalation.CodeCountUnreadable, countErr, reduced.Why), nil
+	}
+	if !grant.CyclesWithin(n + 1) {
+		return escalation.CodeCycleExceeded, fmt.Sprintf("%s: cycle %d exceeds grant ceiling %d; re-mint a wider -max-cycles grant to proceed; %s",
+			capability.ErrCycleExceeded, n+1, grant.MaxCycles, reduced.Why), nil
+	}
+	return "", "", nil
+}
+
+// readBaseFreshness records the PR's base branch as it stands now and answers,
+// from that recorded read, whether the judged head contains it. A failed read
+// is the caller's hard error: an unread base must never pass as an unmoved one.
+func readBaseFreshness(e env, run string, subject verify.Subject) (string, verify.Freshness, error) {
+	id, err := e.baseHead(e.st, run, evidence.PRRef{Repo: subject.Repo, Number: subject.Number}, subject.HeadSHA)
+	if err != nil {
+		return "", verify.Freshness{}, err
+	}
+	fresh, err := verify.BaseFreshness(e.st, id, subject)
+	return id, fresh, err
+}
 
 // emitAuthorizedStamp posts the gate/authorized provenance stamp — but only on
 // a merge authorization (exit 0), so a block/park/refuse/error posts nothing.
@@ -1388,6 +1432,13 @@ type outcomeBody struct {
 // because every failed retry would burn the cycle the wider grant was minted
 // to free. Excluding them can only lower the count by gate-authored
 // authorization artifacts, never hide a run that did review work.
+//
+// A base-moved block (verify.CodeBaseMoved) is excluded on the same footing: it
+// stops a run before its ladder decision is acted on, the fix is a refresh the
+// agent makes, and the review repeats on the refreshed head — that run is the
+// cycle. Counting it would let other PRs' merges spend this PR's review budget.
+// In a judged run the park before it has already counted the run once.
+// observe.countsAsCycleRow mirrors this for `gate next`.
 func countsAsCycle(a state.Artifact) (bool, error) {
 	var b outcomeBody
 	if err := json.Unmarshal(a.Body, &b); err != nil {
@@ -1404,7 +1455,7 @@ func countsAsCycle(a state.Artifact) (bool, error) {
 	case "capability_refused", outcomeAlreadyMerged, outcomeBaseNotDefault:
 		return false, nil
 	}
-	return true, nil
+	return b.Code != verify.CodeBaseMoved, nil
 }
 
 // outcomeSubjectMatches follows an outcome artifact to its parent reduced
@@ -2843,6 +2894,11 @@ func decorateTerminalCodeContext(res *gateResult, code string, substrateOK bool,
 	retry := readiness.RetryHelps(code)
 	res.SelfGated = readiness.SelfGated(code)
 	res.RetryHelps = &retry
+	if code == verify.CodeBaseMoved && res.Run != "" {
+		res.Escape = explainRoute(res.Run, stateDir,
+			"the base branch moved past this head; merge it into the branch, let CI re-run, then gate again — no judgment of this run can clear it")
+		return
+	}
 	if res.Outcome == "blocked" && res.Run != "" {
 		res.Escape = explainRoute(res.Run, stateDir,
 			"the verifier ladder blocked this head; inspect the recorded decision before changing code")
