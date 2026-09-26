@@ -266,7 +266,7 @@ func BenchmarkQuery(b *testing.B) {
 }
 
 func TestFieldValidation(t *testing.T) {
-	for _, s := range []string{"no-type", "n=x:float", "n=:int"} {
+	for _, s := range []string{"no-type", "n=x:float", "n=:int", "source=x:int", "2name=x:int"} {
 		if _, err := ParseField(s); err == nil {
 			t.Fatal(s)
 		}
@@ -319,6 +319,13 @@ func TestIncompleteVersusMalformedTail(t *testing.T) {
 		if !incomplete && err == nil {
 			t.Fatalf("ignored malformed record %s", tail)
 		}
+	}
+	// An invalid final byte is not an incomplete record, even when a
+	// json.SyntaxError.Offset equals len(data).
+	path := filepath.Join(t.TempDir(), "bad-last-byte.jsonl")
+	_ = os.WriteFile(path, []byte("{\"x\":1}\n{\"x\":truX"), 0600)
+	if _, err := Build([]string{path}, []Field{{Name: "x", Path: "x", Type: "int"}}, false, true); err == nil {
+		t.Fatal("ignored invalid last byte")
 	}
 }
 

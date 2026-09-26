@@ -22,6 +22,12 @@ the measured ~12 MB index and keeps lifetimes, integrity checking, and deploymen
 simple. Incremental updates, compressed masks, block pruning, fused multi-column
 kernels, and an interactive server require an observed workload before addition.
 
+Presence-only predicates deliberately use the scalar kernel. Other predicates
+use vector comparisons and masks when built with SIMD. Go 1.27.1 miscompiles a
+three-way integer AND to invalid AVX-512 assembly; the portable backend combines
+0/-1 presence/selection lanes using a sum-equals-minus-two test instead. Both
+representations have the same truth table. Cross-architecture CI must stay on.
+
 The query grammar is deliberately limited. Compile-time schema/literal errors
 cannot silently select everything. Missing values never satisfy comparisons.
 Source bytes are read only and fingerprinted; indexes are private, immutable,

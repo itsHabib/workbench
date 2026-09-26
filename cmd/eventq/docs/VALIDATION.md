@@ -39,8 +39,9 @@ allocation, initialization, two predicates, and reduction. Data are synthetic:
 duration cycles 0..99,999 and exit code cycles 0..6. Both paths run in the same
 Go 1.27.1 SIMD-enabled binary, with `--scalar` semantics selecting the reference.
 
-At one million rows, three repetitions measured scalar 1.789–1.794 ms versus
-SIMD 1.649–1.652 ms: roughly 8% lower query time for this workload. Both allocate
+After the AVX-512 portability fix, one million rows across three repetitions
+measured scalar 1.845–1.891 ms versus SIMD 1.792–1.811 ms: roughly 4% lower
+median query time for this workload. Both allocate
 about 8 MB per query. At 50,000 rows, timings varied enough (about 0.08–0.16 ms)
 that we do not claim a meaningful SIMD advantage for the current archive.
 Loading the index costs much more than either scan.
@@ -48,7 +49,10 @@ Loading the index costs much more than either scan.
 Disassembly of the actual backend confirms native ARM NEON `VCMEQ`, `VCMGT`,
 and `VAND` instructions. Moving operator dispatch outside each vector loop was
 necessary: the initial implementation's per-vector string switch was slower
-than scalar. Tests also run with `GODEBUG=simd=0` to cover portable emulation.
+than scalar. AMD64 CI then exposed a Go 1.27.1 compiler/assembler failure for
+three chained logical masks. Replacing that expression with equivalent mask
+arithmetic fixes the cross-build, with the modest performance shown above.
+Tests also run with `GODEBUG=simd=0` to cover portable emulation.
 Default installation therefore remains scalar; SIMD stays an opt-in experiment.
 
 ## Correctness checks

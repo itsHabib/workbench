@@ -47,6 +47,9 @@ def source_rows(header):
 
 
 def main():
+    if len(sys.argv) != 3:
+        print("usage: verify-codex.py /absolute/eventq /absolute/commands.eq", file=sys.stderr)
+        raise SystemExit(2)
     binary, index = sys.argv[1:]
     data = pathlib.Path(index).read_bytes()
     if data[:8] != b"EVENTQ01" or hashlib.sha256(data[:-32]).digest() != data[-32:]:

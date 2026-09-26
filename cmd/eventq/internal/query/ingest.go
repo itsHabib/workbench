@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -147,21 +148,14 @@ func readLine(r *bufio.Reader) ([]byte, error) {
 func (t *Table) ingestLine(data []byte, source string, line int64, codex, tail bool) error {
 	if !json.Valid(data) {
 		var raw json.RawMessage
-		parseErr := json.Unmarshal(data, &raw)
-		if tail && parseErr != nil && parseErr.Error() == "unexpected end of JSON input" {
+		parseErr := json.NewDecoder(bytes.NewReader(data)).Decode(&raw)
+		if tail && errors.Is(parseErr, io.ErrUnexpectedEOF) {
 			t.IgnoredTails++
 			return nil
 		}
 		return fmt.Errorf("%s:%d: invalid JSON", source, line)
 	}
-	var values []any
-	var err error
-	if codex {
-		values, err = codexRow(data)
-	}
-	if !codex {
-		values, err = genericRow(data, t.Columns[:len(t.Columns)-2])
-	}
+	values, err := decodeRow(data, t.Columns[:len(t.Columns)-2], codex)
 	if err != nil {
 		return fmt.Errorf("%s:%d: %w", source, line, err)
 	}
@@ -175,6 +169,13 @@ func (t *Table) ingestLine(data []byte, source string, line int64, codex, tail b
 		return fmt.Errorf("%s:%d: %w", source, line, err)
 	}
 	return nil
+}
+
+func decodeRow(data []byte, columns []Column, codex bool) ([]any, error) {
+	if codex {
+		return codexRow(data)
+	}
+	return genericRow(data, columns)
 }
 
 func genericRow(data []byte, columns []Column) ([]any, error) {

@@ -148,7 +148,7 @@ func queryIndex(args []string, out, errOut io.Writer) error {
 
 func render(out io.Writer, r query.Result, stats map[string]any) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d matches / %v rows · snapshot %v · %v\n", r.Matches, stats["rows"], stats["built_at"], stats["backend"])
+	fmt.Fprintf(&b, "%d matches / %v rows · snapshot %q · %v\n", r.Matches, stats["rows"], stats["built_at"], stats["backend"])
 	if stats["ignored_tails"] != 0 {
 		fmt.Fprintf(&b, "incomplete final records omitted: %v\n", stats["ignored_tails"])
 	}

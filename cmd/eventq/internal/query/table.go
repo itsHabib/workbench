@@ -47,6 +47,9 @@ func ParseField(s string) (Field, error) {
 	if !ok {
 		return Field{}, fmt.Errorf("column %q: want name=path:int|string", s)
 	}
+	if !identifier(name) || name == "source" || name == "line" {
+		return Field{}, fmt.Errorf("invalid or reserved column %q", name)
+	}
 	path, kind, ok := strings.Cut(rest, ":")
 	if !ok || path == "" || (kind != "int" && kind != "string") {
 		return Field{}, fmt.Errorf("column %q: want name=path:int|string", s)
