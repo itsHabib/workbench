@@ -52,6 +52,7 @@ Grouped by what they own. Each has its own README under `cmd/<tool>/`.
 | [`console`](cmd/console/README.md) | a local, read-only web view of gate's inbox |
 | [`flare`](cmd/flare/README.md) | notifications on authoritative receipts; a best-effort sink, never a gate |
 | [`tracelens`](cmd/tracelens/README.md) | agent trace diagnostics: loops, redundant calls, retry storms, and what to change |
+| [`eventq`](cmd/eventq/README.md) | local queries over command history and projected JSONL metadata; scalar and optional SIMD scans |
 | [`workbench-mcp`](cmd/workbench-mcp/README.md) | the unified MCP surface over the workbench verbs |
 
 **Local models and secrets**

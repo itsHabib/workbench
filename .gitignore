@@ -59,3 +59,7 @@ __pycache__/
 *.pyc
 /standup
 /swarm
+
+# eventq binary and private local indexes
+/eventq
+*.eq
