@@ -72,7 +72,7 @@ python3 ordinary/proxy_leak.py  # why a host-language tracer cannot infer guards
 python3 -m pytest tests -q      # 62 tests, including the replay-equivalence property test
 python3 live/run_live.py --oracle heuristic --streams 10 --episodes 24   # model-free dry run, 4 arms
 python3 live/run_live.py --oracle live --streams 10 --episodes 24 --max-calls 900  # needs ANTHROPIC_API_KEY
-cd ../.. && go run ./experiments/rote/replay-go   # Go replayer vs 60 exported fixtures
+go run ./replay-go             # Go replayer vs 60 exported fixtures (expects '60 cases, 60 conform')
 ```
 
 Python 3.12+ and pytest are the only requirements. `demo.py` rewrites `runs/library.json`

@@ -13,6 +13,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
+	"maps"
 	"os"
 	"slices"
 	"strconv"
@@ -55,11 +57,8 @@ func (val *value) UnmarshalJSON(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	v, err := readValue(dec)
-	if err != nil {
-		return err
-	}
 	val.v = v
-	return nil
+	return err
 }
 
 func readValue(dec *json.Decoder) (any, error) {
@@ -119,7 +118,8 @@ func list(v any) []any {
 	return items
 }
 
-// equal is deep JSON equality. Unlike Python's ==, a bool never equals an int.
+// equal is deep JSON equality. Unlike Python's ==, a bool never equals an int;
+// objects compare by content regardless of key order, as dicts do.
 func equal(a, b any) bool {
 	switch x := a.(type) {
 	case nil:
@@ -138,100 +138,65 @@ func equal(a, b any) bool {
 		return ok && slices.EqualFunc(x, y, equal)
 	case *object:
 		y, ok := b.(*object)
-		return ok && equalObjects(x, y)
+		return ok && maps.EqualFunc(x.vals, y.vals, equal)
 	}
 	return false
-}
-
-func equalObjects(a, b *object) bool {
-	if len(a.keys) != len(b.keys) {
-		return false
-	}
-	for _, k := range a.keys {
-		v, ok := b.vals[k]
-		if !ok || !equal(a.vals[k], v) {
-			return false
-		}
-	}
-	return true
 }
 
 // render is Python's json.dumps(v, separators=(",", ":")): compact, keys in
 // insertion order, everything outside printable ASCII escaped.
 func render(v any) string {
-	var b strings.Builder
-	write(&b, v)
-	return b.String()
-}
-
-func write(b *strings.Builder, v any) {
 	switch x := v.(type) {
 	case nil:
-		b.WriteString("null")
+		return "null"
 	case bool:
-		b.WriteString(strconv.FormatBool(x))
+		return strconv.FormatBool(x)
 	case int64:
-		b.WriteString(strconv.FormatInt(x, 10))
+		return strconv.FormatInt(x, 10)
 	case string:
-		writeQuoted(b, x)
+		return quote(x)
 	case []any:
-		writeList(b, x)
+		return "[" + joinRendered(x, render) + "]"
 	case *object:
-		writeObject(b, x)
+		return "{" + joinRendered(x.keys, func(k string) string { return quote(k) + ":" + render(x.vals[k]) }) + "}"
 	}
+	return fmt.Sprintf("<%T>", v)
 }
 
-func writeList(b *strings.Builder, items []any) {
-	b.WriteByte('[')
-	for i, v := range items {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		write(b, v)
+func joinRendered[T any](items []T, one func(T) string) string {
+	parts := make([]string, len(items))
+	for i, item := range items {
+		parts[i] = one(item)
 	}
-	b.WriteByte(']')
-}
-
-func writeObject(b *strings.Builder, obj *object) {
-	b.WriteByte('{')
-	for i, k := range obj.keys {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		writeQuoted(b, k)
-		b.WriteByte(':')
-		write(b, obj.vals[k])
-	}
-	b.WriteByte('}')
+	return strings.Join(parts, ",")
 }
 
 var escapes = map[rune]string{'"': `\"`, '\\': `\\`, '\n': `\n`, '\r': `\r`, '\t': `\t`, '\b': `\b`, '\f': `\f`}
 
-func writeQuoted(b *strings.Builder, s string) {
+// quote escapes as json.dumps does with ensure_ascii: printable ASCII passes
+// through, anything else becomes \uXXXX, a surrogate pair above the BMP.
+func quote(s string) string {
+	var b strings.Builder
 	b.WriteByte('"')
 	for _, r := range s {
-		writeRune(b, r)
+		b.WriteString(escape(r))
 	}
 	b.WriteByte('"')
+	return b.String()
 }
 
-// writeRune escapes as json.dumps does with ensure_ascii: printable ASCII
-// passes through, anything else becomes \uXXXX, a surrogate pair above the BMP.
-func writeRune(b *strings.Builder, r rune) {
+func escape(r rune) string {
 	if esc, ok := escapes[r]; ok {
-		b.WriteString(esc)
-		return
+		return esc
 	}
 	if r >= ' ' && r <= '~' {
-		b.WriteRune(r)
-		return
+		return string(r)
 	}
 	if r > 0xFFFF {
 		hi, lo := utf16.EncodeRune(r)
-		fmt.Fprintf(b, `\u%04x\u%04x`, hi, lo)
-		return
+		return fmt.Sprintf(`\u%04x\u%04x`, hi, lo)
 	}
-	fmt.Fprintf(b, `\u%04x`, r)
+	return fmt.Sprintf(`\u%04x`, r)
 }
 
 // toStr is sym.py's _to_str.
@@ -268,7 +233,7 @@ func (en *env) ref(id any) (any, error) {
 	return v, nil
 }
 
-// arity is the length of each form, tag included.
+// arity is the length of each of the 18 forms, tag included.
 var arity = map[string]int{
 	"const": 2, "param": 2, "ref": 2, "field": 3, "index": 3, "len": 2,
 	"has": 3, "get": 4, "keys": 2, "contains": 3, "str": 2, "not": 2, "neg": 2,
@@ -464,10 +429,9 @@ func opField(a []any) (any, error) {
 	return v, nil
 }
 
-// opIndex follows Python's isinstance(i, int), under which a bool is an int.
 func opIndex(a []any) (any, error) {
 	seq, isList := a[0].([]any)
-	i, isInt := asIndex(a[1])
+	i, isInt := a[1].(int64)
 	if !isList || !isInt {
 		return nil, errors.New("index needs a list and an int")
 	}
@@ -477,25 +441,12 @@ func opIndex(a []any) (any, error) {
 	return seq[i], nil
 }
 
-func asIndex(v any) (int64, bool) {
-	switch x := v.(type) {
-	case int64:
-		return x, true
-	case bool:
-		if x {
-			return 1, true
-		}
-		return 0, true
-	}
-	return 0, false
-}
-
 func opLen(a []any) (any, error) {
 	switch x := a[0].(type) {
 	case []any:
 		return int64(len(x)), nil
 	case *object:
-		return int64(len(x.keys)), nil
+		return int64(len(x.vals)), nil
 	case string:
 		return int64(utf8.RuneCountInString(x)), nil
 	}
@@ -556,24 +507,19 @@ func opNeg(a []any) (any, error) {
 	return -n, nil
 }
 
-func opMin(a []any) (any, error) {
+func opMin(a []any) (any, error) { return extremum(a, true) }
+
+func opMax(a []any) (any, error) { return extremum(a, false) }
+
+func extremum(a []any, low bool) (any, error) {
 	x, y, err := twoInts("<", a[0], a[1])
 	if err != nil {
 		return nil, err
 	}
-	return min(x, y), nil
-}
-
-func opMax(a []any) (any, error) {
-	x, y, err := twoInts("<", a[0], a[1])
-	if err != nil {
-		return nil, err
+	if low {
+		return min(x, y), nil
 	}
 	return max(x, y), nil
-}
-
-type library struct {
-	Witnesses []witness `json:"witnesses"`
 }
 
 type witness struct {
@@ -628,7 +574,7 @@ func bind(w *witness, fx *fixture) (*env, error) {
 
 // replay is witness.py's kernel with the world replaced by the fixture's
 // recorded answers. A guard that fails or cannot be evaluated, or a step whose
-// args cannot be evaluated, is a side exit there; the acts so far stand. An
+// args cannot be evaluated, is a side exit there and the acts so far stand. An
 // answer that is missing or of the wrong op is a fixture violation, not an outcome.
 func replay(w *witness, fx *fixture) (outcome, error) {
 	en, err := bind(w, fx)
@@ -690,22 +636,20 @@ func check(witnesses map[string]*witness, fx *fixture) string {
 	if err != nil {
 		return "fixture violation: " + err.Error()
 	}
-	return diff(got, fx.Expected)
-}
-
-func diff(got, want outcome) string {
 	var parts []string
-	if got.Kind != want.Kind {
-		parts = append(parts, fmt.Sprintf("kind %s, expected %s", got.Kind, want.Kind))
+	if got.Kind != want(fx).Kind {
+		parts = append(parts, fmt.Sprintf("kind %s, expected %s", got.Kind, want(fx).Kind))
 	}
-	if got.Step != want.Step {
-		parts = append(parts, fmt.Sprintf("step %d, expected %d", got.Step, want.Step))
+	if got.Step != want(fx).Step {
+		parts = append(parts, fmt.Sprintf("step %d, expected %d", got.Step, want(fx).Step))
 	}
-	if !equal(got.Acts.v, want.Acts.v) {
-		parts = append(parts, fmt.Sprintf("acts %s, expected %s", render(got.Acts.v), render(want.Acts.v)))
+	if !equal(got.Acts.v, want(fx).Acts.v) {
+		parts = append(parts, fmt.Sprintf("acts %s, expected %s", render(got.Acts.v), render(want(fx).Acts.v)))
 	}
 	return strings.Join(parts, "; ")
 }
+
+func want(fx *fixture) *outcome { return &fx.Expected }
 
 func load(path string, into any) error {
 	data, err := os.ReadFile(path)
@@ -718,22 +662,15 @@ func load(path string, into any) error {
 	return nil
 }
 
-func fatal(err error) {
-	fmt.Fprintln(os.Stderr, "replay-go:", err)
-	os.Exit(2)
-}
-
 func main() {
 	libPath := flag.String("lib", "runs/library.json", "witness library written by the Python reference")
 	fxPath := flag.String("fixtures", "runs/replay_fixtures.json", "conformance fixtures from export_fixtures.py")
 	flag.Parse()
-	var lib library
-	if err := load(*libPath, &lib); err != nil {
-		fatal(err)
-	}
+	log.SetFlags(0)
+	var lib struct{ Witnesses []witness }
 	var cases []fixture
-	if err := load(*fxPath, &cases); err != nil {
-		fatal(err)
+	if err := errors.Join(load(*libPath, &lib), load(*fxPath, &cases)); err != nil {
+		log.Fatal("replay-go: ", err)
 	}
 	witnesses := map[string]*witness{}
 	for i := range lib.Witnesses {

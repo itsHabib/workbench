@@ -191,6 +191,25 @@ agent writes comes with a machine-derived applicability check, an audit trail of
 it was validated and where it failed, a static guarantee that it runs without a model
 and within a grant, and a side exit that says exactly which assumption broke.
 
+## The replay kernel in Go
+
+`replay-go/main.go` re-implements the replay kernel and the symbolic evaluator in Go
+(standard library only, no parser, no evaluator for Rote itself, no world). The Python
+side exports conformance fixtures: for each of the five witnesses in `runs/library.json`,
+twelve replays against random worlds, each recorded as the sequence of world answers
+plus the outcome Python produced (completed, or side-exited at which step, with the
+exact actions and their evaluated arguments). The Go kernel reproduces all 60 outcomes:
+
+```
+$ go run ./replay-go
+60 cases, 60 conform
+```
+
+That is the "retained artifacts are host-language independent" claim tested as far as
+fixtures allow. It is not an end-to-end test: replaying through a Go world adapter is
+listed under the next experiments. (`gofmt` and `go vet` are clean; `golangci-lint`
+could not run in this environment because of a toolchain version mismatch.)
+
 ## The live experiment: harness built, dry run measured, live run blocked on a key
 
 The experiment proposed below was built as `live/run_live.py`: random fleets with six

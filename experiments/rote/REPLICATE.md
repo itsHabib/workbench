@@ -32,7 +32,7 @@ python3 demo.py                            # the nine-episode workload, scripted
 python3 ordinary/agent_py.py               # the plain-Python baseline, same episodes
 python3 ordinary/proxy_leak.py             # the host-language tracer leak
 python3 live/run_live.py --oracle heuristic --streams 10 --episodes 24   # model-free dry run
-cd ../.. && go run ./experiments/rote/replay-go     # Go replayer against exported fixtures
+go run ./replay-go                         # Go replayer against exported fixtures
 ```
 
 Confirm or refute every number in `RESULTS.md` against what you see. Any discrepancy is
