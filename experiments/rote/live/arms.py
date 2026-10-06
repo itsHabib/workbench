@@ -34,10 +34,21 @@ class EpisodeResult:
     retained: int = 0  # library size after the episode
 
 
-def _prompt(cap_goal: str, world: Any, s: str, attempts: list[dict[str, Any]], fmt: str, **extra: Any) -> dict[str, Any]:
-    return {"cap": "heal", "params": ["service"], "args": {"service": s}, "goal": cap_goal,
-            "world": {n: f"{k}/{a}" for n, (k, a) in world.signature().items()}, "grant": sorted(GRANT6),
-            "situation": probe6(world, "heal", [s]), "attempts": attempts, "format": fmt, **extra}
+def _prompt(
+    cap_goal: str, world: Any, s: str, attempts: list[dict[str, Any]], fmt: str, **extra: Any
+) -> dict[str, Any]:
+    return {
+        "cap": "heal",
+        "params": ["service"],
+        "args": {"service": s},
+        "goal": cap_goal,
+        "world": {n: f"{k}/{a}" for n, (k, a) in world.signature().items()},
+        "grant": sorted(GRANT6),
+        "situation": probe6(world, "heal", [s]),
+        "attempts": attempts,
+        "format": fmt,
+        **extra,
+    }
 
 
 class RoteArm:
@@ -47,12 +58,19 @@ class RoteArm:
     def __init__(self, oracle: Any):
         self.lib = Library.from_source(LIBRARY6)
         self.oracle = oracle
-        self.rt = Runtime(self.lib, Policy(grant=GRANT6, max_attempts=3, probe=probe6,
-                                           revalidate_sources=self.revalidate), oracle)
+        self.rt = Runtime(
+            self.lib,
+            Policy(grant=GRANT6, max_attempts=3, probe=probe6, revalidate_sources=self.revalidate),
+            oracle,
+        )
 
     def achieve(self, world: Any, s: str) -> EpisodeResult:
         out = self.rt.achieve("heal", [s], world)
-        notes = [e.text for e in out.events if e.kind in ("inapplicable", "checker_fail", "side_exit", "refused", "failed")]
+        notes = [
+            e.text
+            for e in out.events
+            if e.kind in ("inapplicable", "checker_fail", "side_exit", "refused", "failed")
+        ]
         return EpisodeResult(out.kind, out.oracle_calls, notes[:8], len(self.lib.caps["heal"].witnesses))
 
 
@@ -71,7 +89,9 @@ class _Base:
         self.lib = Library.from_source(LIBRARY6)
         self.cap = self.lib.caps["heal"]
         self.oracle = oracle
-        self.rt = Runtime(self.lib, Policy(grant=GRANT6, max_attempts=3, probe=probe6), oracle)  # for `use` and the goal
+        self.rt = Runtime(
+            self.lib, Policy(grant=GRANT6, max_attempts=3, probe=probe6), oracle
+        )  # for `use` and the goal
 
     def goal(self, world: Any, s: str) -> bool:
         holds, _ = self.rt.goal_holds(self.cap, [s], world)
@@ -138,23 +158,35 @@ class PrecondArm(_Base):
         calls = 0
         for _ in range(3):
             try:
-                src = self.oracle.ask(_prompt(self.cap.goal_src, world, s, attempts, "when", dispatch=notes[-4:]))
+                src = self.oracle.ask(
+                    _prompt(self.cap.goal_src, world, s, attempts, "when", dispatch=notes[-4:])
+                )
             except OracleExhausted as err:
                 return EpisodeResult("failed", calls, [*notes, str(err)], len(self.skills))
             calls += 1
             decl, err = self.parse(src)
             if decl is None or decl.when is None:
-                attempts.append({"source": src, "outcome": "refused", "reason": err or "missing `when` clause"})
+                attempts.append(
+                    {"source": src, "outcome": "refused", "reason": err or "missing `when` clause"}
+                )
                 continue
             sk = _Skill(decl.when, decl.body, src, len(self.skills) + 1)
             if not self.applies(sk, world, s):
-                attempts.append({"source": src, "outcome": "refused", "reason": "the when-clause is false in the current situation"})
+                attempts.append(
+                    {
+                        "source": src,
+                        "outcome": "refused",
+                        "reason": "the when-clause is false in the current situation",
+                    }
+                )
                 continue
             ok, rerr, _ = self.run_body(decl.body, world, s)
             if ok and self.goal(world, s):
                 self.skills.append(sk)
                 return EpisodeResult("synthesized", calls, notes, len(self.skills))
-            attempts.append({"source": src, "outcome": "fail", "reason": rerr or "the goal does not hold after the run"})
+            attempts.append(
+                {"source": src, "outcome": "fail", "reason": rerr or "the goal does not hold after the run"}
+            )
         return EpisodeResult("failed", calls, [*notes, "no proposal passed"], len(self.skills))
 
 
@@ -173,7 +205,9 @@ class ModelEachArm(_Base):
         for _ in range(3):
             shown = [{"source": e["source"], "solved": e["solved"]} for e in self.library]
             try:
-                src = self.oracle.ask(_prompt(self.cap.goal_src, world, s, attempts, "library", library=shown))
+                src = self.oracle.ask(
+                    _prompt(self.cap.goal_src, world, s, attempts, "library", library=shown)
+                )
             except OracleExhausted as err:
                 return EpisodeResult("failed", calls, [str(err)], len(self.library))
             calls += 1
@@ -185,7 +219,9 @@ class ModelEachArm(_Base):
             if ok and self.goal(world, s):
                 self.remember(src, probe6(world, "heal", [s]))
                 return EpisodeResult("synthesized", calls, [], len(self.library))
-            attempts.append({"source": src, "outcome": "fail", "reason": rerr or "the goal does not hold after the run"})
+            attempts.append(
+                {"source": src, "outcome": "fail", "reason": rerr or "the goal does not hold after the run"}
+            )
         return EpisodeResult("failed", calls, ["no proposal passed"], len(self.library))
 
     def remember(self, src: str, sit: dict[str, Any]) -> None:
@@ -206,4 +242,6 @@ class RoteRevalArm(RoteArm):
 
 
 def make_arm(name: str, oracle: Any) -> Any:
-    return {"rote": RoteArm, "rote_reval": RoteRevalArm, "precond": PrecondArm, "model_each": ModelEachArm}[name](oracle)
+    return {"rote": RoteArm, "rote_reval": RoteRevalArm, "precond": PrecondArm, "model_each": ModelEachArm}[
+        name
+    ](oracle)

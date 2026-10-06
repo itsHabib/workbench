@@ -15,7 +15,7 @@ from . import ast as A
 from .effects import StaticError, check_goal, check_script
 from .eval import RoteError, Tracer, run_script
 from .library import Capability, Library
-from .parser import ParseError, parse_program
+from .parser import parse_program
 from .synth import OracleExhausted
 from .witness import Evidence, ReplayOutcome, Witness, describe_guards, replay, witness_from_steps
 
@@ -30,7 +30,9 @@ class Policy:
     fuel: int = 20_000
     max_depth: int = 6
     probe: Any = None  # optional callable(world, cap_name, args) -> dict shown to the oracle as "situation"
-    revalidate_sources: bool = False  # on a miss, re-run known sources under the goal before asking the oracle
+    revalidate_sources: bool = (
+        False  # on a miss, re-run known sources under the goal before asking the oracle
+    )
     stop_after_failed_replay: bool = False  # True: one witness that acted and failed ends dispatch
 
 
@@ -71,8 +73,12 @@ class ProposalResult:
     events: list[Event] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
-        return {"ok": self.ok, "kind": self.kind, "reason": self.reason,
-                "witness": self.witness.hash if self.witness else None}
+        return {
+            "ok": self.ok,
+            "kind": self.kind,
+            "reason": self.reason,
+            "witness": self.witness.hash if self.witness else None,
+        }
 
 
 class Runtime:
@@ -85,8 +91,15 @@ class Runtime:
 
     # -- helpers -------------------------------------------------------------------
     def _tracer(self, world: Any, mode: str) -> Tracer:
-        return Tracer(world, grant=set(self.policy.grant), mode=mode, fuel=self.policy.fuel,
-                      caps=self.library.arities(), runtime=self, oracle=self.oracle)
+        return Tracer(
+            world,
+            grant=set(self.policy.grant),
+            mode=mode,
+            fuel=self.policy.fuel,
+            caps=self.library.arities(),
+            runtime=self,
+            oracle=self.oracle,
+        )
 
     def goal_holds(self, cap: Capability, args: list[Any], world: Any) -> tuple[bool | None, str]:
         """The checker. None means inconclusive (the goal itself failed to evaluate)."""
@@ -148,7 +161,12 @@ class Runtime:
             if res.ok:
                 out.kind = "revalidated"
                 out.witness = res.witness
-                out.events.append(Event("revalidated", f"known source of {w.hash} took a new path; retained {res.witness.hash}"))
+                out.events.append(
+                    Event(
+                        "revalidated",
+                        f"known source of {w.hash} took a new path; retained {res.witness.hash}",
+                    )
+                )
                 return True
             if res.acts:
                 break  # it acted and failed: do not keep trying sources on a changed world
@@ -161,10 +179,17 @@ class Runtime:
             r = replay(w, args, world, self.policy.grant, runtime=self, prefix_only=True)
             out.seen.update(r.seen)
             if r.kind == "refused":
-                out.events.append(Event("refused", f"{w.hash} refused before replay: {r.reason}", {"witness": w.hash}))
+                out.events.append(
+                    Event("refused", f"{w.hash} refused before replay: {r.reason}", {"witness": w.hash})
+                )
             elif r.kind in ("side_exit", "error"):
-                out.events.append(Event("inapplicable", f"{w.hash} does not apply: {r.reason}",
-                                        {"witness": w.hash, "step": r.step}))
+                out.events.append(
+                    Event(
+                        "inapplicable",
+                        f"{w.hash} does not apply: {r.reason}",
+                        {"witness": w.hash, "step": r.step},
+                    )
+                )
             else:
                 keep.append(w)
         return keep
@@ -177,13 +202,23 @@ class Runtime:
             out.acts.extend(r.acts)
             out.seen.update(r.seen)
             if r.inapplicable:  # an earlier replay in this dispatch changed what this one assumed
-                out.events.append(Event("inapplicable", f"{w.hash} no longer applies: {r.reason}",
-                                        {"witness": w.hash, "step": r.step}))
+                out.events.append(
+                    Event(
+                        "inapplicable",
+                        f"{w.hash} no longer applies: {r.reason}",
+                        {"witness": w.hash, "step": r.step},
+                    )
+                )
                 continue
             if r.kind != "completed":
                 self._record(w, "replayed", "side_exit", world, cap, args, r, out)
-                out.events.append(Event("side_exit", f"{w.hash} stopped after acting: {r.reason}",
-                                        {"witness": w.hash, "acts": r.acts}))
+                out.events.append(
+                    Event(
+                        "side_exit",
+                        f"{w.hash} stopped after acting: {r.reason}",
+                        {"witness": w.hash, "acts": r.acts},
+                    )
+                )
                 if self.policy.stop_after_failed_replay:
                     return False
                 continue
@@ -193,18 +228,43 @@ class Runtime:
             if holds:
                 out.kind = "replayed"
                 out.witness = w
-                out.events.append(Event("replayed", f"{w.hash} replayed and the goal holds", {"witness": w.hash}))
+                out.events.append(
+                    Event("replayed", f"{w.hash} replayed and the goal holds", {"witness": w.hash})
+                )
                 return True
-            out.events.append(Event("checker_fail", f"{w.hash} replayed but the goal does not hold",
-                                    {"witness": w.hash, "acts": r.acts}))
+            out.events.append(
+                Event(
+                    "checker_fail",
+                    f"{w.hash} replayed but the goal does not hold",
+                    {"witness": w.hash, "acts": r.acts},
+                )
+            )
             if self.policy.stop_after_failed_replay:
                 return False
         return False
 
-    def _record(self, w: Witness, kind: str, verdict: str, world: Any, cap: Capability,
-                args: list[Any], r: ReplayOutcome, out: Outcome, note: str = "") -> None:
-        w.evidence.append(Evidence(kind, verdict, world.label, dict(zip(cap.params, args, strict=True)),
-                                   len(r.acts), note or r.reason))
+    def _record(
+        self,
+        w: Witness,
+        kind: str,
+        verdict: str,
+        world: Any,
+        cap: Capability,
+        args: list[Any],
+        r: ReplayOutcome,
+        out: Outcome,
+        note: str = "",
+    ) -> None:
+        w.evidence.append(
+            Evidence(
+                kind,
+                verdict,
+                world.label,
+                dict(zip(cap.params, args, strict=True)),
+                len(r.acts),
+                note or r.reason,
+            )
+        )
 
     def _synthesize(self, cap: Capability, args: list[Any], world: Any, out: Outcome) -> Outcome:
         if self.oracle is None:
@@ -237,8 +297,9 @@ class Runtime:
         out.events.append(Event("failed", out.reason))
         return out
 
-    def _prompt(self, cap: Capability, args: list[Any], world: Any, attempts: list[dict[str, Any]],
-                out: Outcome) -> dict[str, Any]:
+    def _prompt(
+        self, cap: Capability, args: list[Any], world: Any, attempts: list[dict[str, Any]], out: Outcome
+    ) -> dict[str, Any]:
         return {
             "cap": cap.name,
             "params": cap.params,
@@ -247,7 +308,9 @@ class Runtime:
             "doc": cap.doc,
             "world": {name: f"{kind}/{arity}" for name, (kind, arity) in self.library.signature.items()},
             "grant": sorted(self.policy.grant),
-            "dispatch": [e.text for e in out.events if e.kind in ("inapplicable", "side_exit", "checker_fail")],
+            "dispatch": [
+                e.text for e in out.events if e.kind in ("inapplicable", "side_exit", "checker_fail")
+            ],
             "observed": dict(out.seen),
             "situation": self.policy.probe(world, cap.name, list(args)) if self.policy.probe else None,
             "attempts": attempts,
@@ -255,19 +318,25 @@ class Runtime:
 
     def _run_tactic(self, cap: Capability, args: list[Any], world: Any, out: Outcome) -> Outcome:
         assert cap.tactic is not None
-        before = len(cap.witnesses)
+        calls_before = getattr(self.oracle, "calls", 0)
+        ctx = _TacticContext(self, cap, args, out)
         t = self._tracer(world, "tactic")
-        t.runtime = _TacticContext(self, cap, args, out)
+        t.runtime = ctx
         result = run_script(t, cap.tactic.params, args, cap.tactic.body)
+        out.oracle_calls += getattr(self.oracle, "calls", 0) - calls_before
         if not result.ok:
             out.events.append(Event("tactic_error", result.error or "tactic failed"))
-        retained = [w for w in cap.witnesses[before:]] or [w for w in cap.witnesses if _just_validated(w, world)]
-        if retained:
-            out.kind = "synthesized"
-            out.witness = retained[-1]
+        if not ctx.successes:
+            out.reason = "the tactic validated no proposal in this invocation"
+            out.events.append(Event("failed", out.reason))
             return out
-        out.reason = "the tactic retained nothing"
-        out.events.append(Event("failed", out.reason))
+        holds, why = self.goal_holds(cap, args, world)
+        if not holds:
+            out.reason = why or "a proposal passed during the tactic but the goal does not hold now"
+            out.events.append(Event("failed", out.reason))
+            return out
+        out.kind = "synthesized"
+        out.witness = ctx.successes[-1]
         return out
 
     # -- proposals ---------------------------------------------------------------------
@@ -279,18 +348,25 @@ class Runtime:
             return ProposalResult(False, "refused", f"parse error: {err}")
         scripts = [d for d in prog.decls if isinstance(d, A.ScriptDecl)]
         if len(scripts) != 1 or scripts[0].name != cap.name:
-            return ProposalResult(False, "refused", f"a proposal must be exactly one `script {cap.name}(...)`")
+            return ProposalResult(
+                False, "refused", f"a proposal must be exactly one `script {cap.name}(...)`"
+            )
         decl = scripts[0]
         if decl.params != cap.params:
-            return ProposalResult(False, "refused", f"script parameters must be {cap.params}, got {decl.params}")
-        row, errors = check_script(decl.params, decl.body, self.library.signature, self.policy.grant,
-                                   self.library.arities())
+            return ProposalResult(
+                False, "refused", f"script parameters must be {cap.params}, got {decl.params}"
+            )
+        row, errors = check_script(
+            decl.params, decl.body, self.library.signature, self.policy.grant, self.library.arities()
+        )
         if decl.when is not None:
             _, when_errors = check_goal(decl.params, decl.when, self.library.signature)
             errors += [StaticError(e.kind, f"when-clause: {e.msg}", e.line) for e in when_errors]
         if errors:
             reason = "; ".join(str(e) for e in errors)
-            return ProposalResult(False, "refused", reason, events=[Event("refused", f"static check: {reason}")])
+            return ProposalResult(
+                False, "refused", reason, events=[Event("refused", f"static check: {reason}")]
+            )
         tracer = self._tracer(world, "script")
         body = decl.body if decl.when is None else _guarded_body(decl)
         run = run_script(tracer, decl.params, args, body)
@@ -305,10 +381,15 @@ class Runtime:
             events.append(Event("checker_fail", reason, {"acts": acts}))
             return ProposalResult(False, "fail", reason, acts=acts, events=events)
         w = witness_from_steps(cap.name, cap.params, run.steps, decl.source)
-        kept = self.library.retain(w, Evidence("validated", "pass", world.label,
-                                               dict(zip(cap.params, args, strict=True)), len(acts)))
+        kept = self.library.retain(
+            w, Evidence("validated", "pass", world.label, dict(zip(cap.params, args, strict=True)), len(acts))
+        )
         guards = "; ".join(describe_guards(kept)) or "none"
-        events.append(Event("retained", f"goal holds; retained {kept.hash} with guards: {guards}", {"witness": kept.hash}))
+        events.append(
+            Event(
+                "retained", f"goal holds; retained {kept.hash} with guards: {guards}", {"witness": kept.hash}
+            )
+        )
         return ProposalResult(True, "retained", witness=kept, acts=acts, events=events)
 
 
@@ -316,11 +397,24 @@ def _guarded_body(decl: A.ScriptDecl) -> A.Block:
     """A `when` clause runs first, inside the traced run, so its decisions become guards:
     `if not (when) { fail("when-clause is false") }` followed by the body."""
     assert decl.when is not None
-    check = A.If(A.Unary("not", decl.when, line=decl.line),
-                 A.Block([A.ExprStmt(A.Call(A.Var("fail", line=decl.line),
-                                            [A.StrLit("when-clause is false", line=decl.line)], line=decl.line),
-                                     line=decl.line)], line=decl.line),
-                 None, line=decl.line)
+    check = A.If(
+        A.Unary("not", decl.when, line=decl.line),
+        A.Block(
+            [
+                A.ExprStmt(
+                    A.Call(
+                        A.Var("fail", line=decl.line),
+                        [A.StrLit("when-clause is false", line=decl.line)],
+                        line=decl.line,
+                    ),
+                    line=decl.line,
+                )
+            ],
+            line=decl.line,
+        ),
+        None,
+        line=decl.line,
+    )
     return A.Block([A.ExprStmt(check, line=decl.line), *decl.body.stmts], line=decl.line)
 
 
@@ -329,6 +423,7 @@ class _TacticContext:
 
     def __init__(self, rt: Runtime, cap: Capability, args: list[Any], out: Outcome):
         self.rt, self.cap, self.args, self.out = rt, cap, args, out
+        self.successes: list[Witness] = []  # proposals validated by this invocation, in order
 
     def achieve(self, cap: str, args: list[Any], world: Any) -> Outcome:
         return self.rt.achieve(cap, args, world)
@@ -338,10 +433,6 @@ class _TacticContext:
         res = self.rt.propose(src, world, self.cap, self.args)
         self.out.events.extend(res.events)
         self.out.acts.extend(res.acts)
+        if res.ok and res.witness is not None:
+            self.successes.append(res.witness)
         return res
-
-
-def _just_validated(w: Witness, world: Any) -> bool:
-    return bool(w.evidence) and w.evidence[-1].kind == "validated" and w.evidence[-1].world == world.label
-
-

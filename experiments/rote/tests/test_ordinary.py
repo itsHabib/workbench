@@ -6,8 +6,12 @@ from ordinary import agent_py, proxy_leak
 def test_python_baseline_pays_for_what_it_cannot_see():
     rows = {r.tag: r for r in agent_py.run(verbose=False)}
     assert rows["E4"].disruptions >= 1, "the unvalidated else-branch rebooted a shared host"
-    assert rows["E4"].outcome == "replayed" and rows["E4"].collateral == ["web"], "and moved the outage to web"
-    assert any("P3a" in n for r in rows.values() for n in r.notes), "the skill with an LLM call inside was retained"
+    assert rows["E4"].outcome == "replayed" and rows["E4"].collateral == ["web"], (
+        "and moved the outage to web"
+    )
+    assert any("P3a" in n for r in rows.values() for n in r.notes), (
+        "the skill with an LLM call inside was retained"
+    )
     assert sum(r.runtime_llm_calls for r in rows.values()) >= 1, "and it costs an LLM call at run time"
     assert rows["E9"].outcome == "parked" and rows["E9"].disruptions > rows["E8"].disruptions
 

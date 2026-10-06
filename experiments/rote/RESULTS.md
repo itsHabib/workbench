@@ -197,16 +197,20 @@ and within a grant, and a side exit that says exactly which assumption broke.
 in Go (standard library only, no parser, no evaluator for Rote itself, no world). The
 Python side exports conformance fixtures: replays against random worlds, each recorded
 as the sequence of world answers plus the outcome Python produced (completed, or
-side-exited at which step, with the exact actions and their evaluated arguments). Two
-sets: the demo's five witnesses (60 cases), and 16 witnesses from four hand-written
-scripts that between them use all 21 forms (192 cases). The Go kernel reproduces every
-outcome:
+side-exited at which step, with the exact actions and their evaluated arguments). Three
+sets: the demo's five witnesses (60 cases); 16 witnesses from four hand-written scripts
+that between them use all 21 forms (192 cases); and 20 type-drift cases built from the
+first external review's scenarios, each witness validated on one shape of answer and
+replayed on another (overflow, non-string keys, a string where an int was, an unused
+binding whose type check must still fire). The Go kernel reproduces every outcome:
 
 ```
 $ go run ./replay-go
 60 cases, 60 conform
 $ go run ./replay-go -lib runs/synthetic_library.json -fixtures runs/synthetic_fixtures.json
 192 cases, 192 conform
+$ go run ./replay-go -lib runs/drift_library.json -fixtures runs/drift_fixtures.json
+20 cases, 20 conform
 ```
 
 That is the "retained artifacts are host-language independent" claim tested as far as
@@ -222,6 +226,39 @@ value of `1`. Two inputs raised uncaught `TypeError`s in the replay evaluator in
 of a side exit (`contains` on a string with a non-string needle; a non-string record
 key). All are fixed with a typed structural equality shared by the evaluator, the
 kernel, and the guard check, with tests. None affected the workload numbers.
+
+## What the first external review found
+
+The review of this PR's first head reproduced seven defects; all are fixed, each with a
+regression test, and the Go kernel's conformance sets were extended to cover them.
+
+1. **Unused pure bindings lost their type checks.** `let port = read().port + 1` then
+   `write("restart")`: the witness carried only the `has` guard, so a replay where
+   `port` had become a string acted where the interpreter would have failed first. Pure
+   operations on observed data now leave `eval` steps (dropped when a guard or argument
+   covers them); the demo's witnesses are unchanged by this because every such
+   expression there was already covered.
+2. **`str()` of a container dropped symbolic children.** `write(str([read()]))` retained
+   the constant `"[1]"`. Containers with observed children now lift to a symbolic `str`.
+3. **Replay kept the adapter's live objects.** The evaluator deep-copied answers; the
+   kernel did not, so an adapter that mutates what it handed out could rewrite earlier
+   bindings. Replay copies now.
+4. **Integers.** Python bigints versus Go `int64` wraparound. Rote ints are signed 64-bit
+   by definition in every kernel, and leaving the range is an error.
+5. **Non-string record keys.** The Go kernel treated them as absent where Python
+   refuses. Both refuse.
+6. **Tactic success.** A fallback credited historical evidence on a world with the same
+   label. Success now requires a proposal validated in this invocation and the goal
+   holding afterwards.
+7. **The property test seeded from Python's salted `hash()`.** Worlds changed between
+   processes and the "both outcomes occurred" assertion could fail by chance (it did,
+   under `PYTHONHASHSEED=24`). Seeds now come from a stable checksum, completion is
+   guaranteed by replaying against the validating world, a side exit is guaranteed by a
+   constructed case, and the random trials remain as an additional check.
+
+The soundness claim survives in the form stated in `DESIGN.md`, with the addition that
+replay must also re-evaluate what the interpreter evaluated. It is still argued and
+tested, not proven.
 
 ## The live experiment: harness built, dry run measured, live run blocked on a key
 

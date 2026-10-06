@@ -1,0 +1,546 @@
+[
+ {
+  "witness": "wa901f9d000",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": 1
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "write",
+     [
+      "a",
+      "[1]"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wa901f9d000",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": 2
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "write",
+     [
+      "a",
+      "[2]"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w32d42bc29a",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": 1
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "write",
+     [
+      "a",
+      "2"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w32d42bc29a",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": 9223372036854775807
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 1,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w7f518254d7",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {}
+   },
+   {
+    "op": "observe",
+    "value": "missing"
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w7f518254d7",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {}
+   },
+   {
+    "op": "observe",
+    "value": 1
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w4b04b2a2f8",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "a": 1
+    }
+   },
+   {
+    "op": "observe",
+    "value": "a"
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "write",
+     [
+      "a",
+      1
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w4b04b2a2f8",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "a": 1
+    }
+   },
+   {
+    "op": "observe",
+    "value": 1
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w80a904f9f2",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 80
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "write",
+     [
+      "a",
+      "restart"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w80a904f9f2",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": "eighty"
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wf4998dd858",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": 5
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "write",
+     [
+      "a",
+      -5
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wf4998dd858",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": -9223372036854775808
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 1,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wa69c73d87b",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": 5
+   },
+   {
+    "op": "observe",
+    "value": 5
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "write",
+     [
+      "a",
+      10
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wa69c73d87b",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": 9223372036854775807
+   },
+   {
+    "op": "observe",
+    "value": 9223372036854775807
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w06e83ecac9",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": 5
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "write",
+     [
+      "a",
+      10
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w06e83ecac9",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": -4611686018427387905
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 1,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w0e466906f5",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": [
+     1,
+     2
+    ]
+   },
+   {
+    "op": "observe",
+    "value": [
+     1,
+     2
+    ]
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "write",
+     [
+      "a",
+      5
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w0e466906f5",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": [
+     1,
+     "two"
+    ]
+   },
+   {
+    "op": "observe",
+    "value": [
+     1,
+     "two"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w2fa4c4f3fc",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "a": 7
+    }
+   },
+   {
+    "op": "observe",
+    "value": "a"
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "write",
+     [
+      "a",
+      7
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w2fa4c4f3fc",
+  "cap": "f",
+  "args": {
+   "s": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "a": 7
+    }
+   },
+   {
+    "op": "observe",
+    "value": 2
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ }
+]

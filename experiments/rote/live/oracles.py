@@ -1,11 +1,11 @@
 """Oracles for the live experiment, and the probe every arm shows them.
 
-  HeuristicOracle  -- a deterministic STAND-IN for a model (the dry run). It diagnoses
-                      the cause from the probe and returns a fixed script per cause,
-                      first a generic "kitchen-sink" runbook, then the targeted fix.
-                      Nothing it produces is model output.
-  LoggedLiveOracle -- the real thing: one Claude call per proposal, with token usage
-                      and a JSONL transcript. Needs ANTHROPIC_API_KEY.
+HeuristicOracle  -- a deterministic STAND-IN for a model (the dry run). It diagnoses
+                    the cause from the probe and returns a fixed script per cause,
+                    first a generic "kitchen-sink" runbook, then the targeted fix.
+                    Nothing it produces is model output.
+LoggedLiveOracle -- the real thing: one Claude call per proposal, with token usage
+                    and a JSONL transcript. Needs ANTHROPIC_API_KEY.
 """
 
 from __future__ import annotations
@@ -43,66 +43,66 @@ def probe6(world: Any, cap: str, args: list[Any]) -> dict[str, Any]:
 
 # ---- the heuristic stand-in ---------------------------------------------------------
 
-GENERIC = '''script heal(service) {
+GENERIC = """script heal(service) {
   let host = host_of(service)
   if disk(host) > 90 { clear_tmp(host) }
   if lock_held(service) { remove_lock(service) }
   for d in depends_on(service) { use heal(d) }
   restart(service)
-}'''
+}"""
 
 TARGETED = {
-    "crash": '''script heal(service) {
+    "crash": """script heal(service) {
   if status(service) == "down" { restart(service) }
-}''',
-    "disk": '''script heal(service) {
+}""",
+    "disk": """script heal(service) {
   let host = host_of(service)
   if disk(host) > 90 { clear_tmp(host) }
   restart(service)
-}''',
-    "lock": '''script heal(service) {
+}""",
+    "lock": """script heal(service) {
   if lock_held(service) { remove_lock(service) }
   restart(service)
-}''',
-    "dep": '''script heal(service) {
+}""",
+    "dep": """script heal(service) {
   for d in depends_on(service) { use heal(d) }
   restart(service)
-}''',
-    "lostport": '''script heal(service) {
+}""",
+    "lostport": """script heal(service) {
   let host = host_of(service)
   if not has(config(service), "port") {
     let free = max_of(ports_in_use(host), 8000) + 1
     set_config(service, "port", free)
   }
   restart(service)
-}''',
-    "port": '''script heal(service) {
+}""",
+    "port": """script heal(service) {
   let host = host_of(service)
   let cfg = config(service)
   if contains(ports_in_use(host), cfg.port) {
     set_config(service, "port", max_of(ports_in_use(host), cfg.port) + 1)
   }
   restart(service)
-}''',
-    "port_nested": '''script heal(service) {
+}""",
+    "port_nested": """script heal(service) {
   let host = host_of(service)
   let cfg = config(service)
   if contains(ports_in_use(host), cfg.listen.port) {
     set_config(service, "listen", {port: max_of(ports_in_use(host), cfg.listen.port) + 1})
   }
   restart(service)
-}''',
+}""",
 }
 
 WHEN = {  # the precondition a careful author would write for each targeted script
     "generic": 'status(service) == "down"',
     "crash": 'status(service) == "down"',
-    "disk": 'disk(host_of(service)) > 90',
-    "lock": 'lock_held(service)',
+    "disk": "disk(host_of(service)) > 90",
+    "lock": "lock_held(service)",
     "dep": 'any(map(depends_on(service), fn(d) { status(d) != "up" }))',
     "lostport": 'not has(config(service), "port") and not has(config(service), "listen")',
-    "port": 'contains(ports_in_use(host_of(service)), config(service).port)',
-    "port_nested": 'contains(ports_in_use(host_of(service)), config(service).listen.port)',
+    "port": "contains(ports_in_use(host_of(service)), config(service).port)",
+    "port_nested": "contains(ports_in_use(host_of(service)), config(service).listen.port)",
 }
 
 
@@ -152,6 +152,7 @@ class HeuristicOracle:
 
 # ---- the live oracle --------------------------------------------------------------------
 
+
 class CallBudget:
     def __init__(self, max_calls: int):
         self.max_calls, self.used = max_calls, 0
@@ -166,16 +167,19 @@ class CallBudget:
 
 SYSTEM = (
     "You write Rote scripts for an operator's capability library. The user message is a JSON object: "
-    "the capability (`cap`, `params`, `goal`), the world signature (`world`: name -> observe/act and arity), the caller's "
-    "`grant` (the only actions you may call), a `situation` probe of fresh observations, `observed` values seen while "
-    "dispatching, `dispatch` notes, and `attempts` (earlier proposals this episode and why each failed). Reply with exactly one "
-    "```rote fenced block containing a single `script` declaration and nothing else outside it.\n\n" + GRAMMAR_CARD +
-    "\nRules: observe before you act; call only functions in the world signature and only granted actions; never call ask(); "
-    "a script may `use heal(x)` to repair another service first. "
-    "If `format` is \"when\", add an applicability condition after the parameter list: "
-    "`script heal(service) when <observe-only expression> { ... }`; it will be evaluated on future incidents to decide, "
-    "without you, whether to reuse this script, so make it exactly as specific as the fix requires. "
-    "If `library` is present, you may copy one of those scripts verbatim when it fits, or adapt one, or write a new one."
+    "the capability (`cap`, `params`, `goal`), the world signature (`world`: name -> observe/act and "
+    "arity), the caller's `grant` (the only actions you may call), a `situation` probe of fresh "
+    "observations, `observed` values seen while dispatching, `dispatch` notes, and `attempts` (earlier "
+    "proposals this episode and why each failed). Reply with exactly one ```rote fenced block containing "
+    "a single `script` declaration and nothing else outside it.\n\n"
+    + GRAMMAR_CARD
+    + "\nRules: observe before "
+    "you act; call only functions in the world signature and only granted actions; never call ask(); a "
+    'script may `use heal(x)` to repair another service first. If `format` is "when", add an '
+    "applicability condition after the parameter list: `script heal(service) when <observe-only "
+    "expression> { ... }`; it will be evaluated on future incidents to decide, without you, whether to "
+    "reuse this script, so make it exactly as specific as the fix requires. If `library` is present, you "
+    "may copy one of those scripts verbatim when it fits, or adapt one, or write a new one."
 )
 
 
@@ -215,10 +219,17 @@ class LoggedLiveOracle:
         text = "".join(b.text for b in response.content if b.type == "text")
         m = re.search(r"```(?:rote)?\s*(.*?)```", text, re.S)
         src = m.group(1).strip() if m else text.strip()
-        entry = {"call": None, "model": response.model, "stop_reason": response.stop_reason,
-                 "input_tokens": response.usage.input_tokens, "output_tokens": response.usage.output_tokens,
-                 "cache_read": getattr(response.usage, "cache_read_input_tokens", 0),
-                 "seconds": round(time.time() - t0, 1), "prompt": prompt, "response": text}
+        entry = {
+            "call": None,
+            "model": response.model,
+            "stop_reason": response.stop_reason,
+            "input_tokens": response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens,
+            "cache_read": getattr(response.usage, "cache_read_input_tokens", 0),
+            "seconds": round(time.time() - t0, 1),
+            "prompt": prompt,
+            "response": text,
+        }
         with self._lock:
             self.calls += 1
             entry["call"] = self.calls

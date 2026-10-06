@@ -1,17 +1,17 @@
 """Recursive-descent parser. Grammar summary (see DESIGN.md for the full table):
 
-  program  := decl*
-  decl     := 'world' NAME '{' (('observe'|'act') NAME '(' names ')' (':' NAME)?)* '}'
-            | 'cap' NAME '(' names ')' '{' 'goal' ':' expr '}'
-            | 'script' NAME '(' names ')' ('when' expr)? block | 'tactic' NAME '(' names ')' block
-  block    := '{' stmt* '}'
-  stmt     := 'let' NAME '=' expr | 'for' NAME 'in' expr block | expr
-  expr     := or ; or := and ('or' and)* ; and := not ('and' not)* ; not := 'not' not | cmp
-  cmp      := add (CMPOP add)? ; add := mul (('+'|'-') mul)* ; mul := unary (('*'|'/'|'%') unary)*
-  unary    := '-' unary | postfix ; postfix := primary ('(' args ')' | '.' NAME | '[' expr ']')*
-  primary  := INT | STR | 'true' | 'false' | 'unit' | NAME | '(' expr ')' | '[' args ']' | '{' fields '}'
-            | 'fn' '(' names ')' block | 'if' expr block ('else' (block | if))? | 'return' expr?
-            | 'use' NAME '(' args ')' | 'ask' '(' expr ')' | 'propose' '(' expr ')'
+program  := decl*
+decl     := 'world' NAME '{' (('observe'|'act') NAME '(' names ')' (':' NAME)?)* '}'
+          | 'cap' NAME '(' names ')' '{' 'goal' ':' expr '}'
+          | 'script' NAME '(' names ')' ('when' expr)? block | 'tactic' NAME '(' names ')' block
+block    := '{' stmt* '}'
+stmt     := 'let' NAME '=' expr | 'for' NAME 'in' expr block | expr
+expr     := or ; or := and ('or' and)* ; and := not ('and' not)* ; not := 'not' not | cmp
+cmp      := add (CMPOP add)? ; add := mul (('+'|'-') mul)* ; mul := unary (('*'|'/'|'%') unary)*
+unary    := '-' unary | postfix ; postfix := primary ('(' args ')' | '.' NAME | '[' expr ']')*
+primary  := INT | STR | 'true' | 'false' | 'unit' | NAME | '(' expr ')' | '[' args ']' | '{' fields '}'
+          | 'fn' '(' names ')' block | 'if' expr block ('else' (block | if))? | 'return' expr?
+          | 'use' NAME '(' args ')' | 'ask' '(' expr ')' | 'propose' '(' expr ')'
 """
 
 from __future__ import annotations
@@ -338,6 +338,9 @@ class _Parser:
             if self.at("newline") or self.at_punct("}"):
                 return A.Return(None, line=t.line)
             return A.Return(self.expr(), line=t.line)
+        return self.primary_effect_kw(t)
+
+    def primary_effect_kw(self, t: Token) -> A.Expr:
         if t.text == "use":
             cap = self.ident()
             self.expect("punct", "(")

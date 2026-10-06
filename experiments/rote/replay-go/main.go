@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"math"
 	"os"
 	"slices"
 	"strconv"
@@ -334,6 +335,9 @@ func evalGet(form []any, en *env) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, err := stringKey("get", key); err != nil {
+		return nil, err
+	}
 	if o, ok := obj.(*object); ok {
 		if v, found := o.lookup(key); found {
 			return v, nil
@@ -381,15 +385,38 @@ func twoInts(op string, a, b any) (int64, int64, error) {
 	return x, y, nil
 }
 
-func arith(op string, x, y int64) (any, error) {
+// checkedArith is sym.py's `ranged`: Rote ints are signed 64-bit and leaving the
+// range is an error in every kernel, never a silent wrap.
+func checkedArith(op string, x, y int64) (int64, error) {
+	var r int64
 	switch op {
 	case "+":
-		return x + y, nil
+		r = x + y
+		if (y > 0 && r < x) || (y < 0 && r > x) {
+			return 0, errors.New("integer overflow: result is outside the signed 64-bit range")
+		}
 	case "-":
-		return x - y, nil
+		r = x - y
+		if (y < 0 && r < x) || (y > 0 && r > x) {
+			return 0, errors.New("integer overflow: result is outside the signed 64-bit range")
+		}
 	case "*":
-		return x * y, nil
+		r = x * y
+		if x != 0 && (r/x != y || (x == -1 && y == math.MinInt64)) {
+			return 0, errors.New("integer overflow: result is outside the signed 64-bit range")
+		}
+	}
+	return r, nil
+}
+
+func arith(op string, x, y int64) (any, error) {
+	switch op {
+	case "+", "-", "*":
+		return checkedArith(op, x, y)
 	case "/", "%":
+		if op == "/" && x == math.MinInt64 && y == -1 {
+			return nil, errors.New("integer overflow: result is outside the signed 64-bit range")
+		}
 		return divmod(op, x, y)
 	case "<":
 		return x < y, nil
@@ -419,10 +446,21 @@ func divmod(op string, x, y int64) (any, error) {
 	return r, nil
 }
 
+func stringKey(what string, k any) (string, error) {
+	key, ok := k.(string)
+	if !ok {
+		return "", fmt.Errorf("%s needs a string key, got %T", what, k)
+	}
+	return key, nil
+}
+
 func opField(a []any) (any, error) {
 	obj, ok := a[0].(*object)
 	if !ok {
 		return nil, fmt.Errorf("field access on %T", a[0])
+	}
+	if _, err := stringKey("field", a[1]); err != nil {
+		return nil, err
 	}
 	v, ok := obj.lookup(a[1])
 	if !ok {
@@ -456,6 +494,9 @@ func opLen(a []any) (any, error) {
 }
 
 func opHas(a []any) (any, error) {
+	if _, err := stringKey("has", a[1]); err != nil {
+		return nil, err
+	}
 	obj, ok := a[0].(*object)
 	if !ok {
 		return false, nil
@@ -506,6 +547,9 @@ func opNeg(a []any) (any, error) {
 	if !ok {
 		return nil, errors.New("negation needs an int")
 	}
+	if n == math.MinInt64 {
+		return nil, errors.New("integer overflow: result is outside the signed 64-bit range")
+	}
 	return -n, nil
 }
 
@@ -533,7 +577,11 @@ func opSum(a []any) (any, error) {
 	}
 	var total int64
 	for _, x := range xs {
-		total += x
+		next, err := checkedArith("+", total, x)
+		if err != nil {
+			return nil, err
+		}
+		total = next
 	}
 	return total, nil
 }
@@ -594,6 +642,7 @@ type step struct {
 	Args   value  `json:"args"`
 	Pred   value  `json:"pred"`
 	Expect value  `json:"expect"`
+	Expr   value  `json:"expr"`
 }
 
 type fixture struct {
@@ -644,6 +693,12 @@ func replay(w *witness, fx *fixture) (outcome, error) {
 		s := &w.Steps[i]
 		if s.Op == "guard" && !holds(s, en) {
 			return outcome{"side_exit", int64(i), value{acts}}, nil
+		}
+		if s.Op == "eval" {
+			if _, err := eval(s.Expr.v, en); err != nil {
+				return outcome{"side_exit", int64(i), value{acts}}, nil
+			}
+			continue
 		}
 		if s.Op == "guard" {
 			continue

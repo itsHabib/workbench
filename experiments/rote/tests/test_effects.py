@@ -1,5 +1,6 @@
 from rote.effects import check_goal, check_script, check_tactic
 from rote.parser import parse_expr, parse_program
+
 from tests.helpers import SIG
 
 

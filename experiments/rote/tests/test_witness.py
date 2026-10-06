@@ -3,13 +3,14 @@ import json
 from rote.eval import Tracer, run_script
 from rote.parser import parse_program
 from rote.witness import Witness, replay, witness_from_steps
+
 from tests.helpers import SIG, DictWorld
 
-SRC = '''script f(s) {
+SRC = """script f(s) {
   let c = cfg(s)
   if c.port > 1000 { set(s, c.port + 1) }
   if status(s) == "down" { do(s) }
-}'''
+}"""
 
 
 def make(world, args=("a",)):
@@ -76,7 +77,7 @@ def test_type_drift_in_an_observation_is_a_side_exit_not_a_crash():
 
 
 def test_identical_guards_are_deduplicated():
-    src = 'script f(s) { let c = cfg(s)\n set(s, c.port)\n set(s, c.port) }'
+    src = "script f(s) { let c = cfg(s)\n set(s, c.port)\n set(s, c.port) }"
     decl = parse_program(src).decls[0]
     t = Tracer(world(1, "up"), grant={"set"}, caps={})
     res = run_script(t, decl.params, ["a"], decl.body)
@@ -105,9 +106,16 @@ def test_a_bool_is_never_a_number():
 def test_guard_comparison_is_typed():
     w = make(world(8080, "down"))
     # forge a guard that expects the bool True where the fresh world will deliver the int 1
-    forged = Witness("f", ["s"], [{"op": "observe", "id": 1, "name": "n", "args": [["param", "s"]]},
-                                  {"op": "guard", "pred": ["ref", 1], "expect": True},
-                                  {"op": "act", "id": 2, "name": "do", "args": [["param", "s"]]}], "forged")
+    forged = Witness(
+        "f",
+        ["s"],
+        [
+            {"op": "observe", "id": 1, "name": "n", "args": [["param", "s"]]},
+            {"op": "guard", "pred": ["ref", 1], "expect": True},
+            {"op": "act", "id": 2, "name": "do", "args": [["param", "s"]]},
+        ],
+        "forged",
+    )
     fresh = DictWorld({"n(a)": 1}, SIG)
     r = replay(forged, ["a"], fresh, {"do"})
     assert r.kind == "side_exit" and fresh.acts == [] and w.hash != forged.hash

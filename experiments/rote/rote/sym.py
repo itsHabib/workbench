@@ -19,13 +19,34 @@ from __future__ import annotations
 import json
 from typing import Any
 
-__all__ = ["SExpr", "SymError", "const", "param", "ref", "eval_sexpr", "show", "canonical", "is_const", "deep_eq"]
+__all__ = [
+    "SExpr",
+    "SymError",
+    "const",
+    "param",
+    "ref",
+    "eval_sexpr",
+    "show",
+    "canonical",
+    "is_const",
+    "deep_eq",
+]
 
 SExpr = list
 
 
 class SymError(Exception):
     """A symbolic expression could not be evaluated against the world's fresh answers."""
+
+
+INT_MIN, INT_MAX = -(2**63), 2**63 - 1
+
+
+def ranged(n: int) -> int:
+    """Rote ints are signed 64-bit so every kernel agrees; leaving the range is an error, not a wrap."""
+    if n < INT_MIN or n > INT_MAX:
+        raise SymError("integer overflow: result is outside the signed 64-bit range")
+    return n
 
 
 def const(v: Any) -> SExpr:
@@ -90,11 +111,14 @@ def _typecheck_bin(op: str, a: Any, b: Any) -> None:
         return
     ints = isinstance(a, int) and isinstance(b, int) and not isinstance(a, bool) and not isinstance(b, bool)
     if not ints:
-        raise SymError(f"operator {op} needs two ints" + (" or two strings" if op == "+" else "") +
-                       f", got {type(a).__name__} and {type(b).__name__}")
+        raise SymError(
+            f"operator {op} needs two ints"
+            + (" or two strings" if op == "+" else "")
+            + f", got {type(a).__name__} and {type(b).__name__}"
+        )
 
 
-def eval_sexpr(e: SExpr, params: dict[str, Any], refs: dict[int, Any]) -> Any:  # noqa: C901, PLR0911, PLR0912
+def eval_sexpr(e: SExpr, params: dict[str, Any], refs: dict[int, Any]) -> Any:  # noqa: C901, PLR0911, PLR0912, PLR0915
     """Evaluate against fresh inputs. Raises SymError on a shape or type mismatch."""
     tag = e[0]
     if tag == "const":
@@ -159,7 +183,7 @@ def eval_sexpr(e: SExpr, params: dict[str, Any], refs: dict[int, Any]) -> Any:  
         v = eval_sexpr(e[1], params, refs)
         if not isinstance(v, int) or isinstance(v, bool):
             raise SymError("negation needs an int")
-        return -v
+        return ranged(-v)
     if tag in ("min", "max"):
         a, b = eval_sexpr(e[1], params, refs), eval_sexpr(e[2], params, refs)
         _typecheck_bin("<", a, b)
@@ -169,9 +193,10 @@ def eval_sexpr(e: SExpr, params: dict[str, Any], refs: dict[int, Any]) -> Any:  
         a, b = eval_sexpr(e[2], params, refs), eval_sexpr(e[3], params, refs)
         if op in ("/", "%"):
             _typecheck_bin(op, a, b)
-            return _div(op, a, b)
+            return ranged(_div(op, a, b))
         _typecheck_bin(op, a, b)
-        return _BIN_OPS[op](a, b)
+        result = _BIN_OPS[op](a, b)
+        return ranged(result) if op in ("+", "-", "*") and isinstance(result, int) else result
     if tag == "list":
         return [eval_sexpr(x, params, refs) for x in e[1]]
     if tag == "record":
@@ -186,7 +211,7 @@ def _reduce(tag: str, e: SExpr, params: dict[str, Any], refs: dict[int, Any]) ->
     if not isinstance(xs, list) or any(not isinstance(x, int) or isinstance(x, bool) for x in xs):
         raise SymError(f"{tag} needs a list of ints")
     if tag == "sum":
-        return sum(xs)
+        return ranged(sum(xs))
     default = eval_sexpr(e[2], params, refs)
     if not isinstance(default, int) or isinstance(default, bool):
         raise SymError(f"{tag} needs an int default")

@@ -14,9 +14,10 @@ Run:  python3 ordinary/agent_py.py
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
@@ -38,8 +39,10 @@ class Guarded:
             return lambda *a: self._w.observe(name, list(a))
         if kind == "act":
             if name not in self._grant:
+
                 def denied(*a: Any) -> Any:
                     raise PermissionError(f"action {name!r} is not in the caller's grant")
+
                 return denied
             return lambda *a: self._w.act(name, list(a))
         raise AttributeError(name)
@@ -82,6 +85,7 @@ class Episode:
 
 
 # ---- SCRIPTED MODEL RESPONSES: the same proposals as scenario/proposals.json, in Python ----
+
 
 def p1_applies(w: Guarded, s: str) -> bool:
     return w.status(s) == "down"
@@ -212,7 +216,9 @@ class Agent:
         try:
             sk.run(self.g, arg)
         except Exception as err:  # noqa: BLE001
-            ep.exceptions.append(f"{sk.label}: raised {err!r} after {len(self.world.history) - before} action(s)")
+            ep.exceptions.append(
+                f"{sk.label}: raised {err!r} after {len(self.world.history) - before} action(s)"
+            )
             sk.fails += 1
             ep.wasted_acts += len(self.world.history) - before
             return False
@@ -252,6 +258,7 @@ def make_recover_host(agent: Agent) -> None:
         for s in w.services_on(h):
             sub = Episode("", f"heal({s})", "")
             agent.achieve("heal", s, sub)
+
     CASSETTE["recover_host"].append(("R1: compose heal over every service on the host", r1_applies, run))
 
 
@@ -259,7 +266,12 @@ def build_world() -> FleetWorld:
     w = FleetWorld("py")
     w.add_host("h1", disk=40)
     w.add_host("h2", disk=40)
-    for name, host, port in (("web", "h1", 8080), ("api", "h1", 8081), ("db", "h2", 5432), ("cache", "h2", 6379)):
+    for name, host, port in (
+        ("web", "h1", 8080),
+        ("api", "h1", 8081),
+        ("db", "h2", 5432),
+        ("cache", "h2", 6379),
+    ):
         w.add_service(name, host, port)
     return w
 
@@ -316,16 +328,25 @@ def run(verbose: bool = True) -> list[Episode]:
             ep.notes.append(f"disrupted {world.disruptions - before_disruptions} healthy service(s)")
         rows.append(ep)
         if verbose:
-            print(f"{tag}  {ep.call:<18} -> {ep.outcome:<17} oracle {ep.oracle_calls}  runtime-llm {ep.runtime_llm_calls}"
-                  f"  acts {ep.acts} (wasted {ep.wasted_acts})  disruptions so far {ep.disruptions}")
+            print(
+                f"{tag}  {ep.call:<18} -> {ep.outcome:<17} oracle {ep.oracle_calls}  "
+                f"runtime-llm {ep.runtime_llm_calls}"
+                f"  acts {ep.acts} (wasted {ep.wasted_acts})  disruptions so far {ep.disruptions}"
+            )
             for x in ep.exceptions:
                 print(f"      exception: {x}")
             for n in ep.notes:
                 print(f"      note: {n}")
     if verbose:
-        print(f"\noracle calls at synthesis: {agent.oracle_calls}; LLM calls inside retained skills at run time: {LLM.calls}")
-        print("retained skills:", [s.label.split(":")[0] for s in agent.skills["heal"]] +
-              [s.label.split(":")[0] for s in agent.skills["recover_host"]])
+        print(
+            f"\noracle calls at synthesis: {agent.oracle_calls}; "
+            f"LLM calls inside retained skills at run time: {LLM.calls}"
+        )
+        print(
+            "retained skills:",
+            [s.label.split(":")[0] for s in agent.skills["heal"]]
+            + [s.label.split(":")[0] for s in agent.skills["recover_host"]],
+        )
     return rows
 
 

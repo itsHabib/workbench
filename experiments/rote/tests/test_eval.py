@@ -1,7 +1,7 @@
 import pytest
-
 from rote.eval import RoteError, Sym, Tracer, concretize, run_script
 from rote.parser import parse_program
+
 from tests.helpers import SIG, DictWorld
 
 
@@ -90,7 +90,7 @@ def test_filter_all_any_decide_per_element():
 
 def test_equality_of_partially_symbolic_containers_is_symbolic():
     w = DictWorld({"cfg(a)": {"port": 80}}, SIG)
-    res, _ = run('script f(s) { let c = cfg(s)\n if {port: c.port} == {port: 80} { do(s) } }', w, ["a"])
+    res, _ = run("script f(s) { let c = cfg(s)\n if {port: c.port} == {port: 80} { do(s) } }", w, ["a"])
     g = guards(res)
     assert g[-1][0][0] == "bin" and g[-1][1] is True
     assert w.acts == [("do", ["a"])]
@@ -99,7 +99,7 @@ def test_equality_of_partially_symbolic_containers_is_symbolic():
 def test_act_results_are_symbolic_too():
     w = DictWorld({}, SIG)
     w.act_results["do(a)"] = False
-    res, _ = run('script f(s) { let ok = do(s)\n if not ok { do(s) } }', w, ["a"])
+    res, _ = run("script f(s) { let ok = do(s)\n if not ok { do(s) } }", w, ["a"])
     assert guards(res) == [(["not", ["ref", 1]], True)]
     assert len(w.acts) == 2
 
@@ -120,7 +120,9 @@ def test_script_mode_cannot_ask_and_grant_is_enforced_dynamically_too():
 
 def test_fuel_bounds_every_run():
     w = DictWorld({}, SIG)
-    res, _ = run("script f(s) { let loop = fn(x) { x }\n let g = fn(h, x) { h(h, x) }\n g(g, 1) }", w, ["a"], fuel=200)
+    res, _ = run(
+        "script f(s) { let loop = fn(x) { x }\n let g = fn(h, x) { h(h, x) }\n g(g, 1) }", w, ["a"], fuel=200
+    )
     assert not res.ok and res.error_kind == "fuel"
 
 
@@ -169,5 +171,5 @@ def test_equality_and_contains_follow_rote_types_not_python():
     w = DictWorld({"n(a)": 1, "items(a)": [True, "x"], "status(a)": "true"}, SIG)
     res, _ = run("script f(s) { if n(s) == true { do(s) }\n if contains(items(s), 1) { do(s) } }", w, ["a"])
     assert res.ok and w.acts == []
-    res, _ = run('script f(s) { contains(status(s), 1) }', w, ["a"])
+    res, _ = run("script f(s) { contains(status(s), 1) }", w, ["a"])
     assert not res.ok and res.error_kind == "type"

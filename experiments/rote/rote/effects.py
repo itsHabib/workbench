@@ -194,18 +194,30 @@ class _Analyzer:
         self.row.uses.add(e.cap)
 
 
-def analyze(params: list[str], body: A.Expr, sig: dict[str, tuple[str, int]],
-            caps: dict[str, int] | None = None) -> tuple[EffectRow, list[StaticError]]:
+def analyze(
+    params: list[str], body: A.Expr, sig: dict[str, tuple[str, int]], caps: dict[str, int] | None = None
+) -> tuple[EffectRow, list[StaticError]]:
     an = _Analyzer(sig, caps or {})
     an.body(params, body)
     return an.row, an.errors
 
 
-def check_script(params: list[str], body: A.Expr, sig: dict[str, tuple[str, int]],
-                 grant: set[str], caps: dict[str, int] | None = None) -> tuple[EffectRow, list[StaticError]]:
+def check_script(
+    params: list[str],
+    body: A.Expr,
+    sig: dict[str, tuple[str, int]],
+    grant: set[str],
+    caps: dict[str, int] | None = None,
+) -> tuple[EffectRow, list[StaticError]]:
     row, errors = analyze(params, body, sig, caps)
     if row.asks:
-        errors.append(StaticError("effect", "a script may not `ask`: retained capabilities must run without an oracle", body.line))
+        errors.append(
+            StaticError(
+                "effect",
+                "a script may not `ask`: retained capabilities must run without an oracle",
+                body.line,
+            )
+        )
     if row.proposes:
         errors.append(StaticError("effect", "a script may not `propose`", body.line))
     for act in sorted(row.acts - grant):
@@ -213,7 +225,9 @@ def check_script(params: list[str], body: A.Expr, sig: dict[str, tuple[str, int]
     return row, errors
 
 
-def check_goal(params: list[str], goal: A.Expr, sig: dict[str, tuple[str, int]]) -> tuple[EffectRow, list[StaticError]]:
+def check_goal(
+    params: list[str], goal: A.Expr, sig: dict[str, tuple[str, int]]
+) -> tuple[EffectRow, list[StaticError]]:
     row, errors = analyze(params, goal, sig, {})
     for act in sorted(row.acts):
         errors.append(StaticError("effect", f"a goal may only observe; it calls act {act!r}", goal.line))
@@ -222,6 +236,7 @@ def check_goal(params: list[str], goal: A.Expr, sig: dict[str, tuple[str, int]])
     return row, errors
 
 
-def check_tactic(params: list[str], body: A.Expr, sig: dict[str, tuple[str, int]],
-                 caps: dict[str, int] | None = None) -> tuple[EffectRow, list[StaticError]]:
+def check_tactic(
+    params: list[str], body: A.Expr, sig: dict[str, tuple[str, int]], caps: dict[str, int] | None = None
+) -> tuple[EffectRow, list[StaticError]]:
     return analyze(params, body, sig, caps)

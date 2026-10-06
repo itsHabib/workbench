@@ -5,7 +5,7 @@ from rote.runtime import Policy, Runtime
 from rote.synth import ScriptedOracle
 from worlds.fleet import FleetWorld
 
-LIB = '''
+LIB = """
 world fleet {
   observe status(service): string
   observe host_of(service): string
@@ -22,11 +22,13 @@ world fleet {
 }
 cap heal(service) { goal: status(service) == "up" }
 cap recover_host(host) { goal: all(map(services_on(host), fn(s) { status(s) == "up" })) }
-'''
+"""
 GRANT = {"restart", "clear_tmp", "set_config", "reboot_host"}
 P1 = 'script heal(service) {\n  if status(service) == "down" { restart(service) }\n}'
-P2 = ('script heal(service) {\n  let host = host_of(service)\n'
-      '  if log_tail(service) == "no space left on device" { clear_tmp(host) }\n  restart(service)\n}')
+P2 = (
+    "script heal(service) {\n  let host = host_of(service)\n"
+    '  if log_tail(service) == "no space left on device" { clear_tmp(host) }\n  restart(service)\n}'
+)
 
 
 def world():
@@ -62,7 +64,7 @@ def test_already_satisfied_does_nothing():
 
 
 def test_only_the_goal_can_pass_a_proposal():
-    fake = 'script heal(service) {\n  let ok = true\n  ok\n}'  # claims success, changes nothing
+    fake = "script heal(service) {\n  let ok = true\n  ok\n}"  # claims success, changes nothing
     rt, lib = runtime({"heal": [fake, P1]})
     w = world()
     w.crash("web")
@@ -85,7 +87,7 @@ def test_replay_only_policy_parks_instead_of_synthesizing():
 
 def test_static_refusals_run_nothing_and_count_as_attempts():
     bad_ask = 'script heal(service) {\n  restart(service)\n  ask("x")\n}'
-    bad_grant = 'script heal(service) {\n  restart(service)\n  wipe_host(host_of(service))\n}'
+    bad_grant = "script heal(service) {\n  restart(service)\n  wipe_host(host_of(service))\n}"
     rt, _ = runtime({"heal": [bad_ask, bad_grant, P1]})
     w = world()
     w.crash("web")
@@ -120,7 +122,12 @@ def test_library_roundtrips_and_loaded_witnesses_replay(tmp_path):
 
 
 def test_composition_repairs_locally():
-    rt, lib = runtime({"heal": [P1, P2], "recover_host": ["script recover_host(host) {\n  for s in services_on(host) { use heal(s) }\n}"]})
+    rt, lib = runtime(
+        {
+            "heal": [P1, P2],
+            "recover_host": ["script recover_host(host) {\n  for s in services_on(host) { use heal(s) }\n}"],
+        }
+    )
     w = world()
     w.crash("web")
     rt.achieve("heal", ["web"], w)  # heal has P1 retained
@@ -136,15 +143,18 @@ def test_composition_repairs_locally():
 
 
 def test_in_language_tactic_drives_proposals():
-    src = LIB + '''
+    src = (
+        LIB
+        + """
 tactic heal(service) {
   let ctx = {cap: "heal", status: status(service), log: log_tail(service)}
   let first = propose(ask(ctx))
   if not first.ok { propose(ask(ctx)) }
 }
-'''
+"""
+    )
     lib = Library.from_source(src)
-    bad = 'script heal(service) {\n  let x = 1\n}'
+    bad = "script heal(service) {\n  let x = 1\n}"
     oracle = ScriptedOracle({"heal": [bad, P1]})
     rt = Runtime(lib, Policy(grant=GRANT), oracle)
     w = world()
@@ -159,13 +169,19 @@ def test_scripted_oracle_logs_what_it_was_asked():
     w.crash("web")
     rt.achieve("heal", ["web"], w)
     prompt = rt.oracle.log[0]["prompt"]
-    assert prompt["cap"] == "heal" and prompt["goal"] == 'status(service) == "up"' and "restart" in prompt["grant"]
+    assert (
+        prompt["cap"] == "heal"
+        and prompt["goal"] == 'status(service) == "up"'
+        and "restart" in prompt["grant"]
+    )
     json.dumps(prompt)  # the prompt is plain data
 
 
 def test_when_clause_is_traced_into_guards_and_may_only_observe():
-    guarded = ('script heal(service) when status(service) == "down" and log_tail(service) != "x" {\n'
-               '  restart(service)\n}')
+    guarded = (
+        'script heal(service) when status(service) == "down" and log_tail(service) != "x" {\n'
+        "  restart(service)\n}"
+    )
     rt, lib = runtime({"heal": [guarded]})
     w = world()
     w.crash("web")
@@ -174,7 +190,7 @@ def test_when_clause_is_traced_into_guards_and_may_only_observe():
     guards = [g["expect"] for g in out.witness.guards]
     assert guards == [True, False]  # `status == "down"` held; `not (... != "x")` was false
     assert out.witness.prefix_len == 4  # status, guard, log_tail, guard; then restart
-    bad = 'script heal(service) when restart(service) { restart(service) }'
+    bad = "script heal(service) when restart(service) { restart(service) }"
     rt, _ = runtime({"heal": [bad]})
     w = world()
     w.crash("web")
@@ -192,8 +208,10 @@ def test_probe_is_shown_to_the_oracle():
 
 
 def test_revalidating_known_sources_takes_a_new_path_without_the_oracle():
-    two_paths = ('script heal(service) {\n  let host = host_of(service)\n'
-                 '  if log_tail(service) == "no space left on device" { clear_tmp(host) }\n  restart(service)\n}')
+    two_paths = (
+        "script heal(service) {\n  let host = host_of(service)\n"
+        '  if log_tail(service) == "no space left on device" { clear_tmp(host) }\n  restart(service)\n}'
+    )
     rt, lib = runtime({"heal": [two_paths]})
     rt.policy.revalidate_sources = True
     w = world()
@@ -202,16 +220,24 @@ def test_revalidating_known_sources_takes_a_new_path_without_the_oracle():
     w.crash("api")
     out = rt.achieve("heal", ["api"], w)  # guard on the log line fails; same source, other path
     assert out.kind == "revalidated" and out.oracle_calls == 0 and w.obs_status("api") == "up"
-    assert len(lib.caps["heal"].witnesses) == 2 and {x.source for x in lib.caps["heal"].witnesses} == {two_paths}
+    assert len(lib.caps["heal"].witnesses) == 2 and {x.source for x in lib.caps["heal"].witnesses} == {
+        two_paths
+    }
     locked = Runtime(lib, Policy(grant=GRANT, mode="replay-only", revalidate_sources=True), None)
     w.lose_port("web")
     assert locked.achieve("heal", ["web"], w).kind == "parked"  # replay-only still runs nothing unvalidated
 
 
 def test_dispatch_checks_every_prefix_first_and_continues_past_a_failed_replay():
-    lock_fix = 'script heal(service) {\n  if lock_held(service) { remove_lock(service) }\n  restart(service)\n}'
-    lib_src = LIB.replace("  act wipe_host(host): bool\n", "  act wipe_host(host): bool\n  observe lock_held(service): bool\n  act remove_lock(service): bool\n")
+    lock_fix = (
+        "script heal(service) {\n  if lock_held(service) { remove_lock(service) }\n  restart(service)\n}"
+    )
+    lib_src = LIB.replace(
+        "  act wipe_host(host): bool\n",
+        "  act wipe_host(host): bool\n  observe lock_held(service): bool\n  act remove_lock(service): bool\n",
+    )
     from live.world6 import FleetWorld6
+
     lib = Library.from_source(lib_src)
     oracle = ScriptedOracle({"heal": [P1, lock_fix]})
     rt = Runtime(lib, Policy(grant=GRANT | {"remove_lock"}), oracle)

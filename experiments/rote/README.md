@@ -9,7 +9,7 @@ needed only when none applies.
 The name is provisional: "by rote" is how a retained capability runs, without thinking.
 (PyPI already has an unrelated `rote` package; nothing here is published.)
 
-Status: a runnable prototype (~2,578 lines of stdlib Python for the language, 65 tests), one
+Status: a runnable prototype (~2,578 lines of stdlib Python for the language, 77 tests), one
 scripted nine-episode workload, a model-free dry run of the larger live experiment, and a
 Go replayer checked against exported fixtures. Every number in `RESULTS.md` comes from a
 scripted or heuristic oracle; **no model was called anywhere in this experiment**. The
@@ -69,11 +69,12 @@ cd experiments/rote
 python3 demo.py                 # the nine-episode workload, Rote (scripted oracle)
 python3 ordinary/agent_py.py    # the same episodes in plain Python (the baseline)
 python3 ordinary/proxy_leak.py  # why a host-language tracer cannot infer guards
-python3 -m pytest tests -q      # 65 tests, including the replay-equivalence property test
+python3 -m pytest tests -q      # 77 tests, including the replay-equivalence property test
 python3 live/run_live.py --oracle heuristic --streams 10 --episodes 24   # model-free dry run, 4 arms
 python3 live/run_live.py --oracle live --streams 10 --episodes 24 --max-calls 900  # needs ANTHROPIC_API_KEY
 go run ./replay-go             # Go replayer vs the demo's witnesses: '60 cases, 60 conform'
 go run ./replay-go -lib runs/synthetic_library.json -fixtures runs/synthetic_fixtures.json  # all 21 forms: 192 conform
+go run ./replay-go -lib runs/drift_library.json -fixtures runs/drift_fixtures.json          # type drift: 20 conform
 ```
 
 Python 3.12+ and pytest are the only requirements. `demo.py` rewrites `runs/library.json`
@@ -103,6 +104,7 @@ E9      heal(db)            parked                  0       0      3     1      
 | Nothing acts before a prefix guard fails | Replay evaluates steps in order; the prefix contains no actions |
 | Success | Only the goal's verdict, evaluated after the run, observe-only by static check |
 | Every run terminates | Fuel |
+| Integers behave identically in every kernel | Signed 64-bit by definition; leaving the range is an error in the evaluator, the Python kernel and the Go kernel |
 | The outcome of an action | Not guaranteed. Guards pin the script's behavior, not the world's response; evidence records both passes and failures |
 
 ## Layout

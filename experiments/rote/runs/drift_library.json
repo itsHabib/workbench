@@ -1,0 +1,688 @@
+{
+ "program": "\nworld drift {\n  observe cfg(s): record\n  observe n(s): int\n  observe k(s): string\n  observe xs(s): list\n  act write(s, v): bool\n}\ncap f(s) { goal: true }\n",
+ "retained": 10,
+ "witnesses": [
+  {
+   "cap": "f",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "s": "a"
+     },
+     "kind": "validated",
+     "note": "drift fixture",
+     "verdict": "pass",
+     "world": "drift"
+    }
+   ],
+   "hash": "wa901f9d000",
+   "params": [
+    "s"
+   ],
+   "seq": 1,
+   "source": "script f(s) { write(s, str([n(s)])) }",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ]
+     ],
+     "id": 1,
+     "name": "n",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ],
+      [
+       "str",
+       [
+        "list",
+        [
+         [
+          "ref",
+          1
+         ]
+        ]
+       ]
+      ]
+     ],
+     "id": 2,
+     "name": "write",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "f",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "s": "a"
+     },
+     "kind": "validated",
+     "note": "drift fixture",
+     "verdict": "pass",
+     "world": "drift"
+    }
+   ],
+   "hash": "w32d42bc29a",
+   "params": [
+    "s"
+   ],
+   "seq": 2,
+   "source": "script f(s) { write(s, str(n(s) + 1)) }",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ]
+     ],
+     "id": 1,
+     "name": "n",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ],
+      [
+       "str",
+       [
+        "bin",
+        "+",
+        [
+         "ref",
+         1
+        ],
+        [
+         "const",
+         1
+        ]
+       ]
+      ]
+     ],
+     "id": 2,
+     "name": "write",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "f",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "s": "a"
+     },
+     "kind": "validated",
+     "note": "drift fixture",
+     "verdict": "pass",
+     "world": "drift"
+    }
+   ],
+   "hash": "w7f518254d7",
+   "params": [
+    "s"
+   ],
+   "seq": 3,
+   "source": "script f(s) { if has(cfg(s), k(s)) { write(s, 1) } }",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ]
+     ],
+     "id": 1,
+     "name": "cfg",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ]
+     ],
+     "id": 2,
+     "name": "k",
+     "op": "observe"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "has",
+      [
+       "ref",
+       1
+      ],
+      [
+       "ref",
+       2
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "cap": "f",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "s": "a"
+     },
+     "kind": "validated",
+     "note": "drift fixture",
+     "verdict": "pass",
+     "world": "drift"
+    }
+   ],
+   "hash": "w4b04b2a2f8",
+   "params": [
+    "s"
+   ],
+   "seq": 4,
+   "source": "script f(s) { write(s, get(cfg(s), k(s), 0)) }",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ]
+     ],
+     "id": 1,
+     "name": "cfg",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ]
+     ],
+     "id": 2,
+     "name": "k",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ],
+      [
+       "get",
+       [
+        "ref",
+        1
+       ],
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 3,
+     "name": "write",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "f",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "s": "a"
+     },
+     "kind": "validated",
+     "note": "drift fixture",
+     "verdict": "pass",
+     "world": "drift"
+    }
+   ],
+   "hash": "w80a904f9f2",
+   "params": [
+    "s"
+   ],
+   "seq": 5,
+   "source": "script f(s) { let p = cfg(s).port + 1\n write(s, \"restart\") }",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ]
+     ],
+     "id": 1,
+     "name": "cfg",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "has",
+      [
+       "ref",
+       1
+      ],
+      [
+       "const",
+       "port"
+      ]
+     ]
+    },
+    {
+     "expr": [
+      "bin",
+      "+",
+      [
+       "field",
+       [
+        "ref",
+        1
+       ],
+       [
+        "const",
+        "port"
+       ]
+      ],
+      [
+       "const",
+       1
+      ]
+     ],
+     "op": "eval"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ],
+      [
+       "const",
+       "restart"
+      ]
+     ],
+     "id": 2,
+     "name": "write",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "f",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "s": "a"
+     },
+     "kind": "validated",
+     "note": "drift fixture",
+     "verdict": "pass",
+     "world": "drift"
+    }
+   ],
+   "hash": "wf4998dd858",
+   "params": [
+    "s"
+   ],
+   "seq": 6,
+   "source": "script f(s) { write(s, -n(s)) }",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ]
+     ],
+     "id": 1,
+     "name": "n",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ],
+      [
+       "neg",
+       [
+        "ref",
+        1
+       ]
+      ]
+     ],
+     "id": 2,
+     "name": "write",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "f",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "s": "a"
+     },
+     "kind": "validated",
+     "note": "drift fixture",
+     "verdict": "pass",
+     "world": "drift"
+    }
+   ],
+   "hash": "wa69c73d87b",
+   "params": [
+    "s"
+   ],
+   "seq": 7,
+   "source": "script f(s) { write(s, sum([n(s), n(s)])) }",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ]
+     ],
+     "id": 1,
+     "name": "n",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ]
+     ],
+     "id": 2,
+     "name": "n",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ],
+      [
+       "sum",
+       [
+        "list",
+        [
+         [
+          "ref",
+          1
+         ],
+         [
+          "ref",
+          2
+         ]
+        ]
+       ]
+      ]
+     ],
+     "id": 3,
+     "name": "write",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "f",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "s": "a"
+     },
+     "kind": "validated",
+     "note": "drift fixture",
+     "verdict": "pass",
+     "world": "drift"
+    }
+   ],
+   "hash": "w06e83ecac9",
+   "params": [
+    "s"
+   ],
+   "seq": 8,
+   "source": "script f(s) { write(s, n(s) * 2) }",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ]
+     ],
+     "id": 1,
+     "name": "n",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ],
+      [
+       "bin",
+       "*",
+       [
+        "ref",
+        1
+       ],
+       [
+        "const",
+        2
+       ]
+      ]
+     ],
+     "id": 2,
+     "name": "write",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "f",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "s": "a"
+     },
+     "kind": "validated",
+     "note": "drift fixture",
+     "verdict": "pass",
+     "world": "drift"
+    }
+   ],
+   "hash": "w0e466906f5",
+   "params": [
+    "s"
+   ],
+   "seq": 9,
+   "source": "script f(s) { write(s, len(xs(s)) + sum(xs(s))) }",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ]
+     ],
+     "id": 1,
+     "name": "xs",
+     "op": "observe"
+    },
+    {
+     "expr": [
+      "len",
+      [
+       "ref",
+       1
+      ]
+     ],
+     "op": "eval"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ]
+     ],
+     "id": 2,
+     "name": "xs",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ],
+      [
+       "bin",
+       "+",
+       [
+        "len",
+        [
+         "ref",
+         1
+        ]
+       ],
+       [
+        "sum",
+        [
+         "ref",
+         2
+        ]
+       ]
+      ]
+     ],
+     "id": 3,
+     "name": "write",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "f",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "s": "a"
+     },
+     "kind": "validated",
+     "note": "drift fixture",
+     "verdict": "pass",
+     "world": "drift"
+    }
+   ],
+   "hash": "w2fa4c4f3fc",
+   "params": [
+    "s"
+   ],
+   "seq": 10,
+   "source": "script f(s) { write(s, cfg(s)[k(s)]) }",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ]
+     ],
+     "id": 1,
+     "name": "cfg",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ]
+     ],
+     "id": 2,
+     "name": "k",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "has",
+      [
+       "ref",
+       1
+      ],
+      [
+       "ref",
+       2
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "s"
+      ],
+      [
+       "field",
+       [
+        "ref",
+        1
+       ],
+       [
+        "ref",
+        2
+       ]
+      ]
+     ],
+     "id": 3,
+     "name": "write",
+     "op": "act"
+    }
+   ]
+  }
+ ],
+ "world": "drift"
+}

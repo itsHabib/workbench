@@ -94,12 +94,16 @@ class ProxyTracer:
     def __getattr__(self, name: str):
         kind, _ = self.w.signature().get(name, (None, 0))
         if kind == "observe":
-            return lambda *a: Proxy(self, f"{name}({', '.join(_show(x) for x in a)})", self.w.observe(name, [_raw(x) for x in a]))
+            return lambda *a: Proxy(
+                self, f"{name}({', '.join(_show(x) for x in a)})", self.w.observe(name, [_raw(x) for x in a])
+            )
         if kind == "act":
+
             def act(*a: Any) -> Any:
                 args = [_raw(x) for x in a]
                 self.trace.append((name, args))
                 return self.w.act(name, args)
+
             return act
         raise AttributeError(name)
 
@@ -156,10 +160,10 @@ def rote_version(small: FleetWorld) -> list[str]:
     from rote.parser import parse_program
     from rote.witness import describe_guards, witness_from_steps
 
-    src = '''script heal(service) {
+    src = """script heal(service) {
   let host = host_of(service)
   if len(services_on(host)) > 1 { restart(service) } else { reboot_host(host) }
-}'''
+}"""
     snap = small.snapshot()
     small.restore(snap)
     small.services["solo"]["status"] = "down"

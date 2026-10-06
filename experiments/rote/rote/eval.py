@@ -17,11 +17,23 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from . import ast as A
-from .sym import SExpr, _contains, const, deep_eq
+from .sym import INT_MAX, INT_MIN, SExpr, _contains, const, deep_eq
 
 __all__ = [
-    "Sym", "Closure", "RoteError", "ScriptFailure", "FuelExhausted", "World", "Oracle",
-    "Tracer", "concretize", "lift", "contains_sym", "BUILTINS", "run_script", "RunResult",
+    "Sym",
+    "Closure",
+    "RoteError",
+    "ScriptFailure",
+    "FuelExhausted",
+    "World",
+    "Oracle",
+    "Tracer",
+    "concretize",
+    "lift",
+    "contains_sym",
+    "BUILTINS",
+    "run_script",
+    "RunResult",
 ]
 
 
@@ -189,6 +201,14 @@ class Tracer:
     def guard(self, pred: SExpr, expect: Any) -> None:
         self.steps.append({"op": "guard", "pred": pred, "expect": expect})
 
+    def note(self, v: Any) -> Any:
+        """A pure operation on observed data succeeded here. Replay must re-evaluate it, even if
+        the script never uses the result, so a type or overflow failure the interpreter would
+        have hit stays a side exit instead of being skipped."""
+        if isinstance(v, Sym):
+            self.steps.append({"op": "eval", "expr": v.expr})
+        return v
+
     def decide_bool(self, v: Any, line: int, what: str = "condition") -> bool:
         raw = v.value if isinstance(v, Sym) else v
         if not isinstance(raw, bool):
@@ -238,7 +258,9 @@ class Tracer:
     # -- the evaluator -------------------------------------------------------
     def eval(self, e: A.Expr, env: Env) -> Any:  # noqa: C901, PLR0911, PLR0912
         self.tick(e.line)
-        if isinstance(e, A.IntLit | A.StrLit | A.BoolLit):
+        if isinstance(e, A.IntLit):
+            return _ranged(e.value, e.line)
+        if isinstance(e, A.StrLit | A.BoolLit):
             return e.value
         if isinstance(e, A.UnitLit):
             return None
@@ -247,7 +269,9 @@ class Tracer:
             if found:
                 return v
             if e.name in self.world.signature():
-                raise RoteError("name", f"world function {e.name!r} must be called, not used as a value", e.line)
+                raise RoteError(
+                    "name", f"world function {e.name!r} must be called, not used as a value", e.line
+                )
             if e.name in BUILTINS:
                 raise RoteError("name", f"builtin {e.name!r} must be called, not used as a value", e.line)
             raise RoteError("name", f"unknown name {e.name!r}", e.line)
@@ -315,10 +339,11 @@ class Tracer:
         if e.op == "not":
             if not isinstance(raw, bool):
                 raise RoteError("type", f"not needs a bool, got {_tname(v)}", e.line)
-            return Sym(["not", v.expr], not raw) if isinstance(v, Sym) else (not raw)
+            return self.note(Sym(["not", v.expr], not raw)) if isinstance(v, Sym) else (not raw)
         if not isinstance(raw, int) or isinstance(raw, bool):
             raise RoteError("type", f"negation needs an int, got {_tname(v)}", e.line)
-        return Sym(["neg", v.expr], -raw) if isinstance(v, Sym) else -raw
+        result = _ranged(-raw, e.line)
+        return self.note(Sym(["neg", v.expr], result)) if isinstance(v, Sym) else result
 
     def eval_binary(self, e: A.Binary, env: Env) -> Any:
         if e.op in ("and", "or"):
@@ -343,10 +368,12 @@ class Tracer:
         if op == "+" and isinstance(a, str) and isinstance(b, str):
             return Sym(["bin", "+", lift(left), lift(right)], a + b) if symbolic else a + b
         if not (_is_int(a) and _is_int(b)):
-            raise RoteError("type", f"operator {op} needs two ints, got {_tname(left)} and {_tname(right)}", line)
+            raise RoteError(
+                "type", f"operator {op} needs two ints, got {_tname(left)} and {_tname(right)}", line
+            )
         if op in _COMPARE:
             result = _COMPARE[op](a, b)
-            return Sym(["bin", op, lift(left), lift(right)], result) if symbolic else result
+            return self.note(Sym(["bin", op, lift(left), lift(right)], result)) if symbolic else result
         if op in ("/", "%"):
             if isinstance(right, Sym):
                 self.guard(["bin", "==", right.expr, const(0)], False)
@@ -355,7 +382,8 @@ class Tracer:
             result = a // b if op == "/" else a % b
         else:
             result = _ARITH[op](a, b)
-        return Sym(["bin", op, lift(left), lift(right)], result) if symbolic else result
+        result = _ranged(result, line)
+        return self.note(Sym(["bin", op, lift(left), lift(right)], result)) if symbolic else result
 
     def eval_field(self, e: A.FieldAccess, env: Env) -> Any:
         obj = self.eval(e.obj, env)
@@ -423,7 +451,9 @@ class Tracer:
         if not isinstance(callee, Closure):
             raise RoteError("type", f"calling a {_tname(callee)}", line)
         if len(callee.params) != len(args):
-            raise RoteError("arity", f"function expects {len(callee.params)} arguments, got {len(args)}", line)
+            raise RoteError(
+                "arity", f"function expects {len(callee.params)} arguments, got {len(args)}", line
+            )
         inner = Env(callee.env)
         for p, a in zip(callee.params, args, strict=True):
             inner.vars[p] = a
@@ -477,7 +507,9 @@ class Tracer:
 
     def eval_ask(self, e: A.Ask, env: Env) -> Any:
         if self.mode != "tactic":
-            raise RoteError("effect", "`ask` is only allowed in a tactic; a script must run without an oracle", e.line)
+            raise RoteError(
+                "effect", "`ask` is only allowed in a tactic; a script must run without an oracle", e.line
+            )
         if self.oracle is None:
             raise RoteError("effect", "no oracle available", e.line)
         return self.oracle.ask(concretize(self.eval(e.prompt, env)))
@@ -497,18 +529,30 @@ def _is_int(v: Any) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
 
 
+def _ranged(n: int, line: int) -> int:
+    if n < INT_MIN or n > INT_MAX:
+        raise RoteError("arith", "integer overflow: result is outside the signed 64-bit range", line)
+    return n
+
+
 _ARITH = {"+": lambda a, b: a + b, "-": lambda a, b: a - b, "*": lambda a, b: a * b}
-_COMPARE = {"<": lambda a, b: a < b, "<=": lambda a, b: a <= b, ">": lambda a, b: a > b, ">=": lambda a, b: a >= b}
+_COMPARE = {
+    "<": lambda a, b: a < b,
+    "<=": lambda a, b: a <= b,
+    ">": lambda a, b: a > b,
+    ">=": lambda a, b: a >= b,
+}
 
 
 # -- builtins ---------------------------------------------------------------------
+
 
 def _b_len(t: Tracer, args: list[Any], line: int) -> Any:
     (v,) = _arity("len", args, 1, line)
     raw = concretize(v)
     if not isinstance(raw, (list, dict, str)):
         raise RoteError("type", f"len of {_tname(v)}", line)
-    return Sym(["len", v.expr], len(raw)) if isinstance(v, Sym) else len(raw)
+    return t.note(Sym(["len", v.expr], len(raw))) if isinstance(v, Sym) else len(raw)
 
 
 def _b_map(t: Tracer, args: list[Any], line: int) -> Any:
@@ -546,7 +590,7 @@ def _b_contains(t: Tracer, args: list[Any], line: int) -> Any:
     except Exception as err:  # noqa: BLE001  a SymError from the shared helper
         raise RoteError("type", str(err), line) from None
     if contains_sym(xs) or contains_sym(v):
-        return Sym(["contains", lift(xs), lift(v)], result)
+        return t.note(Sym(["contains", lift(xs), lift(v)], result))
     return result
 
 
@@ -555,7 +599,7 @@ def _b_keys(t: Tracer, args: list[Any], line: int) -> Any:
     raw = concretize(r)
     if not isinstance(raw, dict):
         raise RoteError("type", f"keys of {_tname(r)}", line)
-    return Sym(["keys", r.expr], list(raw.keys())) if isinstance(r, Sym) else list(raw.keys())
+    return t.note(Sym(["keys", r.expr], list(raw.keys()))) if isinstance(r, Sym) else list(raw.keys())
 
 
 def _b_has(t: Tracer, args: list[Any], line: int) -> Any:
@@ -565,7 +609,7 @@ def _b_has(t: Tracer, args: list[Any], line: int) -> Any:
         raise RoteError("type", f"has needs a string key, got {_tname(k)}", line)
     result = isinstance(raw, dict) and rk in raw
     if contains_sym(r) or isinstance(k, Sym):
-        return Sym(["has", lift(r), lift(k)], result)
+        return t.note(Sym(["has", lift(r), lift(k)], result))
     return result
 
 
@@ -576,7 +620,7 @@ def _b_get(t: Tracer, args: list[Any], line: int) -> Any:
         raise RoteError("type", f"get needs a string key, got {_tname(k)}", line)
     if isinstance(r, Sym) or isinstance(k, Sym):
         result = raw[rk] if isinstance(raw, dict) and rk in raw else concretize(d)
-        return Sym(["get", lift(r), lift(k), lift(d)], result)
+        return t.note(Sym(["get", lift(r), lift(k), lift(d)], result))
     if isinstance(r, dict) and rk in r:
         return r[rk]
     return d
@@ -585,7 +629,9 @@ def _b_get(t: Tracer, args: list[Any], line: int) -> Any:
 def _b_str(t: Tracer, args: list[Any], line: int) -> Any:
     (v,) = _arity("str", args, 1, line)
     raw = concretize(v)
-    return Sym(["str", v.expr], _to_str(raw)) if isinstance(v, Sym) else _to_str(raw)
+    if contains_sym(v):  # a constructed container may hold observed children
+        return Sym(["str", lift(v)], _to_str(raw))
+    return _to_str(raw)
 
 
 def _b_range(t: Tracer, args: list[Any], line: int) -> Any:
@@ -593,6 +639,8 @@ def _b_range(t: Tracer, args: list[Any], line: int) -> Any:
     raw = concretize(n)
     if not _is_int(raw):
         raise RoteError("type", f"range needs an int, got {_tname(n)}", line)
+    if raw > 1_000_000:
+        raise RoteError("arith", "range is limited to 1,000,000 elements", line)
     if isinstance(n, Sym):
         t.guard(n.expr, raw)
     return list(range(raw))
@@ -606,7 +654,7 @@ def _b_minmax(which: str):
             raise RoteError("type", f"{which} needs two ints", line)
         result = min(ra, rb) if which == "min" else max(ra, rb)
         if isinstance(a, Sym) or isinstance(b, Sym):
-            return Sym([which, lift(a), lift(b)], result)
+            return t.note(Sym([which, lift(a), lift(b)], result))
         return result
 
     return f
@@ -636,13 +684,13 @@ def _b_reduce(which: str):
         if rest and not _is_int(default):
             raise RoteError("type", f"{which} needs an int default", line)
         if which == "sum":
-            result = sum(rxs)
+            result = _ranged(sum(rxs), line)
         else:
             result = default if not rxs else (max(rxs) if which == "max_of" else min(rxs))
         if not contains_sym(xs) and not (rest and contains_sym(rest[0])):
             return result
         expr = [tag, lift(xs)] if which == "sum" else [tag, lift(xs), lift(rest[0])]
-        return Sym(expr, result)
+        return t.note(Sym(expr, result))
 
     return f
 
@@ -654,10 +702,25 @@ def _arity(name: str, args: list[Any], n: int, line: int) -> list[Any]:
 
 
 BUILTINS = {
-    "len": _b_len, "map": _b_map, "filter": _b_filter, "fold": _b_fold, "all": _b_all, "any": _b_any,
-    "contains": _b_contains, "keys": _b_keys, "has": _b_has, "get": _b_get, "str": _b_str,
-    "range": _b_range, "min": _b_minmax("min"), "max": _b_minmax("max"), "fail": _b_fail, "append": _b_append,
-    "sum": _b_reduce("sum"), "max_of": _b_reduce("max_of"), "min_of": _b_reduce("min_of"),
+    "len": _b_len,
+    "map": _b_map,
+    "filter": _b_filter,
+    "fold": _b_fold,
+    "all": _b_all,
+    "any": _b_any,
+    "contains": _b_contains,
+    "keys": _b_keys,
+    "has": _b_has,
+    "get": _b_get,
+    "str": _b_str,
+    "range": _b_range,
+    "min": _b_minmax("min"),
+    "max": _b_minmax("max"),
+    "fail": _b_fail,
+    "append": _b_append,
+    "sum": _b_reduce("sum"),
+    "max_of": _b_reduce("max_of"),
+    "min_of": _b_reduce("min_of"),
 }
 
 
@@ -665,8 +728,11 @@ def run_script(tracer: Tracer, params: list[str], args: list[Any], body: A.Block
     """Run a body to completion or to its first error; the steps so far are kept either way."""
     try:
         value = tracer.run_body(params, args, body)
-        return RunResult(tracer.steps, concretize(value) if not isinstance(value, Closure) else "<fn>",
-                         fuel_used=tracer.fuel_used)
+        return RunResult(
+            tracer.steps,
+            concretize(value) if not isinstance(value, Closure) else "<fn>",
+            fuel_used=tracer.fuel_used,
+        )
     except RoteError as err:
         return RunResult(tracer.steps, None, str(err), err.kind, tracer.fuel_used)
     except ScriptFailure as err:

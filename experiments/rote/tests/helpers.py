@@ -30,6 +30,10 @@ class DictWorld:
 
 
 SIG = {
-    "status": ("observe", 1), "cfg": ("observe", 1), "items": ("observe", 1), "n": ("observe", 1),
-    "do": ("act", 1), "set": ("act", 2),
+    "status": ("observe", 1),
+    "cfg": ("observe", 1),
+    "items": ("observe", 1),
+    "n": ("observe", 1),
+    "do": ("act", 1),
+    "set": ("act", 2),
 }

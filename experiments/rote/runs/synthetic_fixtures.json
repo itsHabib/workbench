@@ -1,6 +1,6 @@
 [
  {
-  "witness": "wcedc30b619",
+  "witness": "w776c9b08eb",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -30,7 +30,7 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 5,
+   "step": 8,
    "acts": [
     [
      "set_config",
@@ -48,7 +48,7 @@
   }
  },
  {
-  "witness": "wcedc30b619",
+  "witness": "w776c9b08eb",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -80,7 +80,7 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 5,
+   "step": 8,
    "acts": [
     [
      "set_config",
@@ -98,7 +98,7 @@
   }
  },
  {
-  "witness": "wcedc30b619",
+  "witness": "w776c9b08eb",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -129,7 +129,7 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 5,
+   "step": 8,
    "acts": [
     [
      "set_config",
@@ -147,7 +147,7 @@
   }
  },
  {
-  "witness": "wcedc30b619",
+  "witness": "w776c9b08eb",
   "cap": "heal",
   "args": {
    "service": "svc5"
@@ -179,12 +179,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "wcedc30b619",
+  "witness": "w776c9b08eb",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -215,7 +215,7 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 5,
+   "step": 8,
    "acts": [
     [
      "set_config",
@@ -233,7 +233,7 @@
   }
  },
  {
-  "witness": "wcedc30b619",
+  "witness": "w776c9b08eb",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -263,7 +263,7 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 5,
+   "step": 8,
    "acts": [
     [
      "set_config",
@@ -281,7 +281,7 @@
   }
  },
  {
-  "witness": "w439c3101c7",
+  "witness": "w6ea52cf053",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -309,12 +309,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w439c3101c7",
+  "witness": "w6ea52cf053",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -342,12 +342,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w439c3101c7",
+  "witness": "w6ea52cf053",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -406,7 +406,7 @@
   }
  },
  {
-  "witness": "w439c3101c7",
+  "witness": "w6ea52cf053",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -431,12 +431,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w439c3101c7",
+  "witness": "w6ea52cf053",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -496,7 +496,7 @@
   }
  },
  {
-  "witness": "w439c3101c7",
+  "witness": "w6ea52cf053",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -524,12 +524,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "wcedc30b619",
+  "witness": "w776c9b08eb",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -560,7 +560,7 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 5,
+   "step": 8,
    "acts": [
     [
      "set_config",
@@ -578,7 +578,7 @@
   }
  },
  {
-  "witness": "wcedc30b619",
+  "witness": "w776c9b08eb",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -608,7 +608,7 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 5,
+   "step": 8,
    "acts": [
     [
      "set_config",
@@ -626,7 +626,7 @@
   }
  },
  {
-  "witness": "wcedc30b619",
+  "witness": "w776c9b08eb",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -654,12 +654,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "wcedc30b619",
+  "witness": "w776c9b08eb",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -691,12 +691,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "wcedc30b619",
+  "witness": "w776c9b08eb",
   "cap": "heal",
   "args": {
    "service": "svc5"
@@ -728,7 +728,7 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 5,
+   "step": 8,
    "acts": [
     [
      "set_config",
@@ -746,7 +746,7 @@
   }
  },
  {
-  "witness": "wcedc30b619",
+  "witness": "w776c9b08eb",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -776,7 +776,7 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 5,
+   "step": 8,
    "acts": [
     [
      "set_config",
@@ -794,7 +794,7 @@
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -866,7 +866,7 @@
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -894,12 +894,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -974,7 +974,7 @@
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc6"
@@ -1004,12 +1004,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -1082,7 +1082,7 @@
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -1152,7 +1152,7 @@
   }
  },
  {
-  "witness": "w97595d0728",
+  "witness": "w675cef9f2a",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -1179,12 +1179,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w97595d0728",
+  "witness": "w675cef9f2a",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -1213,12 +1213,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w97595d0728",
+  "witness": "w675cef9f2a",
   "cap": "heal",
   "args": {
    "service": "svc5"
@@ -1244,12 +1244,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w97595d0728",
+  "witness": "w675cef9f2a",
   "cap": "heal",
   "args": {
    "service": "svc5"
@@ -1279,12 +1279,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w97595d0728",
+  "witness": "w675cef9f2a",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -1311,12 +1311,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w97595d0728",
+  "witness": "w675cef9f2a",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -1347,12 +1347,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 4,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -1382,12 +1382,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc6"
@@ -1417,12 +1417,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -1452,12 +1452,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -1527,7 +1527,7 @@
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc5"
@@ -1557,12 +1557,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -1632,7 +1632,7 @@
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -1704,7 +1704,7 @@
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -1774,7 +1774,7 @@
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -1846,7 +1846,7 @@
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -1917,7 +1917,7 @@
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -1987,7 +1987,7 @@
   }
  },
  {
-  "witness": "wf7e058594d",
+  "witness": "w5ae23ac9ba",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -2057,7 +2057,7 @@
   }
  },
  {
-  "witness": "w439c3101c7",
+  "witness": "w6ea52cf053",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -2114,7 +2114,7 @@
   }
  },
  {
-  "witness": "w439c3101c7",
+  "witness": "w6ea52cf053",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -2141,12 +2141,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w439c3101c7",
+  "witness": "w6ea52cf053",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -2174,12 +2174,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w439c3101c7",
+  "witness": "w6ea52cf053",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -2239,7 +2239,7 @@
   }
  },
  {
-  "witness": "w439c3101c7",
+  "witness": "w6ea52cf053",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -2297,7 +2297,7 @@
   }
  },
  {
-  "witness": "w439c3101c7",
+  "witness": "w6ea52cf053",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -2325,12 +2325,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 3,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -2389,7 +2389,7 @@
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -2448,7 +2448,7 @@
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -2470,12 +2470,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -2494,12 +2494,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 4,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc6"
@@ -2518,12 +2518,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 4,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -2542,12 +2542,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 4,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -2621,7 +2621,7 @@
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -2695,7 +2695,7 @@
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -2714,12 +2714,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -2738,12 +2738,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -2762,12 +2762,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -2786,12 +2786,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -2810,12 +2810,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 4,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc5"
@@ -2874,7 +2874,7 @@
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -2893,12 +2893,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 4,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -2920,12 +2920,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -2984,7 +2984,7 @@
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc5"
@@ -3006,12 +3006,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc5"
@@ -3030,12 +3030,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc6"
@@ -3109,7 +3109,7 @@
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -3183,7 +3183,7 @@
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -3202,12 +3202,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -3226,12 +3226,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -3305,7 +3305,7 @@
   }
  },
  {
-  "witness": "w3498fd906d",
+  "witness": "w96256adde9",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -3352,7 +3352,7 @@
   }
  },
  {
-  "witness": "w3498fd906d",
+  "witness": "w96256adde9",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -3374,12 +3374,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w3498fd906d",
+  "witness": "w96256adde9",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -3398,12 +3398,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 4,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w3498fd906d",
+  "witness": "w96256adde9",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -3425,12 +3425,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w3498fd906d",
+  "witness": "w96256adde9",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -3449,12 +3449,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 4,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w3498fd906d",
+  "witness": "w96256adde9",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -3501,7 +3501,7 @@
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -3523,12 +3523,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -3547,12 +3547,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 4,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc5"
@@ -3571,12 +3571,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 4,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -3635,7 +3635,7 @@
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -3657,12 +3657,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w17181cb139",
+  "witness": "wb6fe8cc869",
   "cap": "heal",
   "args": {
    "service": "svc5"
@@ -3721,7 +3721,7 @@
   }
  },
  {
-  "witness": "w3498fd906d",
+  "witness": "w96256adde9",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -3740,12 +3740,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 4,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w3498fd906d",
+  "witness": "w96256adde9",
   "cap": "heal",
   "args": {
    "service": "svc5"
@@ -3764,12 +3764,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 4,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w3498fd906d",
+  "witness": "w96256adde9",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -3816,7 +3816,7 @@
   }
  },
  {
-  "witness": "w3498fd906d",
+  "witness": "w96256adde9",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -3835,12 +3835,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 4,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w3498fd906d",
+  "witness": "w96256adde9",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -3859,12 +3859,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 4,
+   "step": 6,
    "acts": []
   }
  },
  {
-  "witness": "w3498fd906d",
+  "witness": "w96256adde9",
   "cap": "heal",
   "args": {
    "service": "svc5"
@@ -3886,12 +3886,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc5"
@@ -3965,7 +3965,7 @@
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -3984,12 +3984,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -4008,12 +4008,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -4032,12 +4032,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -4056,12 +4056,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
  {
-  "witness": "w0e8a089a16",
+  "witness": "w5e82a05e17",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -4080,7 +4080,7 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 2,
+   "step": 4,
    "acts": []
   }
  },
@@ -5460,7 +5460,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -5490,12 +5490,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -5541,7 +5541,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -5573,12 +5573,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -5621,7 +5621,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -5667,7 +5667,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -5710,7 +5710,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -5742,12 +5742,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -5790,7 +5790,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc5"
@@ -5833,7 +5833,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -5879,7 +5879,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -5925,7 +5925,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -5954,12 +5954,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -6002,7 +6002,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -6031,12 +6031,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -6079,7 +6079,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -6122,7 +6122,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -6154,12 +6154,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -6188,12 +6188,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc6"
@@ -6223,12 +6223,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -6271,7 +6271,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc5"
@@ -6303,12 +6303,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -6340,12 +6340,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -6388,7 +6388,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -6431,7 +6431,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -6461,12 +6461,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -6495,12 +6495,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -6543,7 +6543,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -6573,12 +6573,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -6621,7 +6621,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -6653,12 +6653,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -6688,12 +6688,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc1"
@@ -6736,7 +6736,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc6"
@@ -6769,12 +6769,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -6817,7 +6817,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -6860,7 +6860,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -6892,12 +6892,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -6940,7 +6940,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -6983,7 +6983,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc6"
@@ -7012,12 +7012,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -7046,12 +7046,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc0"
@@ -7097,7 +7097,7 @@
   }
  },
  {
-  "witness": "wd33111e671",
+  "witness": "w433929fef1",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -7129,12 +7129,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "w471e4982a9",
+  "witness": "wb2a5f03dc7",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -7166,12 +7166,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "w471e4982a9",
+  "witness": "wb2a5f03dc7",
   "cap": "heal",
   "args": {
    "service": "svc2"
@@ -7198,12 +7198,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "w471e4982a9",
+  "witness": "wb2a5f03dc7",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -7235,12 +7235,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "w471e4982a9",
+  "witness": "wb2a5f03dc7",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -7269,12 +7269,12 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  },
  {
-  "witness": "w471e4982a9",
+  "witness": "wb2a5f03dc7",
   "cap": "heal",
   "args": {
    "service": "svc4"
@@ -7338,7 +7338,7 @@
   }
  },
  {
-  "witness": "w471e4982a9",
+  "witness": "wb2a5f03dc7",
   "cap": "heal",
   "args": {
    "service": "svc3"
@@ -7370,7 +7370,7 @@
   ],
   "expected": {
    "kind": "side_exit",
-   "step": 6,
+   "step": 7,
    "acts": []
   }
  }

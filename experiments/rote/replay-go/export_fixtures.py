@@ -110,7 +110,6 @@ def synthetic_cases(rng: random.Random) -> tuple[Library, list[dict]]:
     from rote.witness import witness_from_steps
 
     lib = Library.from_source(LIBRARY6)
-    cap = lib.caps["heal"]
     cases = []
     for src in SYNTHETIC:
         decl = parse_program(src).decls[0]
@@ -125,8 +124,10 @@ def synthetic_cases(rng: random.Random) -> tuple[Library, list[dict]]:
             res = run_script(t, decl.params, [arg], decl.body)
             if not res.ok:
                 continue
-            w = lib.retain(witness_from_steps("heal", decl.params, res.steps, src),
-                           Evidence("validated", "pass", world.label, {"service": arg}, 0, "synthetic"))
+            w = lib.retain(
+                witness_from_steps("heal", decl.params, res.steps, src),
+                Evidence("validated", "pass", world.label, {"service": arg}, 0, "synthetic"),
+            )
             retained.append(w)
         for w in retained:
             for _ in range(6):
@@ -135,44 +136,177 @@ def synthetic_cases(rng: random.Random) -> tuple[Library, list[dict]]:
                 rt = Runtime(lib, Policy(grant=GRANT6, mode="replay-only"), None)
                 rec = Recording(world, rt)
                 r = replay(w, [arg], rec, GRANT6, runtime=rec)
-                cases.append({"witness": w.hash, "cap": "heal", "args": {"service": arg}, "answers": rec.answers,
-                              "expected": {"kind": r.kind, "step": r.step, "acts": [[n, a] for n, a in r.acts]}})
+                cases.append(
+                    {
+                        "witness": w.hash,
+                        "cap": "heal",
+                        "args": {"service": arg},
+                        "answers": rec.answers,
+                        "expected": {"kind": r.kind, "step": r.step, "acts": [[n, a] for n, a in r.acts]},
+                    }
+                )
     return lib, cases
 
 
+FORMS = {
+    "const",
+    "param",
+    "ref",
+    "field",
+    "index",
+    "len",
+    "has",
+    "get",
+    "keys",
+    "contains",
+    "str",
+    "not",
+    "neg",
+    "min",
+    "max",
+    "bin",
+    "list",
+    "record",
+    "sum",
+    "maxof",
+    "minof",
+}
+
+
 def forms_used(lib: Library) -> set[str]:
+    """Every expression tag that occurs in a library's witnesses."""
     tags: set[str] = set()
 
-    def walk(e):
-        if isinstance(e, list) and e and isinstance(e[0], str):
-            tags.add(e[0])
-            if e[0] == "list":
-                for x in e[1]:
-                    walk(x)
-            elif e[0] == "record":
-                for _, x in e[1]:
-                    walk(x)
-            else:
-                for x in e[1:]:
-                    walk(x)
+    def walk(x):
+        if isinstance(x, list):
+            if x and isinstance(x[0], str) and x[0] in FORMS:
+                tags.add(x[0])
+            for y in x:
+                walk(y)
+        elif isinstance(x, dict):
+            for y in x.values():
+                walk(y)
 
     for c in lib.caps.values():
         for w in c.witnesses:
-            for st in w.steps:
-                for a in st.get("args", []):
-                    walk(a)
-                if "pred" in st:
-                    walk(st["pred"])
+            walk(w.steps)
     return tags
 
 
+# Type-drift cases from the first external review: a witness validated on one shape of
+# answer, replayed on another. Python's outcome is authoritative; a foreign kernel must
+# refuse exactly where the interpreter would have failed.
+DRIFT_LIBRARY = """
+world drift {
+  observe cfg(s): record
+  observe n(s): int
+  observe k(s): string
+  observe xs(s): list
+  act write(s, v): bool
+}
+cap f(s) { goal: true }
+"""
+DRIFT_SIGNATURE = {
+    "cfg": ("observe", 1),
+    "n": ("observe", 1),
+    "k": ("observe", 1),
+    "xs": ("observe", 1),
+    "write": ("act", 2),
+}
+BIG = 2**63 - 1
+DRIFT_CASES = [
+    # (script, answers while validating, answers while replaying)
+    ("script f(s) { write(s, str([n(s)])) }", {"n": 1}, {"n": 2}),
+    ("script f(s) { write(s, str(n(s) + 1)) }", {"n": 1}, {"n": BIG}),
+    (
+        "script f(s) { if has(cfg(s), k(s)) { write(s, 1) } }",
+        {"cfg": {}, "k": "missing"},
+        {"cfg": {}, "k": 1},
+    ),
+    (
+        "script f(s) { write(s, get(cfg(s), k(s), 0)) }",
+        {"cfg": {"a": 1}, "k": "a"},
+        {"cfg": {"a": 1}, "k": 1},
+    ),
+    (
+        'script f(s) { let p = cfg(s).port + 1\n write(s, "restart") }',
+        {"cfg": {"port": 80}},
+        {"cfg": {"port": "eighty"}},
+    ),
+    ("script f(s) { write(s, -n(s)) }", {"n": 5}, {"n": -(2**63)}),
+    ("script f(s) { write(s, sum([n(s), n(s)])) }", {"n": 5}, {"n": BIG}),
+    ("script f(s) { write(s, n(s) * 2) }", {"n": 5}, {"n": -(2**62) - 1}),
+    ("script f(s) { write(s, len(xs(s)) + sum(xs(s))) }", {"xs": [1, 2]}, {"xs": [1, "two"]}),
+    ("script f(s) { write(s, cfg(s)[k(s)]) }", {"cfg": {"a": 7}, "k": "a"}, {"cfg": {"a": 7}, "k": 2}),
+]
+
+
+class CannedWorld:
+    label = "drift"
+
+    def __init__(self, answers):
+        self.answers = answers
+        self.history = []
+
+    def signature(self):
+        return DRIFT_SIGNATURE
+
+    def observe(self, name, args):
+        return copy.deepcopy(self.answers[name])
+
+    def act(self, name, args):
+        self.history.append((name, list(args)))
+        return True
+
+
+def drift_cases() -> tuple[Library, list[dict]]:
+    from rote.eval import Tracer, run_script
+    from rote.parser import parse_program
+    from rote.witness import witness_from_steps
+
+    lib = Library.from_source(DRIFT_LIBRARY)
+    cases = []
+    for src, validate_with, replay_with in DRIFT_CASES:
+        decl = parse_program(src).decls[0]
+        t = Tracer(CannedWorld(validate_with), grant={"write"}, caps={})
+        res = run_script(t, decl.params, ["a"], decl.body)
+        assert res.ok, (src, res.error)
+        w = lib.retain(
+            witness_from_steps("f", decl.params, res.steps, src),
+            Evidence("validated", "pass", "drift", {"s": "a"}, 0, "drift fixture"),
+        )
+        for answers in (validate_with, replay_with):
+            rec = Recording(CannedWorld(answers), None)
+            r = replay(w, ["a"], rec, {"write"}, runtime=rec)
+            cases.append(
+                {
+                    "witness": w.hash,
+                    "cap": "f",
+                    "args": {"s": "a"},
+                    "answers": rec.answers,
+                    "expected": {"kind": r.kind, "step": r.step, "acts": [[n, a] for n, a in r.acts]},
+                }
+            )
+    return lib, cases
+
+
 def main() -> None:
+    _export_demo_and_synthetic()
+    drift_lib, drift = drift_cases()
+    drift_lib.save(HERE / "runs" / "drift_library.json")
+    (HERE / "runs" / "drift_fixtures.json").write_text(json.dumps(drift, indent=1) + "\n")
+    print(
+        f"wrote {len(drift)} drift cases over {len(drift_lib.caps['f'].witnesses)} witnesses: {_kinds(drift)}"
+    )
+
+
+def _export_demo_and_synthetic() -> None:
     lib = Library.load(HERE / "runs" / "library.json")
     rng = random.Random(7)
     cases = []
     for cap in lib.caps.values():
         for w in cap.witnesses:
-            for trial in range(12):
+            for _ in range(12):
                 world = random_world(rng)
                 if cap.name == "recover_host":
                     world.add_host("h3", disk=40)
@@ -186,11 +320,15 @@ def main() -> None:
                 rt = Runtime(lib, Policy(grant=GRANT, mode="replay-only"), None)
                 rec = Recording(world, rt)
                 r = replay(w, args, rec, GRANT, runtime=rec)
-                cases.append({
-                    "witness": w.hash, "cap": cap.name, "args": dict(zip(w.params, args, strict=True)),
-                    "answers": rec.answers,
-                    "expected": {"kind": r.kind, "step": r.step, "acts": [[n, a] for n, a in r.acts]},
-                })
+                cases.append(
+                    {
+                        "witness": w.hash,
+                        "cap": cap.name,
+                        "args": dict(zip(w.params, args, strict=True)),
+                        "answers": rec.answers,
+                        "expected": {"kind": r.kind, "step": r.step, "acts": [[n, a] for n, a in r.acts]},
+                    }
+                )
     out = HERE / "runs" / "replay_fixtures.json"
     out.write_text(json.dumps(cases, indent=1) + "\n")
     print(f"wrote {len(cases)} cases to {out}: {_kinds(cases)}")
@@ -198,8 +336,10 @@ def main() -> None:
     syn_lib.save(HERE / "runs" / "synthetic_library.json")
     (HERE / "runs" / "synthetic_fixtures.json").write_text(json.dumps(syn_cases, indent=1) + "\n")
     used = forms_used(syn_lib)
-    print(f"wrote {len(syn_cases)} synthetic cases over {sum(len(c.witnesses) for c in syn_lib.caps.values())} "
-          f"witnesses: {_kinds(syn_cases)}; forms used: {len(used)}/21 {sorted(used)}")
+    print(
+        f"wrote {len(syn_cases)} synthetic cases over {sum(len(c.witnesses) for c in syn_lib.caps.values())} "
+        f"witnesses: {_kinds(syn_cases)}; forms used: {len(used)}/21 {sorted(used)}"
+    )
 
 
 def _kinds(cases: list[dict]) -> dict[str, int]:

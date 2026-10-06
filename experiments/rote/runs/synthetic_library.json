@@ -26,7 +26,7 @@
      "world": "syn"
     }
    ],
-   "hash": "wcedc30b619",
+   "hash": "w776c9b08eb",
    "params": [
     "service"
    ],
@@ -54,6 +54,56 @@
      "id": 2,
      "name": "ports_in_use",
      "op": "observe"
+    },
+    {
+     "expr": [
+      "maxof",
+      [
+       "ref",
+       2
+      ],
+      [
+       "const",
+       8000
+      ]
+     ],
+     "op": "eval"
+    },
+    {
+     "expr": [
+      "bin",
+      "+",
+      [
+       "maxof",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        8000
+       ]
+      ],
+      [
+       "const",
+       1
+      ]
+     ],
+     "op": "eval"
+    },
+    {
+     "expr": [
+      "minof",
+      [
+       "ref",
+       2
+      ],
+      [
+       "const",
+       0
+      ]
+     ],
+     "op": "eval"
     },
     {
      "args": [
@@ -198,7 +248,7 @@
      "world": "syn"
     }
    ],
-   "hash": "w439c3101c7",
+   "hash": "w6ea52cf053",
    "params": [
     "service"
    ],
@@ -226,6 +276,56 @@
      "id": 2,
      "name": "ports_in_use",
      "op": "observe"
+    },
+    {
+     "expr": [
+      "maxof",
+      [
+       "ref",
+       2
+      ],
+      [
+       "const",
+       8000
+      ]
+     ],
+     "op": "eval"
+    },
+    {
+     "expr": [
+      "bin",
+      "+",
+      [
+       "maxof",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        8000
+       ]
+      ],
+      [
+       "const",
+       1
+      ]
+     ],
+     "op": "eval"
+    },
+    {
+     "expr": [
+      "minof",
+      [
+       "ref",
+       2
+      ],
+      [
+       "const",
+       0
+      ]
+     ],
+     "op": "eval"
     },
     {
      "args": [
@@ -360,7 +460,7 @@
      "world": "syn"
     }
    ],
-   "hash": "wf7e058594d",
+   "hash": "w5ae23ac9ba",
    "params": [
     "service"
    ],
@@ -388,6 +488,56 @@
      "id": 2,
      "name": "ports_in_use",
      "op": "observe"
+    },
+    {
+     "expr": [
+      "maxof",
+      [
+       "ref",
+       2
+      ],
+      [
+       "const",
+       8000
+      ]
+     ],
+     "op": "eval"
+    },
+    {
+     "expr": [
+      "bin",
+      "+",
+      [
+       "maxof",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        8000
+       ]
+      ],
+      [
+       "const",
+       1
+      ]
+     ],
+     "op": "eval"
+    },
+    {
+     "expr": [
+      "minof",
+      [
+       "ref",
+       2
+      ],
+      [
+       "const",
+       0
+      ]
+     ],
+     "op": "eval"
     },
     {
      "args": [
@@ -556,7 +706,7 @@
      "world": "syn"
     }
    ],
-   "hash": "w97595d0728",
+   "hash": "w675cef9f2a",
    "params": [
     "service"
    ],
@@ -584,6 +734,56 @@
      "id": 2,
      "name": "ports_in_use",
      "op": "observe"
+    },
+    {
+     "expr": [
+      "maxof",
+      [
+       "ref",
+       2
+      ],
+      [
+       "const",
+       8000
+      ]
+     ],
+     "op": "eval"
+    },
+    {
+     "expr": [
+      "bin",
+      "+",
+      [
+       "maxof",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        8000
+       ]
+      ],
+      [
+       "const",
+       1
+      ]
+     ],
+     "op": "eval"
+    },
+    {
+     "expr": [
+      "minof",
+      [
+       "ref",
+       2
+      ],
+      [
+       "const",
+       0
+      ]
+     ],
+     "op": "eval"
     },
     {
      "args": [
@@ -684,7 +884,7 @@
      "world": "syn"
     }
    ],
-   "hash": "w17181cb139",
+   "hash": "wb6fe8cc869",
    "params": [
     "service"
    ],
@@ -701,6 +901,29 @@
      "id": 1,
      "name": "config",
      "op": "observe"
+    },
+    {
+     "expr": [
+      "keys",
+      [
+       "ref",
+       1
+      ]
+     ],
+     "op": "eval"
+    },
+    {
+     "expr": [
+      "len",
+      [
+       "keys",
+       [
+        "ref",
+        1
+       ]
+      ]
+     ],
+     "op": "eval"
     },
     {
      "args": [
@@ -944,7 +1167,7 @@
      "world": "syn"
     }
    ],
-   "hash": "w0e8a089a16",
+   "hash": "w5e82a05e17",
    "params": [
     "service"
    ],
@@ -961,6 +1184,29 @@
      "id": 1,
      "name": "config",
      "op": "observe"
+    },
+    {
+     "expr": [
+      "keys",
+      [
+       "ref",
+       1
+      ]
+     ],
+     "op": "eval"
+    },
+    {
+     "expr": [
+      "len",
+      [
+       "keys",
+       [
+        "ref",
+        1
+       ]
+      ]
+     ],
+     "op": "eval"
     },
     {
      "args": [
@@ -1260,7 +1506,7 @@
      "world": "syn"
     }
    ],
-   "hash": "w3498fd906d",
+   "hash": "w96256adde9",
    "params": [
     "service"
    ],
@@ -1277,6 +1523,29 @@
      "id": 1,
      "name": "config",
      "op": "observe"
+    },
+    {
+     "expr": [
+      "keys",
+      [
+       "ref",
+       1
+      ]
+     ],
+     "op": "eval"
+    },
+    {
+     "expr": [
+      "len",
+      [
+       "keys",
+       [
+        "ref",
+        1
+       ]
+      ]
+     ],
+     "op": "eval"
     },
     {
      "args": [
@@ -4318,7 +4587,7 @@
      "world": "syn"
     }
    ],
-   "hash": "wd33111e671",
+   "hash": "w433929fef1",
    "params": [
     "service"
    ],
@@ -4335,6 +4604,24 @@
      "id": 1,
      "name": "config",
      "op": "observe"
+    },
+    {
+     "expr": [
+      "get",
+      [
+       "ref",
+       1
+      ],
+      [
+       "const",
+       "port"
+      ],
+      [
+       "const",
+       0
+      ]
+     ],
+     "op": "eval"
     },
     {
      "args": [
@@ -4483,7 +4770,7 @@
      "world": "syn"
     }
    ],
-   "hash": "w471e4982a9",
+   "hash": "wb2a5f03dc7",
    "params": [
     "service"
    ],
@@ -4500,6 +4787,24 @@
      "id": 1,
      "name": "config",
      "op": "observe"
+    },
+    {
+     "expr": [
+      "get",
+      [
+       "ref",
+       1
+      ],
+      [
+       "const",
+       "port"
+      ],
+      [
+       "const",
+       0
+      ]
+     ],
+     "op": "eval"
     },
     {
      "args": [

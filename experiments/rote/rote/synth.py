@@ -38,7 +38,9 @@ class ScriptedOracle:
     def from_file(path: str) -> ScriptedOracle:
         with open(path) as f:
             data = json.load(f)
-        return ScriptedOracle({k: [p["source"] if isinstance(p, dict) else p for p in v] for k, v in data.items()})
+        return ScriptedOracle(
+            {k: [p["source"] if isinstance(p, dict) else p for p in v] for k, v in data.items()}
+        )
 
     def ask(self, prompt: Any) -> Any:
         self.calls += 1
@@ -79,8 +81,11 @@ class LiveOracle:
         import anthropic  # optional dependency; only needed for live synthesis
 
         client = anthropic.Anthropic()
-        system = ("You write Rote scripts for an operator's capability library. Reply with exactly one "
-                  "```rote fenced block containing a single `script` declaration and nothing else.\n\n" + GRAMMAR_CARD)
+        system = (
+            "You write Rote scripts for an operator's capability library. Reply with exactly one "
+            "```rote fenced block containing a single `script` declaration and nothing else.\n\n"
+            + GRAMMAR_CARD
+        )
         with client.beta.messages.stream(
             model=self.model,
             max_tokens=self.max_tokens,

@@ -16,7 +16,7 @@ from __future__ import annotations
 import random
 from typing import Any
 
-from worlds.fleet import NO_SPACE, SEGFAULT, SIGNATURE, FleetWorld
+from worlds.fleet import NO_SPACE, SIGNATURE, FleetWorld
 
 __all__ = ["FleetWorld6", "SIGNATURE6", "CAUSES", "random_fleet", "incident_stream", "LIBRARY6", "GRANT6"]
 
@@ -59,7 +59,9 @@ class FleetWorld6(FleetWorld):
     def signature(self) -> dict[str, tuple[str, int]]:
         return SIGNATURE6
 
-    def add_service(self, name: str, host: str, port: int, nested: bool = False, deps: list[str] | None = None) -> None:
+    def add_service(
+        self, name: str, host: str, port: int, nested: bool = False, deps: list[str] | None = None
+    ) -> None:
         super().add_service(name, host, port, nested)
         self.services[name]["lock"] = False
         self.services[name]["deps"] = list(deps or [])

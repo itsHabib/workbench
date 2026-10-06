@@ -13,10 +13,10 @@ from __future__ import annotations
 import copy
 import json
 import random
+import zlib
 from pathlib import Path
 
 import pytest
-
 from rote.eval import Tracer, run_script
 from rote.parser import parse_program
 from rote.witness import replay, witness_from_steps
@@ -51,7 +51,9 @@ def random_world(rng: random.Random) -> FleetWorld:
         svc = w.services[n]
         if rng.random() < 0.7:
             svc["status"] = "down"
-            svc["log"].append(rng.choice([SEGFAULT, NO_SPACE, "bind: address already in use (:8000)", "weird"]))
+            svc["log"].append(
+                rng.choice([SEGFAULT, NO_SPACE, "bind: address already in use (:8000)", "weird"])
+            )
         if rng.random() < 0.1:
             svc["config"] = {"version": 3}
     return w
@@ -64,28 +66,71 @@ def effects(world: FleetWorld, src: str, arg: str):
     return res, [(s["name"], s["args"]) for s in res.steps if s["op"] in ("observe", "act")]
 
 
+def _seed(label: str) -> int:
+    return zlib.crc32(label.encode())  # stable across processes, unlike Python's salted hash()
+
+
 @pytest.mark.parametrize("label,src", proposals())
-def test_replay_agrees_with_the_script_on_random_worlds(label: str, src: str):
-    rng = random.Random(hash(label) & 0xFFFF)
-    completed = exits = 0
-    for trial in range(120):
+def test_replay_completes_on_the_world_it_was_validated_on(label: str, src: str):
+    """Guaranteed completion: replaying a witness against the very world that produced it must
+    complete and perform exactly the same effects. No luck involved."""
+    rng = random.Random(_seed(label))
+    checked = 0
+    for _ in range(60):
         base = random_world(rng)
         arg = rng.choice(list(base.services))
         res, _ = effects(copy.deepcopy(base), src, arg)
         if not res.ok:
-            continue  # this world is outside the script's own ability; nothing to retain
+            continue
+        w = witness_from_steps("heal", ["service"], res.steps, src)
+        a, b = copy.deepcopy(base), copy.deepcopy(base)
+        r = replay(w, [arg], a, GRANT)
+        effects(b, src, arg)
+        assert r.kind == "completed", f"{label}: {r.reason}"
+        assert a.history == b.history and a.snapshot() == b.snapshot()
+        checked += 1
+    assert checked > 0, f"{label}: the script never validated on 60 random worlds"
+
+
+def test_a_witness_side_exits_before_acting_when_its_first_guard_fails():
+    """Guaranteed side exit: P1 validated on a down service, replayed on an up one."""
+    src = proposals()[0][1]
+    world = FleetWorld("fixed")
+    world.add_host("h1")
+    world.add_service("a", "h1", 8000)
+    world.crash("a")
+    res, _ = effects(copy.deepcopy(world), src, "a")
+    w = witness_from_steps("heal", ["service"], res.steps, src)
+    healthy = FleetWorld("fixed")
+    healthy.add_host("h1")
+    healthy.add_service("a", "h1", 8000)
+    r = replay(w, ["a"], healthy, GRANT)
+    assert r.kind == "side_exit" and r.inapplicable and healthy.history == []
+
+
+@pytest.mark.parametrize("label,src", proposals())
+def test_replay_agrees_with_the_script_on_random_worlds(label: str, src: str):
+    """Random worlds on top of the guaranteed cases: whatever the outcome, the kernel and the
+    interpreter must agree up to the point where replay stops."""
+    rng = random.Random(_seed(label) ^ 0xA5A5)
+    outcomes = {"completed": 0, "side_exit": 0}
+    for _ in range(120):
+        base = random_world(rng)
+        arg = rng.choice(list(base.services))
+        res, _ = effects(copy.deepcopy(base), src, arg)
+        if not res.ok:
+            continue
         w = witness_from_steps("heal", ["service"], res.steps, src)
         fresh = random_world(rng)
         arg2 = rng.choice(list(fresh.services))
         a, b = copy.deepcopy(fresh), copy.deepcopy(fresh)
         r = replay(w, [arg2], a, GRANT)
         res2, _ = effects(b, src, arg2)
+        outcomes[r.kind] = outcomes.get(r.kind, 0) + 1
         if r.kind == "completed":
-            completed += 1
             assert res2.ok, f"{label}: replay completed but the script failed: {res2.error}"
             assert a.history == b.history, f"{label}: effects diverged"
             assert a.snapshot() == b.snapshot(), f"{label}: final worlds diverged"
         else:
-            exits += 1
             assert a.history == b.history[: len(a.history)], f"{label}: diverged before the side exit"
-    assert completed > 0 and exits > 0, f"{label}: trials were not informative ({completed=}, {exits=})"
+    assert sum(outcomes.values()) > 0, f"{label}: no informative trial"

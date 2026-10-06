@@ -1,12 +1,11 @@
 import pytest
-
 from rote import ast as A
 from rote.lexer import LexError
 from rote.parser import ParseError, parse_expr, parse_program
 
 
 def test_parses_declarations_and_keeps_script_source():
-    src = '''
+    src = """
 world w { observe status(s): string
           act do(s): bool }
 cap heal(s) { "doc" goal: status(s) == "up" }
@@ -15,7 +14,7 @@ script heal(s) {
   if x == "down" { do(s) } else { unit }
 }
 tactic heal(s) { propose(ask({cap: "heal"})) }
-'''
+"""
     prog = parse_program(src)
     kinds = [type(d).__name__ for d in prog.decls]
     assert kinds == ["WorldDecl", "CapDecl", "ScriptDecl", "TacticDecl"]

@@ -18,9 +18,17 @@ from typing import Any
 __all__ = ["FleetWorld", "SIGNATURE"]
 
 SIGNATURE: dict[str, tuple[str, int]] = {
-    "status": ("observe", 1), "host_of": ("observe", 1), "disk": ("observe", 1), "config": ("observe", 1),
-    "log_tail": ("observe", 1), "ports_in_use": ("observe", 1), "services_on": ("observe", 1),
-    "restart": ("act", 1), "clear_tmp": ("act", 1), "set_config": ("act", 3), "reboot_host": ("act", 1),
+    "status": ("observe", 1),
+    "host_of": ("observe", 1),
+    "disk": ("observe", 1),
+    "config": ("observe", 1),
+    "log_tail": ("observe", 1),
+    "ports_in_use": ("observe", 1),
+    "services_on": ("observe", 1),
+    "restart": ("act", 1),
+    "clear_tmp": ("act", 1),
+    "set_config": ("act", 3),
+    "reboot_host": ("act", 1),
     "wipe_host": ("act", 1),
 }
 
@@ -49,7 +57,9 @@ class FleetWorld:
         self.services[name] = {"host": host, "status": "up", "config": cfg, "log": ["started"], "pid": 100}
 
     def snapshot(self) -> dict[str, Any]:
-        return copy.deepcopy({"hosts": self.hosts, "services": self.services, "disruptions": self.disruptions})
+        return copy.deepcopy(
+            {"hosts": self.hosts, "services": self.services, "disruptions": self.disruptions}
+        )
 
     def restore(self, snap: dict[str, Any]) -> None:
         snap = copy.deepcopy(snap)
@@ -92,7 +102,9 @@ class FleetWorld:
 
     def obs_ports_in_use(self, h: str) -> list[int]:
         self._host(h)
-        ports = {self._port(svc) for svc in self.services.values() if svc["host"] == h and svc["status"] == "up"}
+        ports = {
+            self._port(svc) for svc in self.services.values() if svc["host"] == h and svc["status"] == "up"
+        }
         return sorted(p for p in ports if p is not None)
 
     def obs_services_on(self, h: str) -> list[str]:

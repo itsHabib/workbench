@@ -27,13 +27,14 @@ your statement against the code in step 3.
 
 ```sh
 cd experiments/rote
-python3 -m pytest tests -q                 # expect 65 passed
+python3 -m pytest tests -q                 # expect 77 passed
 python3 demo.py                            # the nine-episode workload, scripted oracle
 python3 ordinary/agent_py.py               # the plain-Python baseline, same episodes
 python3 ordinary/proxy_leak.py             # the host-language tracer leak
 python3 live/run_live.py --oracle heuristic --streams 10 --episodes 24   # model-free dry run
 go run ./replay-go                         # Go replayer, demo fixtures: 60 conform
 go run ./replay-go -lib runs/synthetic_library.json -fixtures runs/synthetic_fixtures.json   # 192 conform
+go run ./replay-go -lib runs/drift_library.json -fixtures runs/drift_fixtures.json           # 20 conform
 ```
 
 Confirm or refute every number in `RESULTS.md` against what you see. Any discrepancy is

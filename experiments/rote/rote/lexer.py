@@ -8,11 +8,54 @@ from dataclasses import dataclass
 __all__ = ["Token", "LexError", "tokenize", "KEYWORDS"]
 
 KEYWORDS = {
-    "let", "if", "else", "for", "in", "fn", "true", "false", "unit", "and", "or", "not",
-    "return", "world", "observe", "act", "cap", "goal", "script", "tactic", "use", "ask", "propose",
+    "let",
+    "if",
+    "else",
+    "for",
+    "in",
+    "fn",
+    "true",
+    "false",
+    "unit",
+    "and",
+    "or",
+    "not",
+    "return",
+    "world",
+    "observe",
+    "act",
+    "cap",
+    "goal",
+    "script",
+    "tactic",
+    "use",
+    "ask",
+    "propose",
 }
 
-_PUNCT = ["==", "!=", "<=", ">=", "(", ")", "{", "}", "[", "]", ",", ":", ".", "=", "<", ">", "+", "-", "*", "/", "%"]
+_PUNCT = [
+    "==",
+    "!=",
+    "<=",
+    ">=",
+    "(",
+    ")",
+    "{",
+    "}",
+    "[",
+    "]",
+    ",",
+    ":",
+    ".",
+    "=",
+    "<",
+    ">",
+    "+",
+    "-",
+    "*",
+    "/",
+    "%",
+]
 
 
 @dataclass(frozen=True)
@@ -26,7 +69,7 @@ class LexError(Exception):
     pass
 
 
-def tokenize(src: str) -> list[Token]:
+def tokenize(src: str) -> list[Token]:  # noqa: C901, PLR0912, PLR0915  (a lexer loop is one big switch)
     toks: list[Token] = []
     i, line, n = 0, 1, len(src)
     while i < n:

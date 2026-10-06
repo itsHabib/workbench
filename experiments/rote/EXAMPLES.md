@@ -264,4 +264,9 @@ replay. The third witness above, abbreviated:
 ```
 
 A replayer needs an evaluator for the 21 expression forms and the loop in
-`rote/witness.py:replay`. It needs no parser and no interpreter.
+`rote/witness.py:replay`. It needs no parser and no interpreter. Besides `observe`,
+`act`, `use` and `guard`, a witness may carry `eval` steps: a pure expression the
+interpreter evaluated successfully (say `cfg.port + 1` bound to a variable the script
+never used) that replay must evaluate too, so a type or overflow failure stays a side
+exit before the next action. None of the five demo witnesses needs one, because every
+such expression there is already inside a guard or an action argument.

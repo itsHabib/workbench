@@ -161,18 +161,26 @@ trusted dispatch predicate, to measure the difference.
 ### Witnesses and replay
 
 A witness is the step list of a run that the goal accepted: `observe`, `act`, `use`
-steps with symbolic arguments, and `guard` steps. Identical guards are deduplicated
-(guards are functions of parameters and step results, which never change within a run).
+steps with symbolic arguments, `guard` steps, and `eval` steps. An `eval` step records
+that a pure operation on observed data succeeded (a comparison, arithmetic, `len`,
+`keys`, a reduction, a key lookup); replay must evaluate it too, even when the script
+never used the result, so a type or overflow failure the interpreter would have hit
+before acting is a side exit at replay rather than an action the interpreter would not
+have reached. Identical guards are deduplicated (guards are functions of parameters and
+step results, which never change within a run), and an `eval` step is dropped when its
+expression is a subtree of something replay evaluates anyway before the next action.
 Its `prefix` is everything before the first `act`/`use`. Its hash is the content hash
 of params and steps, so the same path validated twice is one witness with two pieces
 of evidence.
 
 `replay(witness, args, world, grant)`:
 1. Refuse if any `act` is outside the grant. Nothing runs.
-2. Walk the steps. `observe`: call the world, bind the result. `guard`: evaluate the
-   expression against fresh bindings; if it differs from the recorded value, stop and
-   report (`side_exit`), with the list of actions performed so far (empty inside the
-   prefix). `act`: call the world. `use`: call the runtime recursively.
+2. Walk the steps. `observe`: call the world, deep-copy and bind the result (an adapter
+   may hand out live objects; the recording must not change under later mutation).
+   `guard`: evaluate the expression against fresh bindings; if it differs from the
+   recorded value, stop and report (`side_exit`), with the list of actions performed so
+   far (empty inside the prefix). `eval`: evaluate; an error is the same side exit.
+   `act`: call the world. `use`: call the runtime recursively.
 3. If every step ran: `completed`. The goal then decides.
 
 The soundness property the design rests on: **if replay completes, the script run
@@ -304,6 +312,15 @@ without the parser, evaluator, or runtime.
   goal-false world into a goal-true one.
 - **`use` as a step.** Composition is by capability, not by source inclusion, so the
   inner capability repairs itself locally and the outer witness stays valid.
+- **Integers are signed 64-bit, everywhere.** The Python reference used arbitrary
+  precision while the Go kernel wrapped; the first external review showed a witness
+  completing in Go with a wrapped value where Python produced a different one. The
+  language now declares the range; leaving it is an error in the evaluator and in both
+  kernels, with conformance fixtures for addition, negation, multiplication and `sum`.
+- **A tactic succeeds only by what it did now.** An early version let a tactic report
+  success on the strength of a witness validated earlier on a world with the same label.
+  Success now requires a proposal validated in the current invocation and the goal
+  holding afterwards.
 - **A bool is never a number.** The first reference let Python's `True == 1` leak into
   `==`, `contains`, list indexing and guard comparison. The Go conformance kernel, written
   to a stricter reading of the spec, disagreed on exactly those cases, which is how the
