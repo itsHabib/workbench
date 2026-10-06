@@ -1,0 +1,680 @@
+{
+ "program": "# The contract between scripts and the simulated fleet. The host-side world\n# (worlds/fleet.py) must agree with this signature; the runtime checks that.\n\nworld fleet {\n  observe status(service): string\n  observe host_of(service): string\n  observe disk(host): int\n  observe config(service): record\n  observe log_tail(service): string\n  observe ports_in_use(host): list\n  observe services_on(host): list\n  act restart(service): bool\n  act clear_tmp(host): int\n  act set_config(service, key, value): bool\n  act reboot_host(host): int\n  act wipe_host(host): bool\n}\n\ncap heal(service) {\n  \"Bring one service back to up.\"\n  goal: status(service) == \"up\"\n}\n\ncap recover_host(host) {\n  \"Every service on the host is up.\"\n  goal: all(map(services_on(host), fn(s) { status(s) == \"up\" }))\n}\n",
+ "retained": 5,
+ "witnesses": [
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 1,
+     "args": {
+      "service": "web"
+     },
+     "kind": "validated",
+     "note": "",
+     "verdict": "pass",
+     "world": "fleet@E1"
+    },
+    {
+     "acts": 1,
+     "args": {
+      "service": "api"
+     },
+     "kind": "replayed",
+     "note": "",
+     "verdict": "pass",
+     "world": "fleet@E2"
+    },
+    {
+     "acts": 1,
+     "args": {
+      "service": "db"
+     },
+     "kind": "replayed",
+     "note": "",
+     "verdict": "fail",
+     "world": "fleet@E3"
+    },
+    {
+     "acts": 1,
+     "args": {
+      "service": "api"
+     },
+     "kind": "replayed",
+     "note": "",
+     "verdict": "fail",
+     "world": "fleet@E4"
+    },
+    {
+     "acts": 1,
+     "args": {
+      "service": "cache"
+     },
+     "kind": "replayed",
+     "note": "",
+     "verdict": "pass",
+     "world": "fleet@E5"
+    },
+    {
+     "acts": 1,
+     "args": {
+      "service": "db"
+     },
+     "kind": "replayed",
+     "note": "",
+     "verdict": "fail",
+     "world": "fleet@E6"
+    },
+    {
+     "acts": 1,
+     "args": {
+      "service": "s3"
+     },
+     "kind": "replayed",
+     "note": "",
+     "verdict": "pass",
+     "world": "fleet@E7"
+    },
+    {
+     "acts": 1,
+     "args": {
+      "service": "t3"
+     },
+     "kind": "replayed",
+     "note": "",
+     "verdict": "pass",
+     "world": "fleet@E8"
+    },
+    {
+     "acts": 1,
+     "args": {
+      "service": "db"
+     },
+     "kind": "replayed",
+     "note": "",
+     "verdict": "fail",
+     "world": "fleet@E9"
+    }
+   ],
+   "hash": "wacedcf7c9f",
+   "params": [
+    "service"
+   ],
+   "seq": 1,
+   "source": "script heal(service) {\n  if status(service) == \"down\" {\n    restart(service)\n  }\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       1
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 2,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 2,
+     "args": {
+      "service": "db"
+     },
+     "kind": "validated",
+     "note": "",
+     "verdict": "pass",
+     "world": "fleet@E3"
+    },
+    {
+     "acts": 2,
+     "args": {
+      "service": "s1"
+     },
+     "kind": "replayed",
+     "note": "",
+     "verdict": "pass",
+     "world": "fleet@E7"
+    }
+   ],
+   "hash": "w4d36485553",
+   "params": [
+    "service"
+   ],
+   "seq": 2,
+   "source": "script heal(service) {\n  let host = host_of(service)\n  if log_tail(service) == \"no space left on device\" {\n    clear_tmp(host)\n  } else {\n    reboot_host(host)\n  }\n  restart(service)\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "host_of",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 2,
+     "name": "log_tail",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       2
+      ],
+      [
+       "const",
+       "no space left on device"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "ref",
+       1
+      ]
+     ],
+     "id": 3,
+     "name": "clear_tmp",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 4,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 2,
+     "args": {
+      "service": "api"
+     },
+     "kind": "validated",
+     "note": "",
+     "verdict": "pass",
+     "world": "fleet@E4"
+    }
+   ],
+   "hash": "w61d79abf0c",
+   "params": [
+    "service"
+   ],
+   "seq": 3,
+   "source": "script heal(service) {\n  let host = host_of(service)\n  let cfg = config(service)\n  if contains(ports_in_use(host), cfg.port) {\n    set_config(service, \"port\", cfg.port + 1)\n  }\n  restart(service)\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "host_of",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 2,
+     "name": "config",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "ref",
+       1
+      ]
+     ],
+     "id": 3,
+     "name": "ports_in_use",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "has",
+      [
+       "ref",
+       2
+      ],
+      [
+       "const",
+       "port"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "contains",
+      [
+       "ref",
+       3
+      ],
+      [
+       "field",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        "port"
+       ]
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "port"
+      ],
+      [
+       "bin",
+       "+",
+       [
+        "field",
+        [
+         "ref",
+         2
+        ],
+        [
+         "const",
+         "port"
+        ]
+       ],
+       [
+        "const",
+        1
+       ]
+      ]
+     ],
+     "id": 4,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 5,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 2,
+     "args": {
+      "service": "db"
+     },
+     "kind": "validated",
+     "note": "",
+     "verdict": "pass",
+     "world": "fleet@E6"
+    },
+    {
+     "acts": 2,
+     "args": {
+      "service": "t1"
+     },
+     "kind": "replayed",
+     "note": "",
+     "verdict": "pass",
+     "world": "fleet@E8"
+    }
+   ],
+   "hash": "w5943be240a",
+   "params": [
+    "service"
+   ],
+   "seq": 4,
+   "source": "script heal(service) {\n  let host = host_of(service)\n  let cfg = config(service)\n  let port = cfg.listen.port\n  if contains(ports_in_use(host), port) {\n    set_config(service, \"listen\", {port: port + 1})\n  }\n  restart(service)\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "host_of",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 2,
+     "name": "config",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "has",
+      [
+       "ref",
+       2
+      ],
+      [
+       "const",
+       "listen"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "has",
+      [
+       "field",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        "listen"
+       ]
+      ],
+      [
+       "const",
+       "port"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "ref",
+       1
+      ]
+     ],
+     "id": 3,
+     "name": "ports_in_use",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "contains",
+      [
+       "ref",
+       3
+      ],
+      [
+       "field",
+       [
+        "field",
+        [
+         "ref",
+         2
+        ],
+        [
+         "const",
+         "listen"
+        ]
+       ],
+       [
+        "const",
+        "port"
+       ]
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "listen"
+      ],
+      [
+       "record",
+       [
+        [
+         "port",
+         [
+          "bin",
+          "+",
+          [
+           "field",
+           [
+            "field",
+            [
+             "ref",
+             2
+            ],
+            [
+             "const",
+             "listen"
+            ]
+           ],
+           [
+            "const",
+            "port"
+           ]
+          ],
+          [
+           "const",
+           1
+          ]
+         ]
+        ]
+       ]
+      ]
+     ],
+     "id": 4,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 5,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "recover_host",
+   "evidence": [
+    {
+     "acts": 3,
+     "args": {
+      "host": "h3"
+     },
+     "kind": "validated",
+     "note": "",
+     "verdict": "pass",
+     "world": "fleet@E7"
+    },
+    {
+     "acts": 3,
+     "args": {
+      "host": "h4"
+     },
+     "kind": "replayed",
+     "note": "",
+     "verdict": "pass",
+     "world": "fleet@E8"
+    }
+   ],
+   "hash": "wc39e3d2280",
+   "params": [
+    "host"
+   ],
+   "seq": 5,
+   "source": "script recover_host(host) {\n  for s in services_on(host) {\n    use heal(s)\n  }\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "host"
+      ]
+     ],
+     "id": 1,
+     "name": "services_on",
+     "op": "observe"
+    },
+    {
+     "expect": 3,
+     "op": "guard",
+     "pred": [
+      "len",
+      [
+       "ref",
+       1
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        1
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "cap": "heal",
+     "id": 2,
+     "op": "use"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        1
+       ],
+       [
+        "const",
+        1
+       ]
+      ]
+     ],
+     "cap": "heal",
+     "id": 3,
+     "op": "use"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        1
+       ],
+       [
+        "const",
+        2
+       ]
+      ]
+     ],
+     "cap": "heal",
+     "id": 4,
+     "op": "use"
+    }
+   ]
+  }
+ ],
+ "world": "fleet"
+}

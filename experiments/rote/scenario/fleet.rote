@@ -1,0 +1,27 @@
+# The contract between scripts and the simulated fleet. The host-side world
+# (worlds/fleet.py) must agree with this signature; the runtime checks that.
+
+world fleet {
+  observe status(service): string
+  observe host_of(service): string
+  observe disk(host): int
+  observe config(service): record
+  observe log_tail(service): string
+  observe ports_in_use(host): list
+  observe services_on(host): list
+  act restart(service): bool
+  act clear_tmp(host): int
+  act set_config(service, key, value): bool
+  act reboot_host(host): int
+  act wipe_host(host): bool
+}
+
+cap heal(service) {
+  "Bring one service back to up."
+  goal: status(service) == "up"
+}
+
+cap recover_host(host) {
+  "Every service on the host is up."
+  goal: all(map(services_on(host), fn(s) { status(s) == "up" }))
+}

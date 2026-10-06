@@ -1,0 +1,35 @@
+{
+  "_comment": "SCRIPTED MODEL RESPONSES. The oracle pops these in order per capability; no model is called. Labels say what each stands in for.",
+  "heal": [
+    {
+      "label": "P1: the obvious first attempt",
+      "source": "script heal(service) {\n  if status(service) == \"down\" {\n    restart(service)\n  }\n}\n"
+    },
+    {
+      "label": "P2: reads the log; the else-branch is a plausible guess with a blast radius",
+      "source": "script heal(service) {\n  let host = host_of(service)\n  if log_tail(service) == \"no space left on device\" {\n    clear_tmp(host)\n  } else {\n    reboot_host(host)\n  }\n  restart(service)\n}\n"
+    },
+    {
+      "label": "P3a (planted): asks the oracle at run time for a free port",
+      "source": "script heal(service) {\n  let host = host_of(service)\n  let port = ask(\"pick a free port on \" + host)\n  set_config(service, \"port\", port)\n  restart(service)\n}\n"
+    },
+    {
+      "label": "P3b (planted): restarts, then reaches for an action outside the caller's grant",
+      "source": "script heal(service) {\n  restart(service)\n  wipe_host(host_of(service))\n}\n"
+    },
+    {
+      "label": "P3c: moves the service off a colliding port",
+      "source": "script heal(service) {\n  let host = host_of(service)\n  let cfg = config(service)\n  if contains(ports_in_use(host), cfg.port) {\n    set_config(service, \"port\", cfg.port + 1)\n  }\n  restart(service)\n}\n"
+    },
+    {
+      "label": "P4: the same fix for the drifted config schema",
+      "source": "script heal(service) {\n  let host = host_of(service)\n  let cfg = config(service)\n  let port = cfg.listen.port\n  if contains(ports_in_use(host), port) {\n    set_config(service, \"listen\", {port: port + 1})\n  }\n  restart(service)\n}\n"
+    }
+  ],
+  "recover_host": [
+    {
+      "label": "R1: compose heal over every service on the host",
+      "source": "script recover_host(host) {\n  for s in services_on(host) {\n    use heal(s)\n  }\n}\n"
+    }
+  ]
+}

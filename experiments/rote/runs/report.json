@@ -1,0 +1,417 @@
+{
+ "episodes": [
+  {
+   "episode": "E1",
+   "story": "web crashes",
+   "call": "heal(web)",
+   "outcome": "synthesized",
+   "witness": "wacedcf7c9f",
+   "reason": "",
+   "oracle_calls": 1,
+   "static_refusals": 0,
+   "inapplicable": 0,
+   "replays_run": 0,
+   "acts": 1,
+   "wasted_acts": 0,
+   "collateral": [],
+   "disruptions": 0,
+   "events": [
+    "synth: proposal 1 requested from the oracle",
+    "ran: ran under the goal; effect row observe{status} + act{restart}",
+    "retained: goal holds; retained wacedcf7c9f with guards: (status(service) == \"down\") == true"
+   ]
+  },
+  {
+   "episode": "E2",
+   "story": "api crashes (same symptom, other service)",
+   "call": "heal(api)",
+   "outcome": "replayed",
+   "witness": "wacedcf7c9f",
+   "reason": "",
+   "oracle_calls": 0,
+   "static_refusals": 0,
+   "inapplicable": 0,
+   "replays_run": 1,
+   "acts": 1,
+   "wasted_acts": 0,
+   "collateral": [],
+   "disruptions": 0,
+   "events": [
+    "replayed: wacedcf7c9f replayed and the goal holds"
+   ]
+  },
+  {
+   "episode": "E3",
+   "story": "db host runs out of disk",
+   "call": "heal(db)",
+   "outcome": "synthesized",
+   "witness": "w4d36485553",
+   "reason": "",
+   "oracle_calls": 1,
+   "static_refusals": 0,
+   "inapplicable": 0,
+   "replays_run": 1,
+   "acts": 3,
+   "wasted_acts": 1,
+   "collateral": [],
+   "disruptions": 0,
+   "events": [
+    "checker_fail: wacedcf7c9f replayed but the goal does not hold",
+    "synth: proposal 1 requested from the oracle",
+    "ran: ran under the goal; effect row observe{host_of, log_tail} + act{clear_tmp, reboot_host, restart}",
+    "retained: goal holds; retained w4d36485553 with guards: (log_tail(service) == \"no space left on device\") == true"
+   ]
+  },
+  {
+   "episode": "E4",
+   "story": "api collides with web's port",
+   "call": "heal(api)",
+   "outcome": "synthesized",
+   "witness": "w61d79abf0c",
+   "reason": "",
+   "oracle_calls": 3,
+   "static_refusals": 2,
+   "inapplicable": 1,
+   "replays_run": 1,
+   "acts": 3,
+   "wasted_acts": 1,
+   "collateral": [],
+   "disruptions": 0,
+   "events": [
+    "inapplicable: w4d36485553 does not apply: guard (log_tail(service) == \"no space left on device\") expected true, got false",
+    "checker_fail: wacedcf7c9f replayed but the goal does not hold",
+    "synth: proposal 1 requested from the oracle",
+    "refused: static check: line 1: a script may not `ask`: retained capabilities must run without an oracle",
+    "synth: proposal 2 requested from the oracle",
+    "refused: static check: line 1: action 'wipe_host' is not in the caller's grant",
+    "synth: proposal 3 requested from the oracle",
+    "ran: ran under the goal; effect row observe{config, host_of, ports_in_use} + act{restart, set_config}",
+    "retained: goal holds; retained w61d79abf0c with guards: has(config(service), \"port\") == true; contains(ports_in_use(host_of(service)), config(service).port) == true"
+   ]
+  },
+  {
+   "episode": "E5",
+   "story": "cache crashes",
+   "call": "heal(cache)",
+   "outcome": "replayed",
+   "witness": "wacedcf7c9f",
+   "reason": "",
+   "oracle_calls": 0,
+   "static_refusals": 0,
+   "inapplicable": 2,
+   "replays_run": 1,
+   "acts": 1,
+   "wasted_acts": 0,
+   "collateral": [],
+   "disruptions": 0,
+   "events": [
+    "inapplicable: w61d79abf0c does not apply: guard contains(ports_in_use(host_of(service)), config(service).port) expected true, got false",
+    "inapplicable: w4d36485553 does not apply: guard (log_tail(service) == \"no space left on device\") expected true, got false",
+    "replayed: wacedcf7c9f replayed and the goal holds"
+   ]
+  },
+  {
+   "episode": "E6",
+   "story": "db's config schema drifts, then it collides with cache's port",
+   "call": "heal(db)",
+   "outcome": "synthesized",
+   "witness": "w5943be240a",
+   "reason": "",
+   "oracle_calls": 1,
+   "static_refusals": 0,
+   "inapplicable": 2,
+   "replays_run": 1,
+   "acts": 3,
+   "wasted_acts": 1,
+   "collateral": [],
+   "disruptions": 0,
+   "events": [
+    "inapplicable: w61d79abf0c does not apply: guard has(config(service), \"port\") expected true, got false",
+    "inapplicable: w4d36485553 does not apply: guard (log_tail(service) == \"no space left on device\") expected true, got false",
+    "checker_fail: wacedcf7c9f replayed but the goal does not hold",
+    "synth: proposal 1 requested from the oracle",
+    "ran: ran under the goal; effect row observe{config, host_of, ports_in_use} + act{restart, set_config}",
+    "retained: goal holds; retained w5943be240a with guards: has(config(service), \"listen\") == true; has(config(service).listen, \"port\") == true; contains(ports_in_use(host_of(service)), config(service).listen.port) == true"
+   ]
+  },
+  {
+   "episode": "E7",
+   "story": "new host h3: full disk (s1), a crash (s3), one healthy service (s2)",
+   "call": "recover_host(h3)",
+   "outcome": "synthesized",
+   "witness": "wc39e3d2280",
+   "reason": "",
+   "oracle_calls": 1,
+   "static_refusals": 0,
+   "inapplicable": 0,
+   "replays_run": 0,
+   "acts": 3,
+   "wasted_acts": 0,
+   "collateral": [],
+   "disruptions": 0,
+   "events": [
+    "synth: proposal 1 requested from the oracle",
+    "ran: ran under the goal; effect row observe{services_on} + use{heal}",
+    "retained: goal holds; retained wc39e3d2280 with guards: len(services_on(host)) == 3"
+   ]
+  },
+  {
+   "episode": "E8",
+   "story": "new host h4: drifted-schema port collision (t1), a crash (t3)",
+   "call": "recover_host(h4)",
+   "outcome": "replayed",
+   "witness": "wc39e3d2280",
+   "reason": "",
+   "oracle_calls": 0,
+   "static_refusals": 0,
+   "inapplicable": 0,
+   "replays_run": 1,
+   "acts": 3,
+   "wasted_acts": 0,
+   "collateral": [],
+   "disruptions": 0,
+   "events": [
+    "replayed: wc39e3d2280 replayed and the goal holds"
+   ]
+  },
+  {
+   "episode": "E9",
+   "story": "replay-only policy: db loses its port entirely (a symptom no witness covers)",
+   "call": "heal(db)",
+   "outcome": "parked",
+   "witness": null,
+   "reason": "no validated path applies and the policy forbids synthesis",
+   "oracle_calls": 0,
+   "static_refusals": 0,
+   "inapplicable": 3,
+   "replays_run": 1,
+   "acts": 1,
+   "wasted_acts": 1,
+   "collateral": [],
+   "disruptions": 0,
+   "events": [
+    "inapplicable: w5943be240a does not apply: guard has(config(service), \"listen\") expected true, got false",
+    "inapplicable: w61d79abf0c does not apply: guard has(config(service), \"port\") expected true, got false",
+    "inapplicable: w4d36485553 does not apply: guard (log_tail(service) == \"no space left on device\") expected true, got false",
+    "checker_fail: wacedcf7c9f replayed but the goal does not hold",
+    "parked: no validated path applies and the policy forbids synthesis"
+   ]
+  }
+ ],
+ "oracle_calls_total": 7,
+ "witnesses": [
+  {
+   "cap": "heal",
+   "hash": "wacedcf7c9f",
+   "guards": [
+    "(status(service) == \"down\") == true"
+   ],
+   "steps": "   observe#1 = status(service)\n   guard  (status(service) == \"down\") == true\n * act    #2 = restart(service)",
+   "evidence": [
+    {
+     "kind": "validated",
+     "verdict": "pass",
+     "world": "fleet@E1",
+     "args": {
+      "service": "web"
+     },
+     "acts": 1,
+     "note": ""
+    },
+    {
+     "kind": "replayed",
+     "verdict": "pass",
+     "world": "fleet@E2",
+     "args": {
+      "service": "api"
+     },
+     "acts": 1,
+     "note": ""
+    },
+    {
+     "kind": "replayed",
+     "verdict": "fail",
+     "world": "fleet@E3",
+     "args": {
+      "service": "db"
+     },
+     "acts": 1,
+     "note": ""
+    },
+    {
+     "kind": "replayed",
+     "verdict": "fail",
+     "world": "fleet@E4",
+     "args": {
+      "service": "api"
+     },
+     "acts": 1,
+     "note": ""
+    },
+    {
+     "kind": "replayed",
+     "verdict": "pass",
+     "world": "fleet@E5",
+     "args": {
+      "service": "cache"
+     },
+     "acts": 1,
+     "note": ""
+    },
+    {
+     "kind": "replayed",
+     "verdict": "fail",
+     "world": "fleet@E6",
+     "args": {
+      "service": "db"
+     },
+     "acts": 1,
+     "note": ""
+    },
+    {
+     "kind": "replayed",
+     "verdict": "pass",
+     "world": "fleet@E7",
+     "args": {
+      "service": "s3"
+     },
+     "acts": 1,
+     "note": ""
+    },
+    {
+     "kind": "replayed",
+     "verdict": "pass",
+     "world": "fleet@E8",
+     "args": {
+      "service": "t3"
+     },
+     "acts": 1,
+     "note": ""
+    },
+    {
+     "kind": "replayed",
+     "verdict": "fail",
+     "world": "fleet@E9",
+     "args": {
+      "service": "db"
+     },
+     "acts": 1,
+     "note": ""
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "hash": "w4d36485553",
+   "guards": [
+    "(log_tail(service) == \"no space left on device\") == true"
+   ],
+   "steps": "   observe#1 = host_of(service)\n   observe#2 = log_tail(service)\n   guard  (log_tail(service) == \"no space left on device\") == true\n * act    #3 = clear_tmp(host_of(service))\n * act    #4 = restart(service)",
+   "evidence": [
+    {
+     "kind": "validated",
+     "verdict": "pass",
+     "world": "fleet@E3",
+     "args": {
+      "service": "db"
+     },
+     "acts": 2,
+     "note": ""
+    },
+    {
+     "kind": "replayed",
+     "verdict": "pass",
+     "world": "fleet@E7",
+     "args": {
+      "service": "s1"
+     },
+     "acts": 2,
+     "note": ""
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "hash": "w61d79abf0c",
+   "guards": [
+    "has(config(service), \"port\") == true",
+    "contains(ports_in_use(host_of(service)), config(service).port) == true"
+   ],
+   "steps": "   observe#1 = host_of(service)\n   observe#2 = config(service)\n   observe#3 = ports_in_use(host_of(service))\n   guard  has(config(service), \"port\") == true\n   guard  contains(ports_in_use(host_of(service)), config(service).port) == true\n * act    #4 = set_config(service, \"port\", (config(service).port + 1))\n * act    #5 = restart(service)",
+   "evidence": [
+    {
+     "kind": "validated",
+     "verdict": "pass",
+     "world": "fleet@E4",
+     "args": {
+      "service": "api"
+     },
+     "acts": 2,
+     "note": ""
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "hash": "w5943be240a",
+   "guards": [
+    "has(config(service), \"listen\") == true",
+    "has(config(service).listen, \"port\") == true",
+    "contains(ports_in_use(host_of(service)), config(service).listen.port) == true"
+   ],
+   "steps": "   observe#1 = host_of(service)\n   observe#2 = config(service)\n   guard  has(config(service), \"listen\") == true\n   guard  has(config(service).listen, \"port\") == true\n   observe#3 = ports_in_use(host_of(service))\n   guard  contains(ports_in_use(host_of(service)), config(service).listen.port) == true\n * act    #4 = set_config(service, \"listen\", {port: (config(service).listen.port + 1)})\n * act    #5 = restart(service)",
+   "evidence": [
+    {
+     "kind": "validated",
+     "verdict": "pass",
+     "world": "fleet@E6",
+     "args": {
+      "service": "db"
+     },
+     "acts": 2,
+     "note": ""
+    },
+    {
+     "kind": "replayed",
+     "verdict": "pass",
+     "world": "fleet@E8",
+     "args": {
+      "service": "t1"
+     },
+     "acts": 2,
+     "note": ""
+    }
+   ]
+  },
+  {
+   "cap": "recover_host",
+   "hash": "wc39e3d2280",
+   "guards": [
+    "len(services_on(host)) == 3"
+   ],
+   "steps": "   observe#1 = services_on(host)\n   guard  len(services_on(host)) == 3\n * use    #2 = heal(services_on(host)[0])\n * use    #3 = heal(services_on(host)[1])\n * use    #4 = heal(services_on(host)[2])",
+   "evidence": [
+    {
+     "kind": "validated",
+     "verdict": "pass",
+     "world": "fleet@E7",
+     "args": {
+      "host": "h3"
+     },
+     "acts": 3,
+     "note": ""
+    },
+    {
+     "kind": "replayed",
+     "verdict": "pass",
+     "world": "fleet@E8",
+     "args": {
+      "host": "h4"
+     },
+     "acts": 3,
+     "note": ""
+    }
+   ]
+  }
+ ]
+}
