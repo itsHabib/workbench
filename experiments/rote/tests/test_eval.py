@@ -163,3 +163,11 @@ def test_reductions_stay_symbolic_without_pinning_length():
     w2 = DictWorld({"items(a)": []}, SIG)
     res, _ = run("script f(s) { set(s, min_of(items(s), 7)) }", w2, ["a"])
     assert res.ok and w2.acts == [("set", ["a", 7])]
+
+
+def test_equality_and_contains_follow_rote_types_not_python():
+    w = DictWorld({"n(a)": 1, "items(a)": [True, "x"], "status(a)": "true"}, SIG)
+    res, _ = run("script f(s) { if n(s) == true { do(s) }\n if contains(items(s), 1) { do(s) } }", w, ["a"])
+    assert res.ok and w.acts == []
+    res, _ = run('script f(s) { contains(status(s), 1) }', w, ["a"])
+    assert not res.ok and res.error_kind == "type"

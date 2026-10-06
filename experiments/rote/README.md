@@ -9,7 +9,7 @@ needed only when none applies.
 The name is provisional: "by rote" is how a retained capability runs, without thinking.
 (PyPI already has an unrelated `rote` package; nothing here is published.)
 
-Status: a runnable prototype (~2,578 lines of stdlib Python for the language, 62 tests), one
+Status: a runnable prototype (~2,578 lines of stdlib Python for the language, 65 tests), one
 scripted nine-episode workload, a model-free dry run of the larger live experiment, and a
 Go replayer checked against exported fixtures. Every number in `RESULTS.md` comes from a
 scripted or heuristic oracle; **no model was called anywhere in this experiment**. The
@@ -69,10 +69,11 @@ cd experiments/rote
 python3 demo.py                 # the nine-episode workload, Rote (scripted oracle)
 python3 ordinary/agent_py.py    # the same episodes in plain Python (the baseline)
 python3 ordinary/proxy_leak.py  # why a host-language tracer cannot infer guards
-python3 -m pytest tests -q      # 62 tests, including the replay-equivalence property test
+python3 -m pytest tests -q      # 65 tests, including the replay-equivalence property test
 python3 live/run_live.py --oracle heuristic --streams 10 --episodes 24   # model-free dry run, 4 arms
 python3 live/run_live.py --oracle live --streams 10 --episodes 24 --max-calls 900  # needs ANTHROPIC_API_KEY
-go run ./replay-go             # Go replayer vs 60 exported fixtures (expects '60 cases, 60 conform')
+go run ./replay-go             # Go replayer vs the demo's witnesses: '60 cases, 60 conform'
+go run ./replay-go -lib runs/synthetic_library.json -fixtures runs/synthetic_fixtures.json  # all 21 forms: 192 conform
 ```
 
 Python 3.12+ and pytest are the only requirements. `demo.py` rewrites `runs/library.json`
@@ -116,7 +117,7 @@ ordinary/    the plain-Python baseline and the proxy-leak demonstration
 live/        the live experiment: six-cause world, four arms, runner, dry-run results
 replay-go/   a Go re-implementation of the replay kernel + the fixture exporter
 tests/       unit tests, runtime tests, the replay-equivalence property test
-runs/        output of the last demo run (library.json, report.json, replay_fixtures.json)
+runs/        output of the last demo run and the Go conformance fixtures (demo and synthetic)
 demo.py      the workload
 REPLICATE.md a self-contained prompt for another agent to replicate, break and compare
 ```

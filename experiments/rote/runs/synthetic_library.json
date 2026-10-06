@@ -1,0 +1,4675 @@
+{
+ "program": "\nworld fleet6 {\n  observe status(service): string\n  observe host_of(service): string\n  observe disk(host): int\n  observe config(service): record\n  observe log_tail(service): string\n  observe ports_in_use(host): list\n  observe services_on(host): list\n  observe lock_held(service): bool\n  observe depends_on(service): list\n  act restart(service): bool\n  act clear_tmp(host): int\n  act set_config(service, key, value): bool\n  act reboot_host(host): int\n  act wipe_host(host): bool\n  act remove_lock(service): bool\n}\n\ncap heal(service) {\n  \"Bring one service back to up.\"\n  goal: status(service) == \"up\"\n}\n",
+ "retained": 16,
+ "witnesses": [
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc1"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    },
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc0"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    }
+   ],
+   "hash": "wcedc30b619",
+   "params": [
+    "service"
+   ],
+   "seq": 1,
+   "source": "script heal(service) {\n  let host = host_of(service)\n  let ports = ports_in_use(host)\n  let free = max_of(ports, 8000) + 1\n  let low = min_of(ports, 0)\n  let cfg = config(service)\n  if has(cfg, \"port\") { set_config(service, \"pair\", [cfg.port, host, free]) }\n  if sum(ports) > low { set_config(service, \"port\", free) }\n  restart(service)\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "host_of",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "ref",
+       1
+      ]
+     ],
+     "id": 2,
+     "name": "ports_in_use",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 3,
+     "name": "config",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "has",
+      [
+       "ref",
+       3
+      ],
+      [
+       "const",
+       "port"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "pair"
+      ],
+      [
+       "list",
+       [
+        [
+         "field",
+         [
+          "ref",
+          3
+         ],
+         [
+          "const",
+          "port"
+         ]
+        ],
+        [
+         "ref",
+         1
+        ],
+        [
+         "bin",
+         "+",
+         [
+          "maxof",
+          [
+           "ref",
+           2
+          ],
+          [
+           "const",
+           8000
+          ]
+         ],
+         [
+          "const",
+          1
+         ]
+        ]
+       ]
+      ]
+     ],
+     "id": 4,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      ">",
+      [
+       "sum",
+       [
+        "ref",
+        2
+       ]
+      ],
+      [
+       "minof",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 5,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc5"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    },
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc3"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    }
+   ],
+   "hash": "w439c3101c7",
+   "params": [
+    "service"
+   ],
+   "seq": 2,
+   "source": "script heal(service) {\n  let host = host_of(service)\n  let ports = ports_in_use(host)\n  let free = max_of(ports, 8000) + 1\n  let low = min_of(ports, 0)\n  let cfg = config(service)\n  if has(cfg, \"port\") { set_config(service, \"pair\", [cfg.port, host, free]) }\n  if sum(ports) > low { set_config(service, \"port\", free) }\n  restart(service)\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "host_of",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "ref",
+       1
+      ]
+     ],
+     "id": 2,
+     "name": "ports_in_use",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 3,
+     "name": "config",
+     "op": "observe"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "has",
+      [
+       "ref",
+       3
+      ],
+      [
+       "const",
+       "port"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      ">",
+      [
+       "sum",
+       [
+        "ref",
+        2
+       ]
+      ],
+      [
+       "minof",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "port"
+      ],
+      [
+       "bin",
+       "+",
+       [
+        "maxof",
+        [
+         "ref",
+         2
+        ],
+        [
+         "const",
+         8000
+        ]
+       ],
+       [
+        "const",
+        1
+       ]
+      ]
+     ],
+     "id": 4,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 5,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc0"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    },
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc0"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    },
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc3"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    }
+   ],
+   "hash": "wf7e058594d",
+   "params": [
+    "service"
+   ],
+   "seq": 3,
+   "source": "script heal(service) {\n  let host = host_of(service)\n  let ports = ports_in_use(host)\n  let free = max_of(ports, 8000) + 1\n  let low = min_of(ports, 0)\n  let cfg = config(service)\n  if has(cfg, \"port\") { set_config(service, \"pair\", [cfg.port, host, free]) }\n  if sum(ports) > low { set_config(service, \"port\", free) }\n  restart(service)\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "host_of",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "ref",
+       1
+      ]
+     ],
+     "id": 2,
+     "name": "ports_in_use",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 3,
+     "name": "config",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "has",
+      [
+       "ref",
+       3
+      ],
+      [
+       "const",
+       "port"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "pair"
+      ],
+      [
+       "list",
+       [
+        [
+         "field",
+         [
+          "ref",
+          3
+         ],
+         [
+          "const",
+          "port"
+         ]
+        ],
+        [
+         "ref",
+         1
+        ],
+        [
+         "bin",
+         "+",
+         [
+          "maxof",
+          [
+           "ref",
+           2
+          ],
+          [
+           "const",
+           8000
+          ]
+         ],
+         [
+          "const",
+          1
+         ]
+        ]
+       ]
+      ]
+     ],
+     "id": 4,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      ">",
+      [
+       "sum",
+       [
+        "ref",
+        2
+       ]
+      ],
+      [
+       "minof",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "port"
+      ],
+      [
+       "bin",
+       "+",
+       [
+        "maxof",
+        [
+         "ref",
+         2
+        ],
+        [
+         "const",
+         8000
+        ]
+       ],
+       [
+        "const",
+        1
+       ]
+      ]
+     ],
+     "id": 5,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 6,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc0"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    }
+   ],
+   "hash": "w97595d0728",
+   "params": [
+    "service"
+   ],
+   "seq": 4,
+   "source": "script heal(service) {\n  let host = host_of(service)\n  let ports = ports_in_use(host)\n  let free = max_of(ports, 8000) + 1\n  let low = min_of(ports, 0)\n  let cfg = config(service)\n  if has(cfg, \"port\") { set_config(service, \"pair\", [cfg.port, host, free]) }\n  if sum(ports) > low { set_config(service, \"port\", free) }\n  restart(service)\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "host_of",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "ref",
+       1
+      ]
+     ],
+     "id": 2,
+     "name": "ports_in_use",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 3,
+     "name": "config",
+     "op": "observe"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "has",
+      [
+       "ref",
+       3
+      ],
+      [
+       "const",
+       "port"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      ">",
+      [
+       "sum",
+       [
+        "ref",
+        2
+       ]
+      ],
+      [
+       "minof",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 4,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc2"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    },
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc1"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    },
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc2"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    }
+   ],
+   "hash": "w17181cb139",
+   "params": [
+    "service"
+   ],
+   "seq": 5,
+   "source": "script heal(service) {\n  let cfg = config(service)\n  let ks = keys(cfg)\n  let label = str(cfg) + \":\" + str(len(ks)) + \":\" + str(lock_held(service))\n  if has(cfg, \"listen\") { set_config(service, \"note\", label) }\n  let p = get(cfg, \"port\", 0)\n  if len(ks) > 0 and p % 2 == 0 and not (p / 2 > 5000) { set_config(service, \"even\", true) }\n  if len(ks) > 0 { set_config(service, \"share\", 100 / len(ks)) }\n  restart(service)\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "config",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 2,
+     "name": "lock_held",
+     "op": "observe"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "has",
+      [
+       "ref",
+       1
+      ],
+      [
+       "const",
+       "listen"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      ">",
+      [
+       "len",
+       [
+        "keys",
+        [
+         "ref",
+         1
+        ]
+       ]
+      ],
+      [
+       "const",
+       0
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "bin",
+       "%",
+       [
+        "get",
+        [
+         "ref",
+         1
+        ],
+        [
+         "const",
+         "port"
+        ],
+        [
+         "const",
+         0
+        ]
+       ],
+       [
+        "const",
+        2
+       ]
+      ],
+      [
+       "const",
+       0
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "not",
+      [
+       "bin",
+       ">",
+       [
+        "bin",
+        "/",
+        [
+         "get",
+         [
+          "ref",
+          1
+         ],
+         [
+          "const",
+          "port"
+         ],
+         [
+          "const",
+          0
+         ]
+        ],
+        [
+         "const",
+         2
+        ]
+       ],
+       [
+        "const",
+        5000
+       ]
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "even"
+      ],
+      [
+       "const",
+       true
+      ]
+     ],
+     "id": 3,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "len",
+       [
+        "keys",
+        [
+         "ref",
+         1
+        ]
+       ]
+      ],
+      [
+       "const",
+       0
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "share"
+      ],
+      [
+       "bin",
+       "/",
+       [
+        "const",
+        100
+       ],
+       [
+        "len",
+        [
+         "keys",
+         [
+          "ref",
+          1
+         ]
+        ]
+       ]
+      ]
+     ],
+     "id": 4,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 5,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc4"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    },
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc4"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    },
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc0"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    }
+   ],
+   "hash": "w0e8a089a16",
+   "params": [
+    "service"
+   ],
+   "seq": 6,
+   "source": "script heal(service) {\n  let cfg = config(service)\n  let ks = keys(cfg)\n  let label = str(cfg) + \":\" + str(len(ks)) + \":\" + str(lock_held(service))\n  if has(cfg, \"listen\") { set_config(service, \"note\", label) }\n  let p = get(cfg, \"port\", 0)\n  if len(ks) > 0 and p % 2 == 0 and not (p / 2 > 5000) { set_config(service, \"even\", true) }\n  if len(ks) > 0 { set_config(service, \"share\", 100 / len(ks)) }\n  restart(service)\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "config",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 2,
+     "name": "lock_held",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "has",
+      [
+       "ref",
+       1
+      ],
+      [
+       "const",
+       "listen"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "note"
+      ],
+      [
+       "bin",
+       "+",
+       [
+        "bin",
+        "+",
+        [
+         "bin",
+         "+",
+         [
+          "bin",
+          "+",
+          [
+           "str",
+           [
+            "ref",
+            1
+           ]
+          ],
+          [
+           "const",
+           ":"
+          ]
+         ],
+         [
+          "str",
+          [
+           "len",
+           [
+            "keys",
+            [
+             "ref",
+             1
+            ]
+           ]
+          ]
+         ]
+        ],
+        [
+         "const",
+         ":"
+        ]
+       ],
+       [
+        "str",
+        [
+         "ref",
+         2
+        ]
+       ]
+      ]
+     ],
+     "id": 3,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      ">",
+      [
+       "len",
+       [
+        "keys",
+        [
+         "ref",
+         1
+        ]
+       ]
+      ],
+      [
+       "const",
+       0
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "bin",
+       "%",
+       [
+        "get",
+        [
+         "ref",
+         1
+        ],
+        [
+         "const",
+         "port"
+        ],
+        [
+         "const",
+         0
+        ]
+       ],
+       [
+        "const",
+        2
+       ]
+      ],
+      [
+       "const",
+       0
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "not",
+      [
+       "bin",
+       ">",
+       [
+        "bin",
+        "/",
+        [
+         "get",
+         [
+          "ref",
+          1
+         ],
+         [
+          "const",
+          "port"
+         ],
+         [
+          "const",
+          0
+         ]
+        ],
+        [
+         "const",
+         2
+        ]
+       ],
+       [
+        "const",
+        5000
+       ]
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "even"
+      ],
+      [
+       "const",
+       true
+      ]
+     ],
+     "id": 4,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "len",
+       [
+        "keys",
+        [
+         "ref",
+         1
+        ]
+       ]
+      ],
+      [
+       "const",
+       0
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "share"
+      ],
+      [
+       "bin",
+       "/",
+       [
+        "const",
+        100
+       ],
+       [
+        "len",
+        [
+         "keys",
+         [
+          "ref",
+          1
+         ]
+        ]
+       ]
+      ]
+     ],
+     "id": 5,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 6,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc2"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    },
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc5"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    }
+   ],
+   "hash": "w3498fd906d",
+   "params": [
+    "service"
+   ],
+   "seq": 7,
+   "source": "script heal(service) {\n  let cfg = config(service)\n  let ks = keys(cfg)\n  let label = str(cfg) + \":\" + str(len(ks)) + \":\" + str(lock_held(service))\n  if has(cfg, \"listen\") { set_config(service, \"note\", label) }\n  let p = get(cfg, \"port\", 0)\n  if len(ks) > 0 and p % 2 == 0 and not (p / 2 > 5000) { set_config(service, \"even\", true) }\n  if len(ks) > 0 { set_config(service, \"share\", 100 / len(ks)) }\n  restart(service)\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "config",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 2,
+     "name": "lock_held",
+     "op": "observe"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "has",
+      [
+       "ref",
+       1
+      ],
+      [
+       "const",
+       "listen"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      ">",
+      [
+       "len",
+       [
+        "keys",
+        [
+         "ref",
+         1
+        ]
+       ]
+      ],
+      [
+       "const",
+       0
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "bin",
+       "%",
+       [
+        "get",
+        [
+         "ref",
+         1
+        ],
+        [
+         "const",
+         "port"
+        ],
+        [
+         "const",
+         0
+        ]
+       ],
+       [
+        "const",
+        2
+       ]
+      ],
+      [
+       "const",
+       0
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "len",
+       [
+        "keys",
+        [
+         "ref",
+         1
+        ]
+       ]
+      ],
+      [
+       "const",
+       0
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "share"
+      ],
+      [
+       "bin",
+       "/",
+       [
+        "const",
+        100
+       ],
+       [
+        "len",
+        [
+         "keys",
+         [
+          "ref",
+          1
+         ]
+        ]
+       ]
+      ]
+     ],
+     "id": 3,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 4,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc4"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    },
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc3"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    }
+   ],
+   "hash": "w15bd0b9a9d",
+   "params": [
+    "service"
+   ],
+   "seq": 8,
+   "source": "script heal(service) {\n  let svcs = services_on(host_of(service))\n  let others = filter(svcs, fn(x) { x != service })\n  if len(others) > 0 {\n    let first = others[0]\n    if status(first) == \"up\" and contains(svcs, first) { set_config(service, \"peer\", first) }\n  }\n  let m = max(len(svcs), 1) - min(len(svcs), 3)\n  set_config(service, \"neg\", -m)\n  if any(map(svcs, fn(x) { status(x) == \"down\" })) { restart(service) }\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "host_of",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "ref",
+       1
+      ]
+     ],
+     "id": 2,
+     "name": "services_on",
+     "op": "observe"
+    },
+    {
+     "expect": 4,
+     "op": "guard",
+     "pred": [
+      "len",
+      [
+       "ref",
+       2
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        2
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        3
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 3,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       3
+      ],
+      [
+       "const",
+       "up"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "contains",
+      [
+       "ref",
+       2
+      ],
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "peer"
+      ],
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 4,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "neg"
+      ],
+      [
+       "neg",
+       [
+        "bin",
+        "-",
+        [
+         "max",
+         [
+          "len",
+          [
+           "ref",
+           2
+          ]
+         ],
+         [
+          "const",
+          1
+         ]
+        ],
+        [
+         "min",
+         [
+          "len",
+          [
+           "ref",
+           2
+          ]
+         ],
+         [
+          "const",
+          3
+         ]
+        ]
+       ]
+      ]
+     ],
+     "id": 5,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 6,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ]
+     ],
+     "id": 7,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        2
+       ]
+      ]
+     ],
+     "id": 8,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        3
+       ]
+      ]
+     ],
+     "id": 9,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       6
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       7
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       8
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 10,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc2"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    }
+   ],
+   "hash": "w88c23bb7e3",
+   "params": [
+    "service"
+   ],
+   "seq": 9,
+   "source": "script heal(service) {\n  let svcs = services_on(host_of(service))\n  let others = filter(svcs, fn(x) { x != service })\n  if len(others) > 0 {\n    let first = others[0]\n    if status(first) == \"up\" and contains(svcs, first) { set_config(service, \"peer\", first) }\n  }\n  let m = max(len(svcs), 1) - min(len(svcs), 3)\n  set_config(service, \"neg\", -m)\n  if any(map(svcs, fn(x) { status(x) == \"down\" })) { restart(service) }\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "host_of",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "ref",
+       1
+      ]
+     ],
+     "id": 2,
+     "name": "services_on",
+     "op": "observe"
+    },
+    {
+     "expect": 3,
+     "op": "guard",
+     "pred": [
+      "len",
+      [
+       "ref",
+       2
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        2
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 3,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       3
+      ],
+      [
+       "const",
+       "up"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "contains",
+      [
+       "ref",
+       2
+      ],
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "peer"
+      ],
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 4,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "neg"
+      ],
+      [
+       "neg",
+       [
+        "bin",
+        "-",
+        [
+         "max",
+         [
+          "len",
+          [
+           "ref",
+           2
+          ]
+         ],
+         [
+          "const",
+          1
+         ]
+        ],
+        [
+         "min",
+         [
+          "len",
+          [
+           "ref",
+           2
+          ]
+         ],
+         [
+          "const",
+          3
+         ]
+        ]
+       ]
+      ]
+     ],
+     "id": 5,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 6,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ]
+     ],
+     "id": 7,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        2
+       ]
+      ]
+     ],
+     "id": 8,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       6
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       7
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 9,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc3"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    }
+   ],
+   "hash": "wbda44cfa5e",
+   "params": [
+    "service"
+   ],
+   "seq": 10,
+   "source": "script heal(service) {\n  let svcs = services_on(host_of(service))\n  let others = filter(svcs, fn(x) { x != service })\n  if len(others) > 0 {\n    let first = others[0]\n    if status(first) == \"up\" and contains(svcs, first) { set_config(service, \"peer\", first) }\n  }\n  let m = max(len(svcs), 1) - min(len(svcs), 3)\n  set_config(service, \"neg\", -m)\n  if any(map(svcs, fn(x) { status(x) == \"down\" })) { restart(service) }\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "host_of",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "ref",
+       1
+      ]
+     ],
+     "id": 2,
+     "name": "services_on",
+     "op": "observe"
+    },
+    {
+     "expect": 2,
+     "op": "guard",
+     "pred": [
+      "len",
+      [
+       "ref",
+       2
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 3,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       3
+      ],
+      [
+       "const",
+       "up"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "contains",
+      [
+       "ref",
+       2
+      ],
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "peer"
+      ],
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 4,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "neg"
+      ],
+      [
+       "neg",
+       [
+        "bin",
+        "-",
+        [
+         "max",
+         [
+          "len",
+          [
+           "ref",
+           2
+          ]
+         ],
+         [
+          "const",
+          1
+         ]
+        ],
+        [
+         "min",
+         [
+          "len",
+          [
+           "ref",
+           2
+          ]
+         ],
+         [
+          "const",
+          3
+         ]
+        ]
+       ]
+      ]
+     ],
+     "id": 5,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 6,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ]
+     ],
+     "id": 7,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       6
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       7
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 8,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc4"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    }
+   ],
+   "hash": "w24a1531d42",
+   "params": [
+    "service"
+   ],
+   "seq": 11,
+   "source": "script heal(service) {\n  let svcs = services_on(host_of(service))\n  let others = filter(svcs, fn(x) { x != service })\n  if len(others) > 0 {\n    let first = others[0]\n    if status(first) == \"up\" and contains(svcs, first) { set_config(service, \"peer\", first) }\n  }\n  let m = max(len(svcs), 1) - min(len(svcs), 3)\n  set_config(service, \"neg\", -m)\n  if any(map(svcs, fn(x) { status(x) == \"down\" })) { restart(service) }\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "host_of",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "ref",
+       1
+      ]
+     ],
+     "id": 2,
+     "name": "services_on",
+     "op": "observe"
+    },
+    {
+     "expect": 6,
+     "op": "guard",
+     "pred": [
+      "len",
+      [
+       "ref",
+       2
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        2
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        3
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        4
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        5
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 3,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       3
+      ],
+      [
+       "const",
+       "up"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "contains",
+      [
+       "ref",
+       2
+      ],
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "peer"
+      ],
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 4,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "neg"
+      ],
+      [
+       "neg",
+       [
+        "bin",
+        "-",
+        [
+         "max",
+         [
+          "len",
+          [
+           "ref",
+           2
+          ]
+         ],
+         [
+          "const",
+          1
+         ]
+        ],
+        [
+         "min",
+         [
+          "len",
+          [
+           "ref",
+           2
+          ]
+         ],
+         [
+          "const",
+          3
+         ]
+        ]
+       ]
+      ]
+     ],
+     "id": 5,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 6,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ]
+     ],
+     "id": 7,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        2
+       ]
+      ]
+     ],
+     "id": 8,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        3
+       ]
+      ]
+     ],
+     "id": 9,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        4
+       ]
+      ]
+     ],
+     "id": 10,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        5
+       ]
+      ]
+     ],
+     "id": 11,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       6
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       7
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       8
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       9
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       10
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 12,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc0"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    }
+   ],
+   "hash": "w3825214640",
+   "params": [
+    "service"
+   ],
+   "seq": 12,
+   "source": "script heal(service) {\n  let svcs = services_on(host_of(service))\n  let others = filter(svcs, fn(x) { x != service })\n  if len(others) > 0 {\n    let first = others[0]\n    if status(first) == \"up\" and contains(svcs, first) { set_config(service, \"peer\", first) }\n  }\n  let m = max(len(svcs), 1) - min(len(svcs), 3)\n  set_config(service, \"neg\", -m)\n  if any(map(svcs, fn(x) { status(x) == \"down\" })) { restart(service) }\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "host_of",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "ref",
+       1
+      ]
+     ],
+     "id": 2,
+     "name": "services_on",
+     "op": "observe"
+    },
+    {
+     "expect": 3,
+     "op": "guard",
+     "pred": [
+      "len",
+      [
+       "ref",
+       2
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        2
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ]
+     ],
+     "id": 3,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       3
+      ],
+      [
+       "const",
+       "up"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "contains",
+      [
+       "ref",
+       2
+      ],
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "peer"
+      ],
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ]
+     ],
+     "id": 4,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "neg"
+      ],
+      [
+       "neg",
+       [
+        "bin",
+        "-",
+        [
+         "max",
+         [
+          "len",
+          [
+           "ref",
+           2
+          ]
+         ],
+         [
+          "const",
+          1
+         ]
+        ],
+        [
+         "min",
+         [
+          "len",
+          [
+           "ref",
+           2
+          ]
+         ],
+         [
+          "const",
+          3
+         ]
+        ]
+       ]
+      ]
+     ],
+     "id": 5,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 6,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ]
+     ],
+     "id": 7,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        2
+       ]
+      ]
+     ],
+     "id": 8,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       6
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       7
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       8
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc6"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    }
+   ],
+   "hash": "w5917b886db",
+   "params": [
+    "service"
+   ],
+   "seq": 13,
+   "source": "script heal(service) {\n  let svcs = services_on(host_of(service))\n  let others = filter(svcs, fn(x) { x != service })\n  if len(others) > 0 {\n    let first = others[0]\n    if status(first) == \"up\" and contains(svcs, first) { set_config(service, \"peer\", first) }\n  }\n  let m = max(len(svcs), 1) - min(len(svcs), 3)\n  set_config(service, \"neg\", -m)\n  if any(map(svcs, fn(x) { status(x) == \"down\" })) { restart(service) }\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "host_of",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "ref",
+       1
+      ]
+     ],
+     "id": 2,
+     "name": "services_on",
+     "op": "observe"
+    },
+    {
+     "expect": 5,
+     "op": "guard",
+     "pred": [
+      "len",
+      [
+       "ref",
+       2
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        2
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        3
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        4
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 3,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       3
+      ],
+      [
+       "const",
+       "up"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "contains",
+      [
+       "ref",
+       2
+      ],
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "peer"
+      ],
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 4,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "neg"
+      ],
+      [
+       "neg",
+       [
+        "bin",
+        "-",
+        [
+         "max",
+         [
+          "len",
+          [
+           "ref",
+           2
+          ]
+         ],
+         [
+          "const",
+          1
+         ]
+        ],
+        [
+         "min",
+         [
+          "len",
+          [
+           "ref",
+           2
+          ]
+         ],
+         [
+          "const",
+          3
+         ]
+        ]
+       ]
+      ]
+     ],
+     "id": 5,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 6,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ]
+     ],
+     "id": 7,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        2
+       ]
+      ]
+     ],
+     "id": 8,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        3
+       ]
+      ]
+     ],
+     "id": 9,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        4
+       ]
+      ]
+     ],
+     "id": 10,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       6
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       7
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       8
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       9
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       10
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc5"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    }
+   ],
+   "hash": "wdb613fd75d",
+   "params": [
+    "service"
+   ],
+   "seq": 14,
+   "source": "script heal(service) {\n  let svcs = services_on(host_of(service))\n  let others = filter(svcs, fn(x) { x != service })\n  if len(others) > 0 {\n    let first = others[0]\n    if status(first) == \"up\" and contains(svcs, first) { set_config(service, \"peer\", first) }\n  }\n  let m = max(len(svcs), 1) - min(len(svcs), 3)\n  set_config(service, \"neg\", -m)\n  if any(map(svcs, fn(x) { status(x) == \"down\" })) { restart(service) }\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "host_of",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "ref",
+       1
+      ]
+     ],
+     "id": 2,
+     "name": "services_on",
+     "op": "observe"
+    },
+    {
+     "expect": 3,
+     "op": "guard",
+     "pred": [
+      "len",
+      [
+       "ref",
+       2
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "!=",
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        2
+       ]
+      ],
+      [
+       "param",
+       "service"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 3,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       3
+      ],
+      [
+       "const",
+       "up"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "contains",
+      [
+       "ref",
+       2
+      ],
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "peer"
+      ],
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 4,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ],
+      [
+       "const",
+       "neg"
+      ],
+      [
+       "neg",
+       [
+        "bin",
+        "-",
+        [
+         "max",
+         [
+          "len",
+          [
+           "ref",
+           2
+          ]
+         ],
+         [
+          "const",
+          1
+         ]
+        ],
+        [
+         "min",
+         [
+          "len",
+          [
+           "ref",
+           2
+          ]
+         ],
+         [
+          "const",
+          3
+         ]
+        ]
+       ]
+      ]
+     ],
+     "id": 5,
+     "name": "set_config",
+     "op": "act"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "id": 6,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        1
+       ]
+      ]
+     ],
+     "id": 7,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        2
+       ],
+       [
+        "const",
+        2
+       ]
+      ]
+     ],
+     "id": 8,
+     "name": "status",
+     "op": "observe"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       6
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       7
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "expect": true,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "ref",
+       8
+      ],
+      [
+       "const",
+       "down"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 9,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc1"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    },
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc3"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    },
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc1"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    },
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc2"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    },
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc2"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    },
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc4"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    },
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc0"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    }
+   ],
+   "hash": "wd33111e671",
+   "params": [
+    "service"
+   ],
+   "seq": 15,
+   "source": "script heal(service) {\n  let cfg = config(service)\n  let snapshot = {port: get(cfg, \"port\", 0), host: host_of(service), tags: [1, \"a\", true]}\n  if snapshot == {port: 8000, host: \"h0\", tags: [1, \"a\", true]} { set_config(service, \"seen\", snapshot) }\n  if contains(log_tail(service), \"no space\") { clear_tmp(host_of(service)) }\n  for d in depends_on(service) { use heal(d) }\n  restart(service)\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "config",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 2,
+     "name": "host_of",
+     "op": "observe"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "record",
+       [
+        [
+         "port",
+         [
+          "get",
+          [
+           "ref",
+           1
+          ],
+          [
+           "const",
+           "port"
+          ],
+          [
+           "const",
+           0
+          ]
+         ]
+        ],
+        [
+         "host",
+         [
+          "ref",
+          2
+         ]
+        ],
+        [
+         "tags",
+         [
+          "const",
+          [
+           1,
+           "a",
+           true
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "const",
+       {
+        "host": "h0",
+        "port": 8000,
+        "tags": [
+         1,
+         "a",
+         true
+        ]
+       }
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 3,
+     "name": "log_tail",
+     "op": "observe"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "contains",
+      [
+       "ref",
+       3
+      ],
+      [
+       "const",
+       "no space"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 4,
+     "name": "depends_on",
+     "op": "observe"
+    },
+    {
+     "expect": 0,
+     "op": "guard",
+     "pred": [
+      "len",
+      [
+       "ref",
+       4
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 5,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  },
+  {
+   "cap": "heal",
+   "evidence": [
+    {
+     "acts": 0,
+     "args": {
+      "service": "svc5"
+     },
+     "kind": "validated",
+     "note": "synthetic",
+     "verdict": "pass",
+     "world": "syn"
+    }
+   ],
+   "hash": "w471e4982a9",
+   "params": [
+    "service"
+   ],
+   "seq": 16,
+   "source": "script heal(service) {\n  let cfg = config(service)\n  let snapshot = {port: get(cfg, \"port\", 0), host: host_of(service), tags: [1, \"a\", true]}\n  if snapshot == {port: 8000, host: \"h0\", tags: [1, \"a\", true]} { set_config(service, \"seen\", snapshot) }\n  if contains(log_tail(service), \"no space\") { clear_tmp(host_of(service)) }\n  for d in depends_on(service) { use heal(d) }\n  restart(service)\n}",
+   "steps": [
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 1,
+     "name": "config",
+     "op": "observe"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 2,
+     "name": "host_of",
+     "op": "observe"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "bin",
+      "==",
+      [
+       "record",
+       [
+        [
+         "port",
+         [
+          "get",
+          [
+           "ref",
+           1
+          ],
+          [
+           "const",
+           "port"
+          ],
+          [
+           "const",
+           0
+          ]
+         ]
+        ],
+        [
+         "host",
+         [
+          "ref",
+          2
+         ]
+        ],
+        [
+         "tags",
+         [
+          "const",
+          [
+           1,
+           "a",
+           true
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "const",
+       {
+        "host": "h0",
+        "port": 8000,
+        "tags": [
+         1,
+         "a",
+         true
+        ]
+       }
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 3,
+     "name": "log_tail",
+     "op": "observe"
+    },
+    {
+     "expect": false,
+     "op": "guard",
+     "pred": [
+      "contains",
+      [
+       "ref",
+       3
+      ],
+      [
+       "const",
+       "no space"
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 4,
+     "name": "depends_on",
+     "op": "observe"
+    },
+    {
+     "expect": 2,
+     "op": "guard",
+     "pred": [
+      "len",
+      [
+       "ref",
+       4
+      ]
+     ]
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        4
+       ],
+       [
+        "const",
+        0
+       ]
+      ]
+     ],
+     "cap": "heal",
+     "id": 5,
+     "op": "use"
+    },
+    {
+     "args": [
+      [
+       "index",
+       [
+        "ref",
+        4
+       ],
+       [
+        "const",
+        1
+       ]
+      ]
+     ],
+     "cap": "heal",
+     "id": 6,
+     "op": "use"
+    },
+    {
+     "args": [
+      [
+       "param",
+       "service"
+      ]
+     ],
+     "id": 7,
+     "name": "restart",
+     "op": "act"
+    }
+   ]
+  }
+ ],
+ "world": "fleet6"
+}

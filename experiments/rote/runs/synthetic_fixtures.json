@@ -1,0 +1,7377 @@
+[
+ {
+  "witness": "wcedc30b619",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8007,
+     8016
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8016
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 5,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc3",
+      "pair",
+      [
+       8016,
+       "h1",
+       8017
+      ]
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wcedc30b619",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8000,
+     8001,
+     8002,
+     8022
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8002
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 5,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc4",
+      "pair",
+      [
+       8002,
+       "h1",
+       8023
+      ]
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wcedc30b619",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8006,
+     8016,
+     8019
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8019
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 5,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc1",
+      "pair",
+      [
+       8019,
+       "h0",
+       8020
+      ]
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wcedc30b619",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8007,
+     8011,
+     8015,
+     8018,
+     8024
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8024
+     },
+     "version": 2
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wcedc30b619",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8003,
+     8021,
+     8026
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8021
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 5,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc0",
+      "pair",
+      [
+       8021,
+       "h1",
+       8027
+      ]
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wcedc30b619",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8003,
+     8004
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8003
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 5,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc0",
+      "pair",
+      [
+       8003,
+       "h2",
+       8005
+      ]
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w439c3101c7",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8001,
+     8006,
+     8014,
+     8016
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8006
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w439c3101c7",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8001,
+     8005,
+     8012,
+     8018
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8018
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w439c3101c7",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8001,
+     8004,
+     8011,
+     8016
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8004
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc4",
+      "port",
+      8017
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc4"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w439c3101c7",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8001
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8001
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w439c3101c7",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8004,
+     8008,
+     8020,
+     8024,
+     8025
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8025
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc2",
+      "port",
+      8026
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc2"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w439c3101c7",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8000,
+     8002,
+     8007,
+     8024
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8007
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wcedc30b619",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8004,
+     8015,
+     8019
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8004
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 5,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc3",
+      "pair",
+      [
+       8004,
+       "h1",
+       8020
+      ]
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wcedc30b619",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8009,
+     8023
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8023
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 5,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc0",
+      "pair",
+      [
+       8023,
+       "h0",
+       8024
+      ]
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wcedc30b619",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8008
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8008
+     },
+     "version": 2
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wcedc30b619",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8002,
+     8004,
+     8006,
+     8011,
+     8018
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8002
+     },
+     "version": 2
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wcedc30b619",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8004,
+     8011,
+     8021,
+     8022
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8004
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 5,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc5",
+      "pair",
+      [
+       8004,
+       "h1",
+       8023
+      ]
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wcedc30b619",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8002,
+     8014
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8014
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 5,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc1",
+      "pair",
+      [
+       8014,
+       "h1",
+       8015
+      ]
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8009,
+     8016,
+     8017,
+     8023
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8023
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc2",
+      "pair",
+      [
+       8023,
+       "h2",
+       8024
+      ]
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc2",
+      "port",
+      8024
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc2"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8017
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8017
+     },
+     "version": 2
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8001,
+     8004,
+     8010,
+     8020,
+     8021,
+     8023,
+     8026
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8026
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc3",
+      "pair",
+      [
+       8026,
+       "h1",
+       8027
+      ]
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc3",
+      "port",
+      8027
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc3"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc6"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8002,
+     8017,
+     8023
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8017
+     },
+     "version": 2
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8006,
+     8020,
+     8022,
+     8025,
+     8026
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8020
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc4",
+      "pair",
+      [
+       8020,
+       "h0",
+       8027
+      ]
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc4",
+      "port",
+      8027
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc4"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8008,
+     8013
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8013
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc4",
+      "pair",
+      [
+       8013,
+       "h1",
+       8014
+      ]
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc4",
+      "port",
+      8014
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc4"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w97595d0728",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8005,
+     8006,
+     8014
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8005
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w97595d0728",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8001,
+     8005,
+     8014,
+     8015,
+     8019
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8005
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w97595d0728",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8005,
+     8009
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8005
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w97595d0728",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8001,
+     8008,
+     8011,
+     8012,
+     8013,
+     8022
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8008
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w97595d0728",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8004,
+     8006,
+     8012
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8004
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w97595d0728",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8002,
+     8016,
+     8021,
+     8022
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8016
+     },
+     "version": 2
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8002,
+     8013,
+     8018
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8018
+     },
+     "version": 2
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc6"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8002,
+     8010,
+     8022
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8010
+     },
+     "version": 2
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8008,
+     8016,
+     8020
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8008
+     },
+     "version": 2
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8001,
+     8009
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8009
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc3",
+      "pair",
+      [
+       8009,
+       "h2",
+       8010
+      ]
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc3",
+      "port",
+      8010
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc3"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8000,
+     8002,
+     8021
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8021
+     },
+     "version": 2
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8000,
+     8012
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8012
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc0",
+      "pair",
+      [
+       8012,
+       "h0",
+       8013
+      ]
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc0",
+      "port",
+      8013
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc0"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8000,
+     8002,
+     8010,
+     8017
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8010
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc4",
+      "pair",
+      [
+       8010,
+       "h2",
+       8018
+      ]
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc4",
+      "port",
+      8018
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc4"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8012,
+     8021
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8021
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc0",
+      "pair",
+      [
+       8021,
+       "h1",
+       8022
+      ]
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc0",
+      "port",
+      8022
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc0"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8008,
+     8010,
+     8014,
+     8016
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8008
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc1",
+      "pair",
+      [
+       8008,
+       "h0",
+       8017
+      ]
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc1",
+      "port",
+      8017
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc1"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8003,
+     8009,
+     8013
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8003
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc2",
+      "pair",
+      [
+       8003,
+       "h1",
+       8014
+      ]
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc2",
+      "port",
+      8014
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc2"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8011,
+     8013
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8011
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc1",
+      "pair",
+      [
+       8011,
+       "h1",
+       8014
+      ]
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc1",
+      "port",
+      8014
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc1"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wf7e058594d",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8011,
+     8013
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8011
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc4",
+      "pair",
+      [
+       8011,
+       "h2",
+       8014
+      ]
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc4",
+      "port",
+      8014
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc4"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w439c3101c7",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8003,
+     8012
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8003
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc3",
+      "port",
+      8013
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc3"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w439c3101c7",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8003,
+     8011,
+     8018
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8011
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w439c3101c7",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8004,
+     8005,
+     8018,
+     8019
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8018
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w439c3101c7",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8006,
+     8010,
+     8013,
+     8015,
+     8020
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8013
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc2",
+      "port",
+      8021
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc2"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w439c3101c7",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8011,
+     8015,
+     8016
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8011
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc4",
+      "port",
+      8017
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc4"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w439c3101c7",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     8002,
+     8005,
+     8021,
+     8023
+    ]
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8005
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8000
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc4",
+      "even",
+      true
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc4",
+      "share",
+      100
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc4"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8018
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc0",
+      "even",
+      true
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc0",
+      "share",
+      100
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc0"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8022
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8001
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc6"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8009
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8019
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8027
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc0",
+      "note",
+      "{\"listen\":{\"port\":8027},\"version\":2}:2:false"
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc0",
+      "even",
+      true
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc0",
+      "share",
+      50
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc0"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8021
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc4",
+      "note",
+      "{\"listen\":{\"port\":8021},\"version\":2}:2:false"
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc4",
+      "even",
+      true
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc4",
+      "share",
+      50
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc4"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8000
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8000
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8005
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8001
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8013
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8014
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc5",
+      "even",
+      true
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc5",
+      "share",
+      100
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc5"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8019
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8020
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8006
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc1",
+      "even",
+      true
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc1",
+      "share",
+      100
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc1"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8023
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8008
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc6"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8018
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc6",
+      "note",
+      "{\"listen\":{\"port\":8018},\"version\":2}:2:false"
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc6",
+      "even",
+      true
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc6",
+      "share",
+      50
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc6"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8014
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc0",
+      "note",
+      "{\"listen\":{\"port\":8014},\"version\":2}:2:false"
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc0",
+      "even",
+      true
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc0",
+      "share",
+      50
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc0"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8018
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8001
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8010
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc2",
+      "note",
+      "{\"listen\":{\"port\":8010},\"version\":2}:2:false"
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc2",
+      "even",
+      true
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc2",
+      "share",
+      50
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc2"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w3498fd906d",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8011
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc1",
+      "share",
+      100
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc1"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w3498fd906d",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8002
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w3498fd906d",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8010
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w3498fd906d",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8012
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w3498fd906d",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8000
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w3498fd906d",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8011
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc2",
+      "share",
+      100
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc2"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8019
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8015
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8023
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8010
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc1",
+      "even",
+      true
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc1",
+      "share",
+      100
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc1"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8019
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w17181cb139",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8014
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc5",
+      "even",
+      true
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc5",
+      "share",
+      100
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc5"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w3498fd906d",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8020
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w3498fd906d",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8012
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w3498fd906d",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8005
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc2",
+      "share",
+      100
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc2"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w3498fd906d",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8000
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w3498fd906d",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8006
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w3498fd906d",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8001
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8008
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc5",
+      "note",
+      "{\"listen\":{\"port\":8008},\"version\":2}:2:false"
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc5",
+      "even",
+      true
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc5",
+      "share",
+      50
+     ]
+    ],
+    [
+     "restart",
+     [
+      "svc5"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8004
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8002
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8011
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8027
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w0e8a089a16",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8015
+    }
+   },
+   {
+    "op": "observe",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w15bd0b9a9d",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc1",
+     "svc3"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w15bd0b9a9d",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w15bd0b9a9d",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1",
+     "svc4",
+     "svc5",
+     "svc6"
+    ]
+   },
+   {
+    "op": "observe",
+    "value": "up"
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "observe",
+    "value": "up"
+   },
+   {
+    "op": "observe",
+    "value": "up"
+   },
+   {
+    "op": "observe",
+    "value": "up"
+   },
+   {
+    "op": "observe",
+    "value": "up"
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 18,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc5",
+      "peer",
+      "svc1"
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc5",
+      "neg",
+      -1
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w15bd0b9a9d",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc1",
+     "svc3",
+     "svc4"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w15bd0b9a9d",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc3",
+     "svc5"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w15bd0b9a9d",
+  "cap": "heal",
+  "args": {
+   "service": "svc6"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc1",
+     "svc5",
+     "svc6"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 5,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w88c23bb7e3",
+  "cap": "heal",
+  "args": {
+   "service": "svc6"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc2",
+     "svc3",
+     "svc4",
+     "svc5",
+     "svc6"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w88c23bb7e3",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc1",
+     "svc5",
+     "svc6"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w88c23bb7e3",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1",
+     "svc2"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w88c23bb7e3",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1",
+     "svc3",
+     "svc4",
+     "svc6"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w88c23bb7e3",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc4"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w88c23bb7e3",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1",
+     "svc2",
+     "svc5"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wbda44cfa5e",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc2",
+     "svc3",
+     "svc4",
+     "svc5"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wbda44cfa5e",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc1",
+     "svc4"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wbda44cfa5e",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1",
+     "svc3"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wbda44cfa5e",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1",
+     "svc2",
+     "svc4",
+     "svc5"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wbda44cfa5e",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc2",
+     "svc5",
+     "svc6"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wbda44cfa5e",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1",
+     "svc2"
+    ]
+   },
+   {
+    "op": "observe",
+    "value": "up"
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "observe",
+    "value": "up"
+   },
+   {
+    "op": "observe",
+    "value": "up"
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 13,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc2",
+      "peer",
+      "svc1"
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc2",
+      "neg",
+      0
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w24a1531d42",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc2",
+     "svc4",
+     "svc5"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w24a1531d42",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1",
+     "svc2",
+     "svc4"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w24a1531d42",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc2",
+     "svc3",
+     "svc4"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w24a1531d42",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1",
+     "svc2",
+     "svc4"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w24a1531d42",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc2",
+     "svc5"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w24a1531d42",
+  "cap": "heal",
+  "args": {
+   "service": "svc6"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1",
+     "svc5",
+     "svc6"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w15bd0b9a9d",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1",
+     "svc3",
+     "svc4",
+     "svc5"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w15bd0b9a9d",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc1",
+     "svc2",
+     "svc3",
+     "svc5"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w15bd0b9a9d",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc3",
+     "svc4"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w15bd0b9a9d",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1",
+     "svc4"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w15bd0b9a9d",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1",
+     "svc3"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w15bd0b9a9d",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc3",
+     "svc4"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w3825214640",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc1",
+     "svc2",
+     "svc3",
+     "svc4",
+     "svc5"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w3825214640",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc3",
+     "svc4"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w3825214640",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc2"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w3825214640",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc1"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w3825214640",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc3"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w3825214640",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc1",
+     "svc2",
+     "svc4"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5917b886db",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc2"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5917b886db",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc2",
+     "svc3",
+     "svc4",
+     "svc5"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5917b886db",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc2",
+     "svc3",
+     "svc4"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5917b886db",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc1",
+     "svc5"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5917b886db",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc1",
+     "svc3"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5917b886db",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1",
+     "svc5"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wdb613fd75d",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc2",
+     "svc5"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wdb613fd75d",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc2",
+     "svc3",
+     "svc4"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wdb613fd75d",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc1",
+     "svc2",
+     "svc3",
+     "svc5"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wdb613fd75d",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1",
+     "svc3",
+     "svc4"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wdb613fd75d",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc1",
+     "svc2"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wdb613fd75d",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc3",
+     "svc4",
+     "svc5"
+    ]
+   },
+   {
+    "op": "observe",
+    "value": "up"
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "observe",
+    "value": "up"
+   },
+   {
+    "op": "observe",
+    "value": "up"
+   },
+   {
+    "op": "observe",
+    "value": "up"
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 16,
+   "acts": [
+    [
+     "set_config",
+     [
+      "svc5",
+      "peer",
+      "svc3"
+     ]
+    ],
+    [
+     "set_config",
+     [
+      "svc5",
+      "neg",
+      0
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8012
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc3"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8014
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc1"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8015
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8007
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc0"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8005
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc2"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8002
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc3"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8026
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8016
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc1"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8009
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc5"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8021
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc0"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8014
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc1"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8017
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc2"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8019
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc0"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8017
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8003
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc0"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8020
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc3"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8006
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8014
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc6"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8019
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc3",
+     "svc5"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8026
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc0"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc5"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8002
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8016
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8001
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc1"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8008
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc2"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8002
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc1",
+     "svc3"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8005
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc2"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8019
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc1"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8006
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc1"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8009
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc2"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8007
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc2"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8015
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc2"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc1"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8002
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc1"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc6"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8025
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc1"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8015
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc0"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8007
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc0"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8007
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc2"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8000
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc3"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8015
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc4"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc6"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8010
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8023
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc2"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc0"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8011
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc0"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wd33111e671",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8021
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc2"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w471e4982a9",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8008
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w471e4982a9",
+  "cap": "heal",
+  "args": {
+   "service": "svc2"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8022
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": []
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w471e4982a9",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8011
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h0"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc2"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w471e4982a9",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8020
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc2"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w471e4982a9",
+  "cap": "heal",
+  "args": {
+   "service": "svc4"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "port": 8009
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0",
+     "svc1"
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "already_satisfied",
+     "witness": null
+    },
+    "acts": []
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "already_satisfied",
+     "witness": null
+    },
+    "acts": []
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "svc4"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w471e4982a9",
+  "cap": "heal",
+  "args": {
+   "service": "svc3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8008
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "started"
+   },
+   {
+    "op": "observe",
+    "value": [
+     "svc0"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 6,
+   "acts": []
+  }
+ }
+]

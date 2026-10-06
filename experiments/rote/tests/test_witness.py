@@ -82,3 +82,32 @@ def test_identical_guards_are_deduplicated():
     res = run_script(t, decl.params, ["a"], decl.body)
     w = witness_from_steps("f", decl.params, res.steps, src)
     assert len(w.guards) == 1 and len([s for s in res.steps if s["op"] == "guard"]) == 2
+
+
+def test_a_bool_is_never_a_number():
+    from rote.sym import SymError, deep_eq, eval_sexpr
+
+    assert not deep_eq(True, 1) and not deep_eq([True], [1]) and deep_eq({"a": [1, "x"]}, {"a": [1, "x"]})
+    assert eval_sexpr(["bin", "==", ["param", "t"], ["const", 1]], {"t": True}, {}) is False
+    assert eval_sexpr(["contains", ["list", [["const", True]]], ["const", 1]], {}, {}) is False
+    import pytest
+
+    with pytest.raises(SymError):
+        eval_sexpr(["index", ["const", [1, 2]], ["const", True]], {}, {})
+    with pytest.raises(SymError):
+        eval_sexpr(["contains", ["const", "abc"], ["const", 1]], {}, {})
+    with pytest.raises(SymError):
+        eval_sexpr(["field", ["const", {"a": 1}], ["const", ["a"]]], {}, {})
+    with pytest.raises(SymError):
+        eval_sexpr(["has", ["const", {"a": 1}], ["const", 1]], {}, {})
+
+
+def test_guard_comparison_is_typed():
+    w = make(world(8080, "down"))
+    # forge a guard that expects the bool True where the fresh world will deliver the int 1
+    forged = Witness("f", ["s"], [{"op": "observe", "id": 1, "name": "n", "args": [["param", "s"]]},
+                                  {"op": "guard", "pred": ["ref", 1], "expect": True},
+                                  {"op": "act", "id": 2, "name": "do", "args": [["param", "s"]]}], "forged")
+    fresh = DictWorld({"n(a)": 1}, SIG)
+    r = replay(forged, ["a"], fresh, {"do"})
+    assert r.kind == "side_exit" and fresh.acts == [] and w.hash != forged.hash

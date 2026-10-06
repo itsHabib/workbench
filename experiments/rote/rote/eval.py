@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from . import ast as A
-from .sym import SExpr, const
+from .sym import SExpr, _contains, const, deep_eq
 
 __all__ = [
     "Sym", "Closure", "RoteError", "ScriptFailure", "FuelExhausted", "World", "Oracle",
@@ -338,7 +338,7 @@ class Tracer:
         a, b = concretize(left), concretize(right)
         symbolic = contains_sym(left) or contains_sym(right)
         if op in ("==", "!="):
-            result = (a == b) if op == "==" else (a != b)
+            result = deep_eq(a, b) if op == "==" else not deep_eq(a, b)
             return Sym(["bin", op, lift(left), lift(right)], result) if symbolic else result
         if op == "+" and isinstance(a, str) and isinstance(b, str):
             return Sym(["bin", "+", lift(left), lift(right)], a + b) if symbolic else a + b
@@ -541,9 +541,10 @@ def _b_any(t: Tracer, args: list[Any], line: int) -> Any:
 def _b_contains(t: Tracer, args: list[Any], line: int) -> Any:
     xs, v = _arity("contains", args, 2, line)
     rxs, rv = concretize(xs), concretize(v)
-    if not isinstance(rxs, (list, str)):
-        raise RoteError("type", f"contains on {_tname(xs)}", line)
-    result = rv in rxs
+    try:
+        result = _contains(rxs, rv)
+    except Exception as err:  # noqa: BLE001  a SymError from the shared helper
+        raise RoteError("type", str(err), line) from None
     if contains_sym(xs) or contains_sym(v):
         return Sym(["contains", lift(xs), lift(v)], result)
     return result

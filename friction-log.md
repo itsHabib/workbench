@@ -492,3 +492,21 @@ intentionally serializes as []. No migration or live configuration changes.
 - Regression snapshots branch, role and legacy checkpoint bytes. It fails with the
   original parser and passes with the fix; independent local review found no blocker.
 - This is argument parsing repair, not checkpoint history or process recovery.
+
+## Session: Rote experiment (experiments/rote), 2026-10-06
+
+Agent: Claude Code (cloud session).
+
+### golangci-lint refuses the repo config on a current toolchain
+
+- **What I tried:** `golangci-lint run ./experiments/rote/replay-go/...` as the
+  canonical check list in `CLAUDE.md` says.
+- **What happened:** `can't load config: the Go language version (go1.25) used to
+  build golangci-lint is lower than the targeted Go version (1.26)`. The installed
+  golangci-lint (2.5.0) was built with go1.25 while `go.mod` says `go 1.26`, so the
+  linter exits before linting anything. `gofmt` and `go vet` ran fine. A scratch
+  copy of `.golangci.yml` with `run.go: "1.25"` added reports 0 issues for the new
+  package, so this is a toolchain pin problem, not a code problem.
+- **Class:** `tooling-version-skew`. Either pin a golangci-lint built with go1.26 in
+  the environment setup, or document the `run.go` override for sessions whose
+  linter lags the module's Go version.

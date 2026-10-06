@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-__all__ = ["SExpr", "SymError", "const", "param", "ref", "eval_sexpr", "show", "canonical", "is_const"]
+__all__ = ["SExpr", "SymError", "const", "param", "ref", "eval_sexpr", "show", "canonical", "is_const", "deep_eq"]
 
 SExpr = list
 
@@ -48,12 +48,26 @@ def canonical(e: Any) -> str:
     return json.dumps(e, sort_keys=True, separators=(",", ":"))
 
 
+def deep_eq(a: Any, b: Any) -> bool:
+    """Structural equality in which a bool is never equal to a number. Python's own
+    `True == 1` would otherwise leak into Rote through `==`, `contains` and guards."""
+    if isinstance(a, bool) or isinstance(b, bool):
+        return isinstance(a, bool) and isinstance(b, bool) and a == b
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(deep_eq(x, y) for x, y in zip(a, b, strict=True))
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(deep_eq(a[k], b[k]) for k in a)
+    if isinstance(a, (list, dict)) or isinstance(b, (list, dict)):
+        return False
+    return a == b
+
+
 _BIN_OPS = {
     "+": lambda a, b: a + b,
     "-": lambda a, b: a - b,
     "*": lambda a, b: a * b,
-    "==": lambda a, b: a == b,
-    "!=": lambda a, b: a != b,
+    "==": deep_eq,
+    "!=": lambda a, b: not deep_eq(a, b),
     "<": lambda a, b: a < b,
     "<=": lambda a, b: a <= b,
     ">": lambda a, b: a > b,
@@ -97,12 +111,14 @@ def eval_sexpr(e: SExpr, params: dict[str, Any], refs: dict[int, Any]) -> Any:  
         obj, key = eval_sexpr(e[1], params, refs), eval_sexpr(e[2], params, refs)
         if not isinstance(obj, dict):
             raise SymError(f"field access on {type(obj).__name__}")
+        if not isinstance(key, str):
+            raise SymError(f"field key must be a string, got {type(key).__name__}")
         if key not in obj:
             raise SymError(f"missing field {key!r}")
         return obj[key]
     if tag == "index":
         obj, i = eval_sexpr(e[1], params, refs), eval_sexpr(e[2], params, refs)
-        if not isinstance(obj, list) or not isinstance(i, int):
+        if not isinstance(obj, list) or not isinstance(i, int) or isinstance(i, bool):
             raise SymError("index needs a list and an int")
         if i < 0 or i >= len(obj):
             raise SymError(f"index {i} out of range for length {len(obj)}")
@@ -114,9 +130,13 @@ def eval_sexpr(e: SExpr, params: dict[str, Any], refs: dict[int, Any]) -> Any:  
         return len(obj)
     if tag == "has":
         obj, key = eval_sexpr(e[1], params, refs), eval_sexpr(e[2], params, refs)
+        if not isinstance(key, str):
+            raise SymError(f"has needs a string key, got {type(key).__name__}")
         return isinstance(obj, dict) and key in obj
     if tag == "get":
         obj, key = eval_sexpr(e[1], params, refs), eval_sexpr(e[2], params, refs)
+        if not isinstance(key, str):
+            raise SymError(f"get needs a string key, got {type(key).__name__}")
         if isinstance(obj, dict) and key in obj:
             return obj[key]
         return eval_sexpr(e[3], params, refs)
@@ -127,9 +147,7 @@ def eval_sexpr(e: SExpr, params: dict[str, Any], refs: dict[int, Any]) -> Any:  
         return list(obj.keys())
     if tag == "contains":
         obj, v = eval_sexpr(e[1], params, refs), eval_sexpr(e[2], params, refs)
-        if not isinstance(obj, (list, str)):
-            raise SymError(f"contains on {type(obj).__name__}")
-        return v in obj
+        return _contains(obj, v)
     if tag == "str":
         return _to_str(eval_sexpr(e[1], params, refs))
     if tag == "not":
@@ -175,6 +193,16 @@ def _reduce(tag: str, e: SExpr, params: dict[str, Any], refs: dict[int, Any]) ->
     if not xs:
         return default
     return max(xs) if tag == "maxof" else min(xs)
+
+
+def _contains(obj: Any, v: Any) -> bool:
+    if isinstance(obj, str):
+        if not isinstance(v, str):
+            raise SymError(f"contains on a string needs a string, got {type(v).__name__}")
+        return v in obj
+    if not isinstance(obj, list):
+        raise SymError(f"contains on {type(obj).__name__}")
+    return any(deep_eq(x, v) for x in obj)
 
 
 def _to_str(v: Any) -> str:

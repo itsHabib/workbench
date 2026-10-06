@@ -1,5 +1,5 @@
 // Command replay-go is a conformance replayer for Rote witnesses. It
-// re-implements the replay kernel (rote/witness.py) and the symbolic
+// re-implements the replay kernel (rote/witness.py) and the 21-form symbolic
 // evaluator (rote/sym.py) in Go and checks them against fixtures exported by
 // the Python reference: each case walks a witness against the world answers
 // Python recorded, and the outcome must match. It is not a Rote
@@ -233,17 +233,19 @@ func (en *env) ref(id any) (any, error) {
 	return v, nil
 }
 
-// arity is the length of each of the 18 forms, tag included.
+// arity is the length of each of the 21 forms, tag included.
 var arity = map[string]int{
 	"const": 2, "param": 2, "ref": 2, "field": 3, "index": 3, "len": 2,
 	"has": 3, "get": 4, "keys": 2, "contains": 3, "str": 2, "not": 2, "neg": 2,
 	"min": 3, "max": 3, "bin": 4, "list": 2, "record": 2,
+	"sum": 2, "maxof": 3, "minof": 3,
 }
 
 // ops are the forms whose operands are all evaluated first, left to right.
 var ops = map[string]func([]any) (any, error){
 	"field": opField, "index": opIndex, "len": opLen, "has": opHas, "keys": opKeys,
 	"contains": opContains, "str": opStr, "not": opNot, "neg": opNeg, "min": opMin, "max": opMax,
+	"sum": opSum, "maxof": opMaxOf, "minof": opMinOf,
 }
 
 // shape checks an expression's outline: a list headed by a known tag with the
@@ -505,6 +507,61 @@ func opNeg(a []any) (any, error) {
 		return nil, errors.New("negation needs an int")
 	}
 	return -n, nil
+}
+
+// intList is sym.py's _reduce precondition: a list whose every element is an int.
+func intList(tag string, v any) ([]int64, error) {
+	xs, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%s needs a list of ints", tag)
+	}
+	out := make([]int64, 0, len(xs))
+	for _, x := range xs {
+		n, isInt := x.(int64)
+		if !isInt {
+			return nil, fmt.Errorf("%s needs a list of ints", tag)
+		}
+		out = append(out, n)
+	}
+	return out, nil
+}
+
+func opSum(a []any) (any, error) {
+	xs, err := intList("sum", a[0])
+	if err != nil {
+		return nil, err
+	}
+	var total int64
+	for _, x := range xs {
+		total += x
+	}
+	return total, nil
+}
+
+func opMaxOf(a []any) (any, error) { return reduceOf("maxof", a, false) }
+
+func opMinOf(a []any) (any, error) { return reduceOf("minof", a, true) }
+
+// reduceOf returns the default for an empty list, else the extremum.
+func reduceOf(tag string, a []any, low bool) (any, error) {
+	xs, err := intList(tag, a[0])
+	if err != nil {
+		return nil, err
+	}
+	def, ok := a[1].(int64)
+	if !ok {
+		return nil, fmt.Errorf("%s needs an int default", tag)
+	}
+	if len(xs) == 0 {
+		return def, nil
+	}
+	best := xs[0]
+	for _, x := range xs[1:] {
+		if (low && x < best) || (!low && x > best) {
+			best = x
+		}
+	}
+	return best, nil
 }
 
 func opMin(a []any) (any, error) { return extremum(a, true) }

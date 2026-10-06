@@ -15,7 +15,7 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
-from .sym import SymError, canonical, eval_sexpr, show
+from .sym import SymError, canonical, deep_eq, eval_sexpr, show
 
 __all__ = ["Witness", "Evidence", "ReplayOutcome", "replay", "witness_from_steps", "describe_guards"]
 
@@ -158,7 +158,7 @@ def replay(w: Witness, args: list[Any], world: Any, grant: set[str], runtime: An
         try:
             if s["op"] == "guard":
                 got = eval_sexpr(s["pred"], params, refs)
-                if got != s["expect"]:
+                if not deep_eq(got, s["expect"]):
                     reason = f"guard {show(s['pred'], names)} expected {show(['const', s['expect']])}, got {show(['const', got])}"
                     return ReplayOutcome("side_exit", acts, i, reason, seen)
                 continue
