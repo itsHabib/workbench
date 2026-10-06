@@ -304,3 +304,9 @@ without the parser, evaluator, or runtime.
   goal-false world into a goal-true one.
 - **`use` as a step.** Composition is by capability, not by source inclusion, so the
   inner capability repairs itself locally and the outer witness stays valid.
+- **A bool is never a number.** The first reference let Python's `True == 1` leak into
+  `==`, `contains`, list indexing and guard comparison. The Go conformance kernel, written
+  to a stricter reading of the spec, disagreed on exactly those cases, which is how the
+  leak was found. Equality is now structural and typed in both the evaluator and the
+  kernel (`deep_eq`), record keys must be strings, and `contains` on a string needs a
+  string. A second implementation is the cheapest spec check there is.

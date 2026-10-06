@@ -193,22 +193,35 @@ and within a grant, and a side exit that says exactly which assumption broke.
 
 ## The replay kernel in Go
 
-`replay-go/main.go` re-implements the replay kernel and the symbolic evaluator in Go
-(standard library only, no parser, no evaluator for Rote itself, no world). The Python
-side exports conformance fixtures: for each of the five witnesses in `runs/library.json`,
-twelve replays against random worlds, each recorded as the sequence of world answers
-plus the outcome Python produced (completed, or side-exited at which step, with the
-exact actions and their evaluated arguments). The Go kernel reproduces all 60 outcomes:
+`replay-go/main.go` re-implements the replay kernel and the 21-form symbolic evaluator
+in Go (standard library only, no parser, no evaluator for Rote itself, no world). The
+Python side exports conformance fixtures: replays against random worlds, each recorded
+as the sequence of world answers plus the outcome Python produced (completed, or
+side-exited at which step, with the exact actions and their evaluated arguments). Two
+sets: the demo's five witnesses (60 cases), and 16 witnesses from four hand-written
+scripts that between them use all 21 forms (192 cases). The Go kernel reproduces every
+outcome:
 
 ```
 $ go run ./replay-go
 60 cases, 60 conform
+$ go run ./replay-go -lib runs/synthetic_library.json -fixtures runs/synthetic_fixtures.json
+192 cases, 192 conform
 ```
 
 That is the "retained artifacts are host-language independent" claim tested as far as
 fixtures allow. It is not an end-to-end test: replaying through a Go world adapter is
 listed under the next experiments. (`gofmt` and `go vet` are clean; `golangci-lint`
-could not run in this environment because of a toolchain version mismatch.)
+could not run in this environment because of a toolchain version mismatch, logged in
+the repo's `friction-log.md`.)
+
+Writing the second implementation found three defects in the first. Python's
+`True == 1` had leaked into Rote: `true == 1` was true, `contains([true], 1)` was true,
+a bool could index a list, and a guard expecting `true` would have accepted a fresh
+value of `1`. Two inputs raised uncaught `TypeError`s in the replay evaluator instead
+of a side exit (`contains` on a string with a non-string needle; a non-string record
+key). All are fixed with a typed structural equality shared by the evaluator, the
+kernel, and the guard check, with tests. None affected the workload numbers.
 
 ## The live experiment: harness built, dry run measured, live run blocked on a key
 
