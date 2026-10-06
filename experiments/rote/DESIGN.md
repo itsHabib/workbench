@@ -278,7 +278,7 @@ That said, the right framing is *embedded language*, in Starlark's sense: a smal
 hermetic dialect that lives inside a host application, where the host supplies the
 world, the goals, the grants, and the oracle. It is not a general-purpose language
 and should not grow into one. The pieces are separable: the replay kernel (JSON
-witnesses, 21 expression forms, ~150 lines in Python, ~750 in Go) can be reimplemented in a host language
+witnesses, 21 expression forms, ~150 lines in Python, ~700 in Go) can be reimplemented in a host language
 without the parser, evaluator, or runtime.
 
 ## Decisions and their reasons

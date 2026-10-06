@@ -636,20 +636,22 @@ func check(witnesses map[string]*witness, fx *fixture) string {
 	if err != nil {
 		return "fixture violation: " + err.Error()
 	}
+	return diff(got, fx.Expected)
+}
+
+func diff(got, want outcome) string {
 	var parts []string
-	if got.Kind != want(fx).Kind {
-		parts = append(parts, fmt.Sprintf("kind %s, expected %s", got.Kind, want(fx).Kind))
+	if got.Kind != want.Kind {
+		parts = append(parts, fmt.Sprintf("kind %s, expected %s", got.Kind, want.Kind))
 	}
-	if got.Step != want(fx).Step {
-		parts = append(parts, fmt.Sprintf("step %d, expected %d", got.Step, want(fx).Step))
+	if got.Step != want.Step {
+		parts = append(parts, fmt.Sprintf("step %d, expected %d", got.Step, want.Step))
 	}
-	if !equal(got.Acts.v, want(fx).Acts.v) {
-		parts = append(parts, fmt.Sprintf("acts %s, expected %s", render(got.Acts.v), render(want(fx).Acts.v)))
+	if !equal(got.Acts.v, want.Acts.v) {
+		parts = append(parts, fmt.Sprintf("acts %s, expected %s", render(got.Acts.v), render(want.Acts.v)))
 	}
 	return strings.Join(parts, "; ")
 }
-
-func want(fx *fixture) *outcome { return &fx.Expected }
 
 func load(path string, into any) error {
 	data, err := os.ReadFile(path)
