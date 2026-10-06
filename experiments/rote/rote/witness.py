@@ -121,7 +121,7 @@ def describe_guards(w: Witness) -> list[str]:
 
 @dataclass
 class ReplayOutcome:
-    kind: str  # "completed" | "side_exit" | "error" | "refused"
+    kind: str  # "completed" | "applicable" | "side_exit" | "error" | "refused"
     acts: list[tuple[str, list[Any]]]
     step: int = -1
     reason: str = ""
@@ -137,9 +137,11 @@ class ReplayOutcome:
         return self.kind in ("side_exit", "error") and not self.acted
 
 
-def replay(w: Witness, args: list[Any], world: Any, grant: set[str], runtime: Any = None) -> ReplayOutcome:  # noqa: C901, PLR0912
+def replay(w: Witness, args: list[Any], world: Any, grant: set[str], runtime: Any = None,
+           prefix_only: bool = False) -> ReplayOutcome:  # noqa: C901, PLR0912
     """Re-run a witness against fresh world answers. Stops at the first guard that no
-    longer holds, before performing anything that followed it."""
+    longer holds, before performing anything that followed it. With `prefix_only`, stops
+    before the first act/use: an applicability check that touches nothing."""
     if len(args) != len(w.params):
         return ReplayOutcome("refused", [], reason=f"expected {len(w.params)} arguments, got {len(args)}")
     for s in w.steps:
@@ -151,6 +153,8 @@ def replay(w: Witness, args: list[Any], world: Any, grant: set[str], runtime: An
     names = w.refnames()
     seen: dict[str, Any] = {}
     for i, s in enumerate(w.steps):
+        if prefix_only and s["op"] in ("act", "use"):
+            return ReplayOutcome("applicable", acts, i, seen=seen)
         try:
             if s["op"] == "guard":
                 got = eval_sexpr(s["pred"], params, refs)

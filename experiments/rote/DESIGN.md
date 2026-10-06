@@ -129,7 +129,7 @@ Every parameter and every result of `observe`, `act` or `use` enters the run as 
 `Sym`: a concrete value plus a symbolic expression (`["param", "service"]`,
 `["ref", 3]`). Pure operations on a `Sym` produce a `Sym` whose expression records the
 operation (`["field", e, "port"]`, `["bin", "+", e, 1]`, `["len", e]`, ...). The
-expression language has 18 forms and is JSON (`rote/sym.py`). Containers built by the
+expression language has 21 forms and is JSON (`rote/sym.py`). Containers built by the
 script may hold `Sym`s; lifting such a container yields a `list`/`record` expression.
 
 ### Decision points record guards
@@ -146,7 +146,17 @@ script may hold `Sym`s; lifting such a container yields a `list`/`record` expres
 Everything else is data flow and needs no guard: an observed value passed to an action
 becomes a symbolic argument, re-evaluated at replay. `get(r, k, default)` and
 `has(r, k)` are symbolic and guard-free, so the script author chooses between "assume
-the field exists" (`r.k`, guarded) and "handle its absence" (`get`, not guarded).
+the field exists" (`r.k`, guarded) and "handle its absence" (`get`, not guarded). The
+reductions `sum`, `max_of` and `min_of` over an observed list are symbolic too: they do
+not pin the list's length the way a `fold` with a closure must (the closure's body may
+act, the reduction cannot). They were added after the dry run showed `fold` guards
+costing oracle calls (`RESULTS.md`).
+
+A script may carry an author-written `when` clause (`script heal(s) when <expr> { ... }`).
+In Rote it is not trusted as a precondition: it runs first, inside the traced run, so its
+decisions become ordinary guards and a false clause is a failed proposal. The live
+experiment's `precond` arm uses the same clause the way ordinary systems would, as a
+trusted dispatch predicate, to measure the difference.
 
 ### Witnesses and replay
 
@@ -194,14 +204,22 @@ too, in the evaluator and before each replay, so a hand-edited witness cannot es
 
 `achieve(cap, args, world)`:
 1. If the goal already holds, do nothing (`already_satisfied`).
-2. Try retained witnesses in dispatch order (no recorded failures first, newest first).
-   Inapplicable ones (stopped in the prefix) cost observations only. A witness that
-   acted and then side-exited, or completed and failed the goal, ends dispatch.
+2. Dispatch in two phases. First, check every witness's applicability prefix without
+   acting; this costs observations only and rejects most witnesses. Then run the
+   applicable ones in evidence order (fewest failures, most passes, newest), each replay
+   re-checking its own guards against the world as it now is. A replay that acts and
+   fails is recorded and, by default, dispatch continues to the next applicable witness
+   (`stop_after_failed_replay` makes it end instead).
 3. If the policy is `replay-only`: park, with the reason.
-4. Otherwise synthesize: run the tactic, or the default loop that asks the oracle for
+4. If `revalidate_sources` is set: re-run the sources of retained witnesses under the
+   goal, newest first, before asking anyone. This is the trace-JIT move of re-entering
+   the interpreter on the same program after a side exit. It takes unvalidated paths
+   and may act, which is why it is opt-in; `replay-only` still forbids it.
+5. Otherwise synthesize: run the tactic, or the default loop that asks the oracle for
    up to N proposals, each statically checked, run once under the goal, and retained
    with evidence on a pass. The prompt carries the goal, the signature, the grant, what
-   dispatch observed, and the prior attempts with their failure reasons.
+   dispatch observed, an optional caller-supplied probe of the situation, and the prior
+   attempts with their failure reasons.
 
 The caller supplies the goal (in the library file), the grant and policy (`Policy`),
 the world (any object with `signature/observe/act`), and the oracle. Validation acts on
@@ -260,7 +278,7 @@ That said, the right framing is *embedded language*, in Starlark's sense: a smal
 hermetic dialect that lives inside a host application, where the host supplies the
 world, the goals, the grants, and the oracle. It is not a general-purpose language
 and should not grow into one. The pieces are separable: the replay kernel (JSON
-witnesses, 18 expression forms, ~140 lines) can be reimplemented in a host language
+witnesses, 21 expression forms, ~150 lines in Python, ~330 in Go) can be reimplemented in a host language
 without the parser, evaluator, or runtime.
 
 ## Decisions and their reasons
@@ -276,10 +294,11 @@ without the parser, evaluator, or runtime.
   fails, the runtime knows *that* the guards were insufficient, not *which* observation
   explains it. It records the failure and lets the next proposal encode the reason as a
   new guard. Deriving negative guards automatically would require the world's dynamics.
-- **Newest-first dispatch among witnesses without failures.** Newer witnesses tend to
-  carry more specific guards and more recent knowledge. The cost is visible in the
-  results: the first, most general witness is tried last and still wastes a restart
-  when nothing better applies.
+- **Two-phase, evidence-ordered dispatch.** The first version ran the first applicable
+  witness immediately and stopped after any replay that acted and failed. The dry run
+  showed a fresh path of a generic script pre-empting a better-evidenced targeted
+  witness over and over (`RESULTS.md`, dispatch v1 vs v3). Checking all prefixes first
+  is free of actions, so there is no reason not to.
 - **The goal runs before as well as after.** A goal that already holds means nothing to
   do and no evidence; validated witnesses therefore always carry evidence of changing a
   goal-false world into a goal-true one.

@@ -263,5 +263,5 @@ replay. The third witness above, abbreviated:
   {"kind": "validated", "verdict": "pass", "world": "fleet@E4", "args": {"service": "api"}, "acts": 2}]}
 ```
 
-A replayer needs an evaluator for the 18 expression forms and the loop in
+A replayer needs an evaluator for the 21 expression forms and the loop in
 `rote/witness.py:replay`. It needs no parser and no interpreter.

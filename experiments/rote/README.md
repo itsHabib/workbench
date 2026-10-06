@@ -9,9 +9,11 @@ needed only when none applies.
 The name is provisional: "by rote" is how a retained capability runs, without thinking.
 (PyPI already has an unrelated `rote` package; nothing here is published.)
 
-Status: a runnable prototype, ~2,400 lines of stdlib Python, 55 tests, one scripted
-workload. Everything in `RESULTS.md` comes from the scripted oracle in
-`scenario/proposals.json`; no model was called anywhere in this experiment.
+Status: a runnable prototype (~2,578 lines of stdlib Python for the language, 62 tests), one
+scripted nine-episode workload, a model-free dry run of the larger live experiment, and a
+Go replayer checked against exported fixtures. Every number in `RESULTS.md` comes from a
+scripted or heuristic oracle; **no model was called anywhere in this experiment**. The
+live run needs a key (see `RESULTS.md`, "The live experiment").
 
 ## The idea in plain English
 
@@ -54,7 +56,7 @@ script has no way to say "it worked".
   and the 4 that acted first were all the earliest, most general witness.
 - **Drift is a side exit, not a crash.** A changed record shape fails a `has(...)` guard
   in the prefix. Nothing acts. The old witness stays valid for the old shape.
-- **Retained artifacts are data.** A witness is JSON over an 18-form expression language;
+- **Retained artifacts are data.** A witness is JSON over a 21-form expression language;
   the replayer is ~140 lines and needs no parser or evaluator (`rote/witness.py`,
   `rote/sym.py`), so a Go or TypeScript host could replay a library without the rest.
 - **Grants and oracle-freedom are static.** The plain-Python baseline can only refuse an
@@ -67,7 +69,10 @@ cd experiments/rote
 python3 demo.py                 # the nine-episode workload, Rote (scripted oracle)
 python3 ordinary/agent_py.py    # the same episodes in plain Python (the baseline)
 python3 ordinary/proxy_leak.py  # why a host-language tracer cannot infer guards
-python3 -m pytest tests -q      # 55 tests, including the replay-equivalence property test
+python3 -m pytest tests -q      # 62 tests, including the replay-equivalence property test
+python3 live/run_live.py --oracle heuristic --streams 10 --episodes 24   # model-free dry run, 4 arms
+python3 live/run_live.py --oracle live --streams 10 --episodes 24 --max-calls 900  # needs ANTHROPIC_API_KEY
+cd ../.. && go run ./experiments/rote/replay-go   # Go replayer vs 60 exported fixtures
 ```
 
 Python 3.12+ and pytest are the only requirements. `demo.py` rewrites `runs/library.json`
@@ -108,9 +113,12 @@ rote/        the language: lexer, parser, ast, sym (symbolic expressions), eval 
 worlds/      the simulated fleet (hosts, services, ports, disks, logs) and its incidents
 scenario/    fleet.rote (world signature + capabilities) and proposals.json (the cassette)
 ordinary/    the plain-Python baseline and the proxy-leak demonstration
+live/        the live experiment: six-cause world, four arms, runner, dry-run results
+replay-go/   a Go re-implementation of the replay kernel + the fixture exporter
 tests/       unit tests, runtime tests, the replay-equivalence property test
-runs/        output of the last demo run (library.json, report.json)
+runs/        output of the last demo run (library.json, report.json, replay_fixtures.json)
 demo.py      the workload
+REPLICATE.md a self-contained prompt for another agent to replicate, break and compare
 ```
 
 Read `DESIGN.md` for the semantics, the alternatives considered, and what is new;

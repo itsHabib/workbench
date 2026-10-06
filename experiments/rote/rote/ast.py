@@ -182,6 +182,7 @@ class ScriptDecl(Decl):
     params: list[str]
     body: Block
     source: str = ""
+    when: Expr | None = None  # optional author-written applicability condition
 
 
 @dataclass

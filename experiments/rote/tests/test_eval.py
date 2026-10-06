@@ -151,3 +151,15 @@ def test_sym_values_concretize_deeply():
     assert concretize(v) == {"a": [1, 2], "b": {"x": 1}}
     with pytest.raises(RoteError):
         concretize({"f": __import__("rote.eval", fromlist=["Closure"]).Closure([], None, None)})
+
+
+def test_reductions_stay_symbolic_without_pinning_length():
+    w = DictWorld({"items(a)": [3, 9, 4]}, SIG)
+    res, _ = run("script f(s) { set(s, max_of(items(s), 0) + 1)\n set(s, sum(items(s))) }", w, ["a"])
+    assert res.ok and guards(res) == []
+    assert w.acts == [("set", ["a", 10]), ("set", ["a", 16])]
+    act = [s for s in res.steps if s["op"] == "act"][0]
+    assert act["args"][1] == ["bin", "+", ["maxof", ["ref", 1], ["const", 0]], ["const", 1]]
+    w2 = DictWorld({"items(a)": []}, SIG)
+    res, _ = run("script f(s) { set(s, min_of(items(s), 7)) }", w2, ["a"])
+    assert res.ok and w2.acts == [("set", ["a", 7])]

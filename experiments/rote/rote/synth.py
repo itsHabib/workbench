@@ -61,6 +61,7 @@ Rote script grammar (whole language):
          | f(args) | fn(x, y) { ... } | if c { ... } else { ... } | return e | use CAP(args)
          | a + b, a - b, a * b, a / b, a % b, ==, !=, <, <=, >, >=, and, or, not a
   builtins: len map filter fold all any contains keys has get str range min max fail append
+            sum(xs) max_of(xs, default) min_of(xs, default)   (reductions over lists of ints)
 World functions are called by name; `observe` ones read, `act` ones change the world.
 A script may not call ask(). Only the goal decides success. Observe before you act.
 """

@@ -191,20 +191,101 @@ agent writes comes with a machine-derived applicability check, an audit trail of
 it was validated and where it failed, a static guarantee that it runs without a model
 and within a grant, and a side exit that says exactly which assumption broke.
 
+## The live experiment: harness built, dry run measured, live run blocked on a key
+
+The experiment proposed below was built as `live/run_live.py`: random fleets with six
+causes (crash, full disk, port collision in flat or nested config, lost port
+configuration, stale lock, dependency down), random incident streams, and four arms
+over identical incidents:
+
+| arm | how a retained script is chosen for reuse |
+|---|---|
+| `rote` | inferred guards (this design) |
+| `rote_reval` | inferred guards, plus re-running known sources under the goal before asking the model |
+| `precond` | the author (the oracle) writes a `when` precondition; it is evaluated and the body is trusted |
+| `model_each` | the model is asked every episode and shown the retained library (Voyager-style dispatch) |
+
+This environment has no model credentials, so the live run did not happen here. What
+did run is the same harness with a **deterministic heuristic oracle**: a stand-in that
+diagnoses the cause from the probe and returns, first, a generic "kitchen-sink" runbook
+(disk, lock, dependencies, restart) and, if that fails, the targeted fix for the cause.
+It never writes a destructive branch, so this dry run measures one thing only: the
+oracle-call economics of the four dispatch mechanisms under a benign, ideal
+synthesizer. Safety is not exercised (every arm: 100% success, 0 disruptions, 0
+collateral outages, 240 episodes each).
+
+Three dry runs, 10 streams x 24 episodes, seed 1, same incidents, as the design changed
+in response to what each run showed (`live/results/dryrun-v*`):
+
+| | rote | rote_reval | precond | model_each |
+|---|---|---|---|---|
+| v1: `fold` reductions, one-phase dispatch | 0.59 | 0.36 | 0.24 | 1.31 |
+| v2: + symbolic `max_of`/`min_of`/`sum` | 0.57 | 0.35 | 0.24 | 1.31 |
+| v3: + two-phase, evidence-ordered dispatch | **0.43** | **0.23** | 0.24 | 1.31 |
+
+(oracle calls per episode, mean over 240 episodes per arm)
+
+The v3 numbers hold across seeds: seed 2 gives 0.49 / 0.24 / 0.27 / 1.34 and seed 3
+gives 0.44 / 0.23 / 0.23 / 1.29 for the same four arms (`live/results/dryrun-v3-seed*`),
+again at 100% success with no disruptions.
+
+What the runs taught, in order:
+
+1. **A validated path is narrower than its source, and that costs oracle calls.** The
+   generic runbook handles four causes in one script. `precond` trusts the whole script
+   under `when status == "down"` and reuses it everywhere it works. Rote retains one
+   path per combination of branch outcomes (disk full or not, lock held or not, how many
+   dependencies), so a new combination is a miss. That is the price of refusing to run
+   unvalidated branches, and the scripted workload showed what that refusal buys (8
+   disruptions avoided). `revalidate_sources` lets a caller pay the other way: re-run the
+   known source on the new path under the goal, model-free, accepting that the path is
+   unvalidated until the goal passes. With it, Rote matches `precond` on calls.
+2. **`fold` over an observed list pins its length.** The lost-port fix computed a free
+   port with `fold(ports_in_use(host), ...)`, so every host with a different number of
+   running services was a miss (1.06 calls per lost-port episode). Symbolic reductions
+   remove the length guard, but only moved the number to 0.98, because the dominant cost
+   was the next item.
+3. **One-phase dispatch let a fresh generic path pre-empt a proven targeted witness.**
+   Each new path of the generic script arrived with one pass and no failures, sorted
+   first, applied (its guards held), restarted, failed, and ended dispatch. Checking
+   every prefix first (observe-only, no actions) and then running applicable witnesses
+   by evidence, continuing past a failed replay, took lost-port episodes from 0.98 to
+   0.41 calls and the `rote` arm from 0.57 to 0.43. The scripted workload's numbers did
+   not change under the new policy.
+
+Per cause after v3 (oracle calls per episode): crash 0.21 / 0.03 / 0.05 / 1.00; disk
+0.55 / 0.12 / 0.10 / 1.00; lock 0.67 / 0.17 / 0.03 / 1.00; dependency 0.12 / 0.12 /
+0.06 / 1.00; lost port 0.41 / 0.41 / 0.53 / 2.00; port collision 0.69 / 0.69 / 0.85 /
+2.00 (rote / rote_reval / precond / model_each). `model_each` never learns by
+construction; its library only shortens the model's job.
+
+What the dry run cannot say: whether a live model writes scripts whose branches matter
+(if its scripts rarely branch on observations, guards collapse toward `status ==
+"down"` and the design adds little over the goal), whether its author-written `when`
+clauses are as careful as the heuristic's, and whether unvalidated branches in its
+scripts ever carry a blast radius. Those three questions are the live run. The harness
+records per-episode outcome, oracle calls, actions, disruptions, collateral, token
+usage and a full transcript; `REPLICATE.md` is a self-contained brief for running it.
+
+To run it here, add `ANTHROPIC_API_KEY` to the cloud environment's settings (edit the
+environment, API credentials or an environment variable) and start a new session; the
+harness reads that variable. Budget: 10 streams x 24 episodes x 4 arms is at most 900
+proposals, roughly $10-15 at Claude Opus 5.5 list prices with the cached system prompt.
+
 ## The next experiment
 
-**Strengthen or disprove:** replace the cassette with `LiveOracle` (one Claude call
-per proposal), generate 50 random incident streams of 30 episodes each over a fleet
-with 6 causes instead of 3, and measure per-episode oracle calls over time, wasted
-actions, disruptions, and collateral outages, against a Voyager-style baseline (skills
-retrieved by description similarity, re-executed through the model). The prediction is
-that Rote's oracle calls per episode fall toward zero as the library covers the cause
-space while the baseline's stay roughly constant, with zero disruptions throughout.
-Two outcomes would disprove the idea's value: if the model's scripts branch on
-observations so rarely that guards are nearly always just `status == "down"` (then
-guards add little over the goal), or if witness proliferation makes dispatch cost more
-observations than synthesis saves (Minton's problem, measured rather than assumed).
+**Run the live arm.** The harness exists and the prediction is unchanged: as the
+library covers the cause space, `rote`'s oracle calls per episode fall toward zero while
+`model_each`'s stay near one, with zero disruptions throughout; `precond` is the
+interesting comparison, because the live model's `when` clauses, unlike the heuristic's,
+will sometimes be insufficient, and the dry run shows `rote_reval` already matching it on
+calls. Two outcomes would count against the idea: a live model whose scripts rarely
+branch on observations (guards collapse toward `status == "down"`), or witness
+proliferation that costs more observations than synthesis saves (Minton's utility
+problem; measure prefix observations per episode, which the harness can be extended to
+log).
 
 Two smaller experiments follow directly: witnesses with bounded loops, to remove the
-length-guard limitation; and a ~150-line Go replayer over `runs/library.json`, to test
-the claim that the retained artifacts are host-language-independent.
+remaining length guards (`for`/`map`/`filter` over observed lists); and replaying a
+library through the Go kernel against a Go world adapter rather than fixtures, to test
+host independence end to end.

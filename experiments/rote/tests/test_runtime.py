@@ -161,3 +161,72 @@ def test_scripted_oracle_logs_what_it_was_asked():
     prompt = rt.oracle.log[0]["prompt"]
     assert prompt["cap"] == "heal" and prompt["goal"] == 'status(service) == "up"' and "restart" in prompt["grant"]
     json.dumps(prompt)  # the prompt is plain data
+
+
+def test_when_clause_is_traced_into_guards_and_may_only_observe():
+    guarded = ('script heal(service) when status(service) == "down" and log_tail(service) != "x" {\n'
+               '  restart(service)\n}')
+    rt, lib = runtime({"heal": [guarded]})
+    w = world()
+    w.crash("web")
+    out = rt.achieve("heal", ["web"], w)
+    assert out.kind == "synthesized"
+    guards = [g["expect"] for g in out.witness.guards]
+    assert guards == [True, False]  # `status == "down"` held; `not (... != "x")` was false
+    assert out.witness.prefix_len == 4  # status, guard, log_tail, guard; then restart
+    bad = 'script heal(service) when restart(service) { restart(service) }'
+    rt, _ = runtime({"heal": [bad]})
+    w = world()
+    w.crash("web")
+    out = rt.achieve("heal", ["web"], w)
+    assert out.kind == "failed" and any("when-clause" in e.text for e in out.events) and w.history == []
+
+
+def test_probe_is_shown_to_the_oracle():
+    rt, _ = runtime({"heal": [P1]})
+    rt.policy.probe = lambda world, cap, args: {"status": world.obs_status(args[0])}
+    w = world()
+    w.crash("web")
+    rt.achieve("heal", ["web"], w)
+    assert rt.oracle.log[0]["prompt"]["situation"] == {"status": "down"}
+
+
+def test_revalidating_known_sources_takes_a_new_path_without_the_oracle():
+    two_paths = ('script heal(service) {\n  let host = host_of(service)\n'
+                 '  if log_tail(service) == "no space left on device" { clear_tmp(host) }\n  restart(service)\n}')
+    rt, lib = runtime({"heal": [two_paths]})
+    rt.policy.revalidate_sources = True
+    w = world()
+    w.disk_full("web")
+    assert rt.achieve("heal", ["web"], w).kind == "synthesized"  # path: clear_tmp, restart
+    w.crash("api")
+    out = rt.achieve("heal", ["api"], w)  # guard on the log line fails; same source, other path
+    assert out.kind == "revalidated" and out.oracle_calls == 0 and w.obs_status("api") == "up"
+    assert len(lib.caps["heal"].witnesses) == 2 and {x.source for x in lib.caps["heal"].witnesses} == {two_paths}
+    locked = Runtime(lib, Policy(grant=GRANT, mode="replay-only", revalidate_sources=True), None)
+    w.lose_port("web")
+    assert locked.achieve("heal", ["web"], w).kind == "parked"  # replay-only still runs nothing unvalidated
+
+
+def test_dispatch_checks_every_prefix_first_and_continues_past_a_failed_replay():
+    lock_fix = 'script heal(service) {\n  if lock_held(service) { remove_lock(service) }\n  restart(service)\n}'
+    lib_src = LIB.replace("  act wipe_host(host): bool\n", "  act wipe_host(host): bool\n  observe lock_held(service): bool\n  act remove_lock(service): bool\n")
+    from live.world6 import FleetWorld6
+    lib = Library.from_source(lib_src)
+    oracle = ScriptedOracle({"heal": [P1, lock_fix]})
+    rt = Runtime(lib, Policy(grant=GRANT | {"remove_lock"}), oracle)
+    w = FleetWorld6("t")
+    w.add_host("h1")
+    w.add_service("web", "h1", 80)
+    w.add_service("api", "h1", 81)
+    w.crash("web")
+    assert rt.achieve("heal", ["web"], w).kind == "synthesized"  # P1: status == down -> restart
+    w.stale_lock("api")
+    out = rt.achieve("heal", ["api"], w)  # P1 applies and fails; the oracle supplies the lock fix
+    assert out.kind == "synthesized" and out.oracle_calls == 1
+    w.stale_lock("web")
+    out = rt.achieve("heal", ["web"], w)
+    # both witnesses are applicable; the lock fix has the better evidence and runs first? P1 has 1 pass
+    # 1 fail, the lock fix 1 pass 0 fails -> lock fix first, no wasted restart, no oracle call.
+    assert out.kind == "replayed" and out.oracle_calls == 0 and out.witness.source == lock_fix
+    assert [n for n, _ in w.history[-2:]] == ["remove_lock", "restart"]

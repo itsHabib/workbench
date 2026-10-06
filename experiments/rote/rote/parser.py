@@ -3,7 +3,7 @@
   program  := decl*
   decl     := 'world' NAME '{' (('observe'|'act') NAME '(' names ')' (':' NAME)?)* '}'
             | 'cap' NAME '(' names ')' '{' 'goal' ':' expr '}'
-            | ('script'|'tactic') NAME '(' names ')' block
+            | 'script' NAME '(' names ')' ('when' expr)? block | 'tactic' NAME '(' names ')' block
   block    := '{' stmt* '}'
   stmt     := 'let' NAME '=' expr | 'for' NAME 'in' expr block | expr
   expr     := or ; or := and ('or' and)* ; and := not ('and' not)* ; not := 'not' not | cmp
@@ -142,11 +142,16 @@ class _Parser:
         start = self.advance()
         name = self.ident()
         params = self.names()
+        when = None
+        if start.text == "script" and self.at("ident", "when"):
+            self.advance()
+            when = self.expr()
         body = self.block()
         end_line = self.toks[self.pos - 1].line
         source = "\n".join(self.src.splitlines()[start.line - 1 : end_line])
-        cls = A.ScriptDecl if start.text == "script" else A.TacticDecl
-        return cls(name, params, body, source, line=start.line)
+        if start.text == "tactic":
+            return A.TacticDecl(name, params, body, source, line=start.line)
+        return A.ScriptDecl(name, params, body, source, when, line=start.line)
 
     # -- statements ----------------------------------------------------------
     def block(self) -> A.Block:

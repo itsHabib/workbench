@@ -1,0 +1,2066 @@
+[
+ {
+  "witness": "wacedcf7c9f",
+  "cap": "heal",
+  "args": {
+   "service": "e"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "down"
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "e"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wacedcf7c9f",
+  "cap": "heal",
+  "args": {
+   "service": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "down"
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "a"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wacedcf7c9f",
+  "cap": "heal",
+  "args": {
+   "service": "d"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "down"
+   },
+   {
+    "op": "act",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "d"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wacedcf7c9f",
+  "cap": "heal",
+  "args": {
+   "service": "e"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "down"
+   },
+   {
+    "op": "act",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "e"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wacedcf7c9f",
+  "cap": "heal",
+  "args": {
+   "service": "c"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "down"
+   },
+   {
+    "op": "act",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "c"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wacedcf7c9f",
+  "cap": "heal",
+  "args": {
+   "service": "b"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "down"
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "b"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wacedcf7c9f",
+  "cap": "heal",
+  "args": {
+   "service": "b"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "down"
+   },
+   {
+    "op": "act",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "b"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wacedcf7c9f",
+  "cap": "heal",
+  "args": {
+   "service": "b"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "down"
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "b"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wacedcf7c9f",
+  "cap": "heal",
+  "args": {
+   "service": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "up"
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 1,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wacedcf7c9f",
+  "cap": "heal",
+  "args": {
+   "service": "b"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "down"
+   },
+   {
+    "op": "act",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "b"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wacedcf7c9f",
+  "cap": "heal",
+  "args": {
+   "service": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "down"
+   },
+   {
+    "op": "act",
+    "value": false
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "a"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wacedcf7c9f",
+  "cap": "heal",
+  "args": {
+   "service": "e"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "down"
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "e"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w4d36485553",
+  "cap": "heal",
+  "args": {
+   "service": "d"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "no space left on device"
+   },
+   {
+    "op": "act",
+    "value": 50
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "clear_tmp",
+     [
+      "h1"
+     ]
+    ],
+    [
+     "restart",
+     [
+      "d"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w4d36485553",
+  "cap": "heal",
+  "args": {
+   "service": "c"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "bind: address already in use (:8000)"
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w4d36485553",
+  "cap": "heal",
+  "args": {
+   "service": "b"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "bind: address already in use (:8000)"
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w4d36485553",
+  "cap": "heal",
+  "args": {
+   "service": "b"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "bind: address already in use (:8000)"
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w4d36485553",
+  "cap": "heal",
+  "args": {
+   "service": "d"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": "weird"
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w4d36485553",
+  "cap": "heal",
+  "args": {
+   "service": "c"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": "weird"
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w4d36485553",
+  "cap": "heal",
+  "args": {
+   "service": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "bind: address already in use (:8000)"
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w4d36485553",
+  "cap": "heal",
+  "args": {
+   "service": "b"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "bind: address already in use (:8000)"
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w4d36485553",
+  "cap": "heal",
+  "args": {
+   "service": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "bind: address already in use (:8000)"
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w4d36485553",
+  "cap": "heal",
+  "args": {
+   "service": "e"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": "segfault (core dumped)"
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w4d36485553",
+  "cap": "heal",
+  "args": {
+   "service": "c"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "bind: address already in use (:8000)"
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w4d36485553",
+  "cap": "heal",
+  "args": {
+   "service": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": "no space left on device"
+   },
+   {
+    "op": "act",
+    "value": 50
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "clear_tmp",
+     [
+      "h1"
+     ]
+    ],
+    [
+     "restart",
+     [
+      "a"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w61d79abf0c",
+  "cap": "heal",
+  "args": {
+   "service": "d"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8001
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": [
+     8001,
+     8002
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w61d79abf0c",
+  "cap": "heal",
+  "args": {
+   "service": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8001
+    }
+   },
+   {
+    "op": "observe",
+    "value": [
+     8001,
+     8002
+    ]
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "a",
+      "port",
+      8002
+     ]
+    ],
+    [
+     "restart",
+     [
+      "a"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w61d79abf0c",
+  "cap": "heal",
+  "args": {
+   "service": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 9000
+    }
+   },
+   {
+    "op": "observe",
+    "value": []
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w61d79abf0c",
+  "cap": "heal",
+  "args": {
+   "service": "b"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 9000
+    }
+   },
+   {
+    "op": "observe",
+    "value": [
+     9000
+    ]
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "b",
+      "port",
+      9001
+     ]
+    ],
+    [
+     "restart",
+     [
+      "b"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w61d79abf0c",
+  "cap": "heal",
+  "args": {
+   "service": "b"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "version": 3
+    }
+   },
+   {
+    "op": "observe",
+    "value": []
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w61d79abf0c",
+  "cap": "heal",
+  "args": {
+   "service": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "version": 3
+    }
+   },
+   {
+    "op": "observe",
+    "value": []
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w61d79abf0c",
+  "cap": "heal",
+  "args": {
+   "service": "d"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 9000
+    }
+   },
+   {
+    "op": "observe",
+    "value": [
+     8002,
+     9000
+    ]
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "d",
+      "port",
+      9001
+     ]
+    ],
+    [
+     "restart",
+     [
+      "d"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w61d79abf0c",
+  "cap": "heal",
+  "args": {
+   "service": "c"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8000
+    }
+   },
+   {
+    "op": "observe",
+    "value": [
+     8001
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w61d79abf0c",
+  "cap": "heal",
+  "args": {
+   "service": "b"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 9000
+    }
+   },
+   {
+    "op": "observe",
+    "value": [
+     8000
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w61d79abf0c",
+  "cap": "heal",
+  "args": {
+   "service": "e"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8002
+    }
+   },
+   {
+    "op": "observe",
+    "value": []
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 4,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w61d79abf0c",
+  "cap": "heal",
+  "args": {
+   "service": "d"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8002
+    }
+   },
+   {
+    "op": "observe",
+    "value": [
+     8002
+    ]
+   },
+   {
+    "op": "act",
+    "value": true
+   },
+   {
+    "op": "act",
+    "value": true
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "set_config",
+     [
+      "d",
+      "port",
+      8003
+     ]
+    ],
+    [
+     "restart",
+     [
+      "d"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "w61d79abf0c",
+  "cap": "heal",
+  "args": {
+   "service": "e"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "version": 3
+    }
+   },
+   {
+    "op": "observe",
+    "value": []
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 3,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5943be240a",
+  "cap": "heal",
+  "args": {
+   "service": "d"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8002
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": [
+     9000
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 5,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5943be240a",
+  "cap": "heal",
+  "args": {
+   "service": "e"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8001
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5943be240a",
+  "cap": "heal",
+  "args": {
+   "service": "e"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8000
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5943be240a",
+  "cap": "heal",
+  "args": {
+   "service": "a"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8001
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": []
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 5,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5943be240a",
+  "cap": "heal",
+  "args": {
+   "service": "e"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8001
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5943be240a",
+  "cap": "heal",
+  "args": {
+   "service": "b"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8002
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": []
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 5,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5943be240a",
+  "cap": "heal",
+  "args": {
+   "service": "d"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "listen": {
+      "port": 8000
+     },
+     "version": 2
+    }
+   },
+   {
+    "op": "observe",
+    "value": []
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 5,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5943be240a",
+  "cap": "heal",
+  "args": {
+   "service": "d"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8001
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5943be240a",
+  "cap": "heal",
+  "args": {
+   "service": "b"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "version": 3
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5943be240a",
+  "cap": "heal",
+  "args": {
+   "service": "b"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8000
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5943be240a",
+  "cap": "heal",
+  "args": {
+   "service": "e"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h2"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "version": 3
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "w5943be240a",
+  "cap": "heal",
+  "args": {
+   "service": "d"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": "h1"
+   },
+   {
+    "op": "observe",
+    "value": {
+     "port": 8000
+    }
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 2,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wc39e3d2280",
+  "cap": "recover_host",
+  "args": {
+   "host": "h3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": [
+     "x0",
+     "x1",
+     "x2"
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "already_satisfied",
+     "witness": null
+    },
+    "acts": []
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "replayed",
+     "witness": "wacedcf7c9f"
+    },
+    "acts": [
+     [
+      "restart",
+      [
+       "x1"
+      ]
+     ]
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "replayed",
+     "witness": "wacedcf7c9f"
+    },
+    "acts": [
+     [
+      "restart",
+      [
+       "x2"
+      ]
+     ]
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "x1"
+     ]
+    ],
+    [
+     "restart",
+     [
+      "x2"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wc39e3d2280",
+  "cap": "recover_host",
+  "args": {
+   "host": "h3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": [
+     "x0",
+     "x1"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 1,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wc39e3d2280",
+  "cap": "recover_host",
+  "args": {
+   "host": "h3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": [
+     "x0",
+     "x1",
+     "x2"
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "already_satisfied",
+     "witness": null
+    },
+    "acts": []
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "replayed",
+     "witness": "wacedcf7c9f"
+    },
+    "acts": [
+     [
+      "restart",
+      [
+       "x1"
+      ]
+     ]
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "replayed",
+     "witness": "wacedcf7c9f"
+    },
+    "acts": [
+     [
+      "restart",
+      [
+       "x2"
+      ]
+     ]
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "x1"
+     ]
+    ],
+    [
+     "restart",
+     [
+      "x2"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wc39e3d2280",
+  "cap": "recover_host",
+  "args": {
+   "host": "h3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": [
+     "x0",
+     "x1",
+     "x2"
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "replayed",
+     "witness": "wacedcf7c9f"
+    },
+    "acts": [
+     [
+      "restart",
+      [
+       "x0"
+      ]
+     ]
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "already_satisfied",
+     "witness": null
+    },
+    "acts": []
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "already_satisfied",
+     "witness": null
+    },
+    "acts": []
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "x0"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wc39e3d2280",
+  "cap": "recover_host",
+  "args": {
+   "host": "h3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": [
+     "x0",
+     "x1",
+     "x2"
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "already_satisfied",
+     "witness": null
+    },
+    "acts": []
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "replayed",
+     "witness": "wacedcf7c9f"
+    },
+    "acts": [
+     [
+      "restart",
+      [
+       "x1"
+      ]
+     ]
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "replayed",
+     "witness": "wacedcf7c9f"
+    },
+    "acts": [
+     [
+      "restart",
+      [
+       "x2"
+      ]
+     ]
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "x1"
+     ]
+    ],
+    [
+     "restart",
+     [
+      "x2"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wc39e3d2280",
+  "cap": "recover_host",
+  "args": {
+   "host": "h3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": [
+     "x0",
+     "x1",
+     "x2"
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "replayed",
+     "witness": "wacedcf7c9f"
+    },
+    "acts": [
+     [
+      "restart",
+      [
+       "x0"
+      ]
+     ]
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "already_satisfied",
+     "witness": null
+    },
+    "acts": []
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "already_satisfied",
+     "witness": null
+    },
+    "acts": []
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "x0"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wc39e3d2280",
+  "cap": "recover_host",
+  "args": {
+   "host": "h3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": [
+     "x0",
+     "x1",
+     "x2"
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "already_satisfied",
+     "witness": null
+    },
+    "acts": []
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "replayed",
+     "witness": "wacedcf7c9f"
+    },
+    "acts": [
+     [
+      "restart",
+      [
+       "x1"
+      ]
+     ]
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "already_satisfied",
+     "witness": null
+    },
+    "acts": []
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "x1"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wc39e3d2280",
+  "cap": "recover_host",
+  "args": {
+   "host": "h3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": [
+     "x0",
+     "x1",
+     "x2",
+     "x3"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 1,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wc39e3d2280",
+  "cap": "recover_host",
+  "args": {
+   "host": "h3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": [
+     "x0",
+     "x1",
+     "x2"
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "replayed",
+     "witness": "wacedcf7c9f"
+    },
+    "acts": [
+     [
+      "restart",
+      [
+       "x0"
+      ]
+     ]
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "replayed",
+     "witness": "wacedcf7c9f"
+    },
+    "acts": [
+     [
+      "restart",
+      [
+       "x1"
+      ]
+     ]
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "replayed",
+     "witness": "wacedcf7c9f"
+    },
+    "acts": [
+     [
+      "restart",
+      [
+       "x2"
+      ]
+     ]
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "x0"
+     ]
+    ],
+    [
+     "restart",
+     [
+      "x1"
+     ]
+    ],
+    [
+     "restart",
+     [
+      "x2"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wc39e3d2280",
+  "cap": "recover_host",
+  "args": {
+   "host": "h3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": [
+     "x0",
+     "x1"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 1,
+   "acts": []
+  }
+ },
+ {
+  "witness": "wc39e3d2280",
+  "cap": "recover_host",
+  "args": {
+   "host": "h3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": [
+     "x0",
+     "x1",
+     "x2"
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "replayed",
+     "witness": "wacedcf7c9f"
+    },
+    "acts": [
+     [
+      "restart",
+      [
+       "x0"
+      ]
+     ]
+    ]
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "already_satisfied",
+     "witness": null
+    },
+    "acts": []
+   },
+   {
+    "op": "use",
+    "value": {
+     "ok": true,
+     "how": "already_satisfied",
+     "witness": null
+    },
+    "acts": []
+   }
+  ],
+  "expected": {
+   "kind": "completed",
+   "step": -1,
+   "acts": [
+    [
+     "restart",
+     [
+      "x0"
+     ]
+    ]
+   ]
+  }
+ },
+ {
+  "witness": "wc39e3d2280",
+  "cap": "recover_host",
+  "args": {
+   "host": "h3"
+  },
+  "answers": [
+   {
+    "op": "observe",
+    "value": [
+     "x0",
+     "x1"
+    ]
+   }
+  ],
+  "expected": {
+   "kind": "side_exit",
+   "step": 1,
+   "acts": []
+  }
+ }
+]

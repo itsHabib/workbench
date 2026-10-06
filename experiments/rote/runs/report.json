@@ -191,8 +191,8 @@
    "disruptions": 0,
    "events": [
     "inapplicable: w5943be240a does not apply: guard has(config(service), \"listen\") expected true, got false",
-    "inapplicable: w61d79abf0c does not apply: guard has(config(service), \"port\") expected true, got false",
     "inapplicable: w4d36485553 does not apply: guard (log_tail(service) == \"no space left on device\") expected true, got false",
+    "inapplicable: w61d79abf0c does not apply: guard has(config(service), \"port\") expected true, got false",
     "checker_fail: wacedcf7c9f replayed but the goal does not hold",
     "parked: no validated path applies and the policy forbids synthesis"
    ]

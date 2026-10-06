@@ -621,6 +621,31 @@ def _b_append(t: Tracer, args: list[Any], line: int) -> Any:
     return [*t.elements(xs, line), v]
 
 
+def _b_reduce(which: str):
+    """A reduction over a list of ints stays symbolic: it does not pin the list's length."""
+    tag = {"sum": "sum", "max_of": "maxof", "min_of": "minof"}[which]
+    n = 1 if which == "sum" else 2
+
+    def f(t: Tracer, args: list[Any], line: int) -> Any:
+        xs, *rest = _arity(which, args, n, line)
+        rxs = concretize(xs)
+        if not isinstance(rxs, list) or any(not _is_int(x) for x in rxs):
+            raise RoteError("type", f"{which} needs a list of ints", line)
+        default = concretize(rest[0]) if rest else None
+        if rest and not _is_int(default):
+            raise RoteError("type", f"{which} needs an int default", line)
+        if which == "sum":
+            result = sum(rxs)
+        else:
+            result = default if not rxs else (max(rxs) if which == "max_of" else min(rxs))
+        if not contains_sym(xs) and not (rest and contains_sym(rest[0])):
+            return result
+        expr = [tag, lift(xs)] if which == "sum" else [tag, lift(xs), lift(rest[0])]
+        return Sym(expr, result)
+
+    return f
+
+
 def _arity(name: str, args: list[Any], n: int, line: int) -> list[Any]:
     if len(args) != n:
         raise RoteError("arity", f"{name} expects {n} arguments, got {len(args)}", line)
@@ -631,6 +656,7 @@ BUILTINS = {
     "len": _b_len, "map": _b_map, "filter": _b_filter, "fold": _b_fold, "all": _b_all, "any": _b_any,
     "contains": _b_contains, "keys": _b_keys, "has": _b_has, "get": _b_get, "str": _b_str,
     "range": _b_range, "min": _b_minmax("min"), "max": _b_minmax("max"), "fail": _b_fail, "append": _b_append,
+    "sum": _b_reduce("sum"), "max_of": _b_reduce("max_of"), "min_of": _b_reduce("min_of"),
 }
 
 

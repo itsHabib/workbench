@@ -11,6 +11,7 @@ so a replayer in any host language can evaluate them with a ~60-line switch:
   ["contains", e, v]      ["str", e]                 ["not", e]        ["neg", e]
   ["min", a, b]           ["max", a, b]              ["bin", op, a, b]
   ["list", [e...]]        ["record", [[k, e]...]]
+  ["sum", e]              ["maxof", e, default]      ["minof", e, default]   (reductions over a list of ints)
 """
 
 from __future__ import annotations
@@ -157,7 +158,23 @@ def eval_sexpr(e: SExpr, params: dict[str, Any], refs: dict[int, Any]) -> Any:  
         return [eval_sexpr(x, params, refs) for x in e[1]]
     if tag == "record":
         return {k: eval_sexpr(x, params, refs) for k, x in e[1]}
+    if tag in ("sum", "maxof", "minof"):
+        return _reduce(tag, e, params, refs)
     raise SymError(f"unknown expression tag {tag!r}")
+
+
+def _reduce(tag: str, e: SExpr, params: dict[str, Any], refs: dict[int, Any]) -> Any:
+    xs = eval_sexpr(e[1], params, refs)
+    if not isinstance(xs, list) or any(not isinstance(x, int) or isinstance(x, bool) for x in xs):
+        raise SymError(f"{tag} needs a list of ints")
+    if tag == "sum":
+        return sum(xs)
+    default = eval_sexpr(e[2], params, refs)
+    if not isinstance(default, int) or isinstance(default, bool):
+        raise SymError(f"{tag} needs an int default")
+    if not xs:
+        return default
+    return max(xs) if tag == "maxof" else min(xs)
 
 
 def _to_str(v: Any) -> str:
@@ -187,10 +204,12 @@ def show(e: SExpr, refnames: dict[int, str] | None = None) -> str:  # noqa: C901
         return f"{show(e[1], refnames)}[{show(key, refnames)}]"
     if tag == "index":
         return f"{show(e[1], refnames)}[{show(e[2], refnames)}]"
-    if tag in ("len", "keys", "str"):
+    if tag in ("len", "keys", "str", "sum"):
         return f"{tag}({show(e[1], refnames)})"
     if tag in ("has", "contains", "min", "max"):
         return f"{tag}({show(e[1], refnames)}, {show(e[2], refnames)})"
+    if tag in ("maxof", "minof"):
+        return f"{tag[:3]}_of({show(e[1], refnames)}, {show(e[2], refnames)})"
     if tag == "get":
         return f"get({show(e[1], refnames)}, {show(e[2], refnames)}, {show(e[3], refnames)})"
     if tag == "not":

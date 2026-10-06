@@ -107,8 +107,8 @@ class Library:
         return w
 
     def dispatch_order(self, cap: Capability) -> list[Witness]:
-        """Witnesses with no recorded failures first, newest first within a tier."""
-        return sorted(cap.witnesses, key=lambda w: (w.counts()[1], -w.seq))
+        """Fewest recorded failures first, then most passes, then newest."""
+        return sorted(cap.witnesses, key=lambda w: (w.counts()[1], -w.counts()[0], -w.seq))
 
     # -- persistence ---------------------------------------------------------------
     def to_json(self) -> dict[str, Any]:

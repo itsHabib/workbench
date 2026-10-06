@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import ast as A
-from .effects import check_script
+from .effects import StaticError, check_goal, check_script
 from .eval import RoteError, Tracer, run_script
 from .library import Capability, Library
 from .parser import ParseError, parse_program
@@ -29,6 +29,9 @@ class Policy:
     max_attempts: int = 3
     fuel: int = 20_000
     max_depth: int = 6
+    probe: Any = None  # optional callable(world, cap_name, args) -> dict shown to the oracle as "situation"
+    revalidate_sources: bool = False  # on a miss, re-run known sources under the goal before asking the oracle
+    stop_after_failed_replay: bool = False  # True: one witness that acted and failed ends dispatch
 
 
 @dataclass
@@ -52,7 +55,7 @@ class Outcome:
 
     @property
     def ok(self) -> bool:
-        return self.kind in ("already_satisfied", "replayed", "synthesized")
+        return self.kind in ("already_satisfied", "replayed", "revalidated", "synthesized")
 
     def summary(self) -> dict[str, Any]:
         return {"ok": self.ok, "how": self.kind, "witness": self.witness.hash if self.witness else None}
@@ -126,26 +129,64 @@ class Runtime:
             out.reason = "no validated path applies and the policy forbids synthesis"
             out.events.append(Event("parked", out.reason))
             return out
+        if self.policy.revalidate_sources and self._revalidate(cap, args, world, out):
+            return out
         return self._synthesize(cap, args, world, out)
 
-    def _dispatch(self, cap: Capability, args: list[Any], world: Any, out: Outcome) -> bool:
-        """Try retained witnesses in order. Returns True when one achieved the goal."""
+    def _revalidate(self, cap: Capability, args: list[Any], world: Any, out: Outcome) -> bool:
+        """The trace-JIT move: a side exit re-enters the interpreter on the same program
+        before anyone calls the compiler. Re-running a known source takes an unvalidated
+        path under the goal; the caller opts in because that path may act."""
+        seen: set[str] = set()
+        for w in sorted(cap.witnesses, key=lambda x: -x.seq):
+            if w.source in seen:
+                continue
+            seen.add(w.source)
+            res = self.propose(w.source, world, cap, args)
+            out.events.extend(res.events)
+            out.acts.extend(res.acts)
+            if res.ok:
+                out.kind = "revalidated"
+                out.witness = res.witness
+                out.events.append(Event("revalidated", f"known source of {w.hash} took a new path; retained {res.witness.hash}"))
+                return True
+            if res.acts:
+                break  # it acted and failed: do not keep trying sources on a changed world
+        return False
+
+    def _applicable(self, cap: Capability, args: list[Any], world: Any, out: Outcome) -> list[Witness]:
+        """Phase one: check every witness's prefix without acting; keep the applicable ones."""
+        keep: list[Witness] = []
         for w in self.library.dispatch_order(cap):
-            r = replay(w, args, world, self.policy.grant, runtime=self)
-            out.acts.extend(r.acts)
+            r = replay(w, args, world, self.policy.grant, runtime=self, prefix_only=True)
             out.seen.update(r.seen)
             if r.kind == "refused":
                 out.events.append(Event("refused", f"{w.hash} refused before replay: {r.reason}", {"witness": w.hash}))
-                continue
-            if r.inapplicable:
+            elif r.kind in ("side_exit", "error"):
                 out.events.append(Event("inapplicable", f"{w.hash} does not apply: {r.reason}",
+                                        {"witness": w.hash, "step": r.step}))
+            else:
+                keep.append(w)
+        return keep
+
+    def _dispatch(self, cap: Capability, args: list[Any], world: Any, out: Outcome) -> bool:
+        """Phase two: run applicable witnesses, best evidence first. Each replay re-checks its
+        own guards against the world as it is now. Returns True when one achieved the goal."""
+        for w in self._applicable(cap, args, world, out):
+            r = replay(w, args, world, self.policy.grant, runtime=self)
+            out.acts.extend(r.acts)
+            out.seen.update(r.seen)
+            if r.inapplicable:  # an earlier replay in this dispatch changed what this one assumed
+                out.events.append(Event("inapplicable", f"{w.hash} no longer applies: {r.reason}",
                                         {"witness": w.hash, "step": r.step}))
                 continue
             if r.kind != "completed":
                 self._record(w, "replayed", "side_exit", world, cap, args, r, out)
                 out.events.append(Event("side_exit", f"{w.hash} stopped after acting: {r.reason}",
                                         {"witness": w.hash, "acts": r.acts}))
-                return False
+                if self.policy.stop_after_failed_replay:
+                    return False
+                continue
             holds, why = self.goal_holds(cap, args, world)
             verdict = "pass" if holds else "fail"
             self._record(w, "replayed", verdict, world, cap, args, r, out, why)
@@ -156,7 +197,8 @@ class Runtime:
                 return True
             out.events.append(Event("checker_fail", f"{w.hash} replayed but the goal does not hold",
                                     {"witness": w.hash, "acts": r.acts}))
-            return False
+            if self.policy.stop_after_failed_replay:
+                return False
         return False
 
     def _record(self, w: Witness, kind: str, verdict: str, world: Any, cap: Capability,
@@ -207,6 +249,7 @@ class Runtime:
             "grant": sorted(self.policy.grant),
             "dispatch": [e.text for e in out.events if e.kind in ("inapplicable", "side_exit", "checker_fail")],
             "observed": dict(out.seen),
+            "situation": self.policy.probe(world, cap.name, list(args)) if self.policy.probe else None,
             "attempts": attempts,
         }
 
@@ -242,11 +285,15 @@ class Runtime:
             return ProposalResult(False, "refused", f"script parameters must be {cap.params}, got {decl.params}")
         row, errors = check_script(decl.params, decl.body, self.library.signature, self.policy.grant,
                                    self.library.arities())
+        if decl.when is not None:
+            _, when_errors = check_goal(decl.params, decl.when, self.library.signature)
+            errors += [StaticError(e.kind, f"when-clause: {e.msg}", e.line) for e in when_errors]
         if errors:
             reason = "; ".join(str(e) for e in errors)
             return ProposalResult(False, "refused", reason, events=[Event("refused", f"static check: {reason}")])
         tracer = self._tracer(world, "script")
-        run = run_script(tracer, decl.params, args, decl.body)
+        body = decl.body if decl.when is None else _guarded_body(decl)
+        run = run_script(tracer, decl.params, args, body)
         acts = [(s["name"], s["args"]) for s in run.steps if s["op"] == "act"] + tracer.nested_acts
         events = [Event("ran", f"ran under the goal; effect row {row.describe()}", {"steps": len(run.steps)})]
         if not run.ok:
@@ -263,6 +310,18 @@ class Runtime:
         guards = "; ".join(describe_guards(kept)) or "none"
         events.append(Event("retained", f"goal holds; retained {kept.hash} with guards: {guards}", {"witness": kept.hash}))
         return ProposalResult(True, "retained", witness=kept, acts=acts, events=events)
+
+
+def _guarded_body(decl: A.ScriptDecl) -> A.Block:
+    """A `when` clause runs first, inside the traced run, so its decisions become guards:
+    `if not (when) { fail("when-clause is false") }` followed by the body."""
+    assert decl.when is not None
+    check = A.If(A.Unary("not", decl.when, line=decl.line),
+                 A.Block([A.ExprStmt(A.Call(A.Var("fail", line=decl.line),
+                                            [A.StrLit("when-clause is false", line=decl.line)], line=decl.line),
+                                     line=decl.line)], line=decl.line),
+                 None, line=decl.line)
+    return A.Block([A.ExprStmt(check, line=decl.line), *decl.body.stmts], line=decl.line)
 
 
 class _TacticContext:
